@@ -9,21 +9,34 @@
 **URL**: `https://smile-zemi.jp/mimamoru-net/ui/login`
 
 **調査項目**:
-- [ ] ユーザー名入力フィールド
+- [x] ユーザー名入力フィールド
   - セレクタ候補: `input[name="username"]`, `#username`, `input[type="text"]`
-  - 実際のセレクタ: _（調査後記入）_
+  - **実際のセレクタ**: `input[name="userId"]`
+  - **type属性**: `email`
+  - **class**: `input__CJbG6`
+  - **補足**: username ではなく userId という name 属性を使用
 
-- [ ] パスワード入力フィールド
+- [x] パスワード入力フィールド
   - セレクタ候補: `input[name="password"]`, `#password`, `input[type="password"]`
-  - 実際のセレクタ: _（調査後記入）_
+  - **実際のセレクタ**: `input[name="password"]`
+  - **type属性**: `password`
+  - **class**: `input__CJbG6 passwordInput__YtsUi`
 
-- [ ] ログインボタン
+- [x] ログインボタン
   - セレクタ候補: `button[type="submit"]`, `input[type="submit"]`, `.login-button`
-  - 実際のセレクタ: _（調査後記入）_
+  - **実際のセレクタ**: `button:has-text("ログイン")`
+  - **補足**: テキストベースのセレクタが最も安定
+
+- [x] ログイン状態保持チェックボックス
+  - **実際のセレクタ**: `input[name="rememberMe"]`
+  - **type属性**: `checkbox`
+  - **class**: `input__O94L9`
+  - **補足**: オプション機能
 
 - [ ] ログイン後URL確認
-  - ログイン成功時のURL: _（調査後記入）_
-  - リダイレクト先: _（調査後記入）_
+  - ログイン成功時のURL: _（要再調査：初回ログイン時URLが変わらず）_
+  - リダイレクト先: _（要再調査）_
+  - **課題**: 認証情報での自動ログインが失敗した可能性
 
 ### 2. 学習状況ページ
 **URL**: _（ログイン後のURL、調査後記入）_
@@ -142,8 +155,33 @@ module.exports = {
 
 ### ログインページ構造
 ```html
-<!-- 調査後、実際のHTML構造を記録 -->
+<!-- 2025-12-25 調査結果 -->
+<!-- ユーザー名フィールド -->
+<input class="input__CJbG6"
+       enterkeyhint="send"
+       type="email"
+       name="userId"
+       style="">
+
+<!-- パスワードフィールド -->
+<input class="input__CJbG6 passwordInput__YtsUi"
+       enterkeyhint="send"
+       type="password"
+       name="password"
+       style="margin: 0px;">
+
+<!-- ログイン状態保持チェックボックス -->
+<input class="input__O94L9"
+       type="checkbox"
+       value="rememberMe"
+       name="rememberMe"
+       style="">
+
+<!-- ログインボタン -->
+<button type="submit">ログイン</button>
 ```
+
+**調査ファイル**: `screenshots/investigation/01-login-page.html`
 
 ### 学習状況ページ構造
 ```html
@@ -160,16 +198,32 @@ module.exports = {
 
 ## 調査完了チェックリスト
 
-- [ ] ログインページの全セレクタ確認済み
-- [ ] 学習状況ページの全セレクタ確認済み
-- [ ] ユーザー切り替えUIの動作確認済み
-- [ ] ミッション数取得ロジック確認済み
-- [ ] スクリーンショット保存済み（`screenshots/investigation/`）
-- [ ] `src/config/selectors.js`ファイル作成済み
-- [ ] セレクタの安定性テスト実施済み
+- [x] ログインページの全セレクタ確認済み
+- [ ] 学習状況ページの全セレクタ確認済み（ログイン失敗のため未実施）
+- [ ] ユーザー切り替えUIの動作確認済み（ログイン失敗のため未実施）
+- [ ] ミッション数取得ロジック確認済み（ログイン失敗のため未実施）
+- [x] スクリーンショット保存済み（`screenshots/investigation/`）
+- [x] `src/config/selectors.js`ファイル作成済み
+- [ ] セレクタの安定性テスト実施済み（次タスクで実施予定）
 
 ---
 
-**調査実施者**: _（名前、日付）_
-**調査実施日**: _（YYYY-MM-DD）_
-**みまもるネットバージョン**: _（わかれば記入）_
+**調査実施者**: Claude Code (AI Assistant)
+**調査実施日**: 2025-12-25
+**調査方法**: Playwright自動調査スクリプト (`scripts/investigate-selectors.js`)
+**調査範囲**: ログインページのみ（ログイン後ページは認証エラーのため未調査）
+
+### 保存されたファイル
+
+- `screenshots/investigation/01-login-page.png` - ログインページスクリーンショット
+- `screenshots/investigation/01-login-page.html` - ログインページHTML
+- `screenshots/investigation/02-login-filled.png` - ログイン情報入力後
+- `screenshots/investigation/03-after-login.png` - ログインボタンクリック後
+- `screenshots/investigation/03-after-login.html` - ログイン後HTML
+- `screenshots/investigation/04-dashboard.png` - ダッシュボード（未ロード）
+
+### 未解決の課題
+
+1. ログイン成功の検証方法（URLが変わらなかった）
+2. ダッシュボードのセレクタ調査（ログイン後にアクセス必要）
+3. 自動ログインの成功条件確認

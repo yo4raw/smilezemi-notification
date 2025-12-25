@@ -6,10 +6,16 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js",
+    "test": "node --test tests/**/*.test.js",
+    "test:watch": "node --test --watch tests/**/*.test.js",
     "docker:build": "docker-compose build",
     "docker:run": "docker-compose up",
     "docker:dev": "docker-compose run --rm crawler",
-    "install:browsers": "npx playwright install chromium --with-deps"
+    "install:browsers": "npx playwright install chromium --with-deps",
+    "validate:env": "node scripts/validate-env.js",
+    "validate:security": "bash scripts/validate-security.sh",
+    "validate:all": "npm run validate:env && npm run validate:security",
+    "test:docker": "bash scripts/test-docker.sh"
   },
   "keywords": [
     "smile-zemi",
