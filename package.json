@@ -1,0 +1,30 @@
+{
+  "name": "smilezemi-notification",
+  "version": "1.0.0",
+  "description": "スマイルゼミ みまもるネット 自動クローリング & LINE通知",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "docker:build": "docker-compose build",
+    "docker:run": "docker-compose up",
+    "docker:dev": "docker-compose run --rm crawler",
+    "install:browsers": "npx playwright install chromium --with-deps"
+  },
+  "keywords": [
+    "smile-zemi",
+    "crawler",
+    "line-notify",
+    "github-actions"
+  ],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "npm@10.0.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {}
+}

@@ -1,0 +1,30 @@
+# 環境変数ファイル（機密情報）
+.env
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# 実行時生成ファイル
+screenshots/
+data/
+logs/
+
+# IDE設定
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# テスト・カバレッジ
+coverage/
+.nyc_output/
+
+# ビルド成果物
+dist/
+build/

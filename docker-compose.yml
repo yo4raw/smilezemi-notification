@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      # スクリーンショット保存
+      - ./screenshots:/app/screenshots
+      # データファイル保存
+      - ./data:/app/data
+      # ログ保存（オプション）
+      - ./logs:/app/logs
+    environment:
+      # .envから自動読み込み
+      - SMILEZEMI_USERNAME
+      - SMILEZEMI_PASSWORD
+      - LINE_CHANNEL_ACCESS_TOKEN
+      - LINE_USER_ID
+      - NODE_ENV=${NODE_ENV:-development}
+    # デバッグ用: コンテナを起動したまま保持
+    # command: tail -f /dev/null
