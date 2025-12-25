@@ -341,28 +341,8 @@ function formatUserListMessage(users) {
   // ヘッダー
   let message = '👥 スマイルゼミ ユーザー一覧\n\n';
 
-  // ユーザー数
-  message += `登録ユーザー数: ${users.length}名\n\n`;
-
-  // 各ユーザーを追加
-  users.forEach((user, index) => {
-    message += `${index + 1}. ${user.name}\n`;
-
-    // メッセージ長を確認（5000文字制限）
-    if (message.length > MAX_MESSAGE_LENGTH - 100) {
-      // 残りの件数を表示して終了
-      const remaining = users.length - index - 1;
-      if (remaining > 0) {
-        message += `\n... 他${remaining}名のユーザーがいます`;
-      }
-      return message;
-    }
-  });
-
-  // メッセージが5000文字を超えていた場合は切り詰め
-  if (message.length > MAX_MESSAGE_LENGTH) {
-    message = message.substring(0, MAX_MESSAGE_LENGTH - 20) + '\n\n（メッセージが長すぎたため省略されました）';
-  }
+  // ユーザー数のみ表示
+  message += `登録ユーザー数: ${users.length}名`;
 
   return message.trim();
 }
@@ -370,6 +350,5 @@ function formatUserListMessage(users) {
 module.exports = {
   sendNotification,
   formatMessage,
-  sendUserListNotification,
-  formatUserListMessage
+  sendUserListNotification
 };
