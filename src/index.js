@@ -6,9 +6,9 @@
 const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
-const { getAllUsersMissionCounts } = require('./crawler');
+const { getAllUsersMissionCounts, getUserList } = require('./crawler');
 const { loadPreviousData, compareData, saveData } = require('./data');
-const { sendNotification } = require('./notifier');
+const { sendNotification, sendUserListNotification } = require('./notifier');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -84,7 +84,36 @@ async function main() {
     context = loginResult.context;
     console.log('✅ ログインが完了しました');
 
-    // 4. 前回データの取得
+    // 4. ユーザー一覧取得とLINE通知
+    console.log('👥 ユーザー一覧を取得しています...');
+    const userListResult = await getUserList(page);
+
+    if (userListResult.success) {
+      const users = userListResult.users;
+      console.log(`✅ ユーザー一覧の取得が完了しました（${users.length}名）`);
+
+      // ユーザー一覧をLINEに通知
+      console.log('📤 ユーザー一覧をLINEに通知しています...');
+      const userListNotifyResult = await sendUserListNotification(
+        users,
+        config.LINE_CHANNEL_ACCESS_TOKEN,
+        config.LINE_USER_ID
+      );
+
+      if (userListNotifyResult.success) {
+        console.log('✅ ユーザー一覧のLINE通知が完了しました');
+      } else {
+        console.error('❌ ユーザー一覧のLINE通知に失敗しました:', userListNotifyResult.error);
+        errors.push(userListNotifyResult.error);
+        // 通知失敗してもクローリングは続行
+      }
+    } else {
+      console.warn('⚠️ ユーザー一覧の取得に失敗しました:', userListResult.error);
+      errors.push(userListResult.error);
+      // ユーザー一覧取得失敗してもクローリングは続行
+    }
+
+    // 5. 前回データの取得
     console.log('📊 前回データを読み込んでいます...');
     const previousDataResult = await loadPreviousData();
     let previousData = [];
@@ -97,7 +126,7 @@ async function main() {
       console.log('ℹ️ 初回実行として続行します');
     }
 
-    // 5. クローリング（ユーザーリストとミッション数の取得）
+    // 6. クローリング（ユーザーリストとミッション数の取得）
     console.log('🔍 ミッション数を取得しています...');
     const crawlResult = await getAllUsersMissionCounts(page);
 
@@ -134,7 +163,7 @@ async function main() {
       console.warn('⚠️ 一部のユーザーのデータ取得に失敗しました');
     }
 
-    // 6. データ比較（変更検出）
+    // 7. データ比較（変更検出）
     console.log('🔄 データを比較しています...');
     const compareResult = compareData(previousData, currentData);
 
@@ -145,7 +174,7 @@ async function main() {
       errors.push(compareResult.error);
     }
 
-    // 7. LINE通知送信
+    // 8. LINE通知送信（ミッション数の変更）
     console.log('📤 LINE通知を送信しています...');
     const notifyResult = await sendNotification(
       compareResult.changes,
@@ -161,7 +190,7 @@ async function main() {
       // 通知失敗してもデータ保存は続行
     }
 
-    // 8. 新しいデータの保存
+    // 9. 新しいデータの保存
     console.log('💾 データを保存しています...');
     const saveResult = await saveData(currentData);
 
@@ -172,7 +201,7 @@ async function main() {
       errors.push(saveResult.error);
     }
 
-    // 9. 完了
+    // 10. 完了
     console.log('🎉 処理が正常に完了しました');
 
     return {
@@ -198,7 +227,7 @@ async function main() {
     };
 
   } finally {
-    // 10. ブラウザのクリーンアップ（必ず実行）
+    // 11. ブラウザのクリーンアップ（必ず実行）
     console.log('🧹 ブラウザを終了しています...');
     try {
       if (context) {

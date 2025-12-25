@@ -41,14 +41,10 @@ function loadConfig() {
   }
 
   return {
-    smilezemi: {
-      username: secrets.SMILEZEMI_USERNAME,
-      password: secrets.SMILEZEMI_PASSWORD
-    },
-    line: {
-      channelAccessToken: secrets.LINE_CHANNEL_ACCESS_TOKEN,
-      userId: secrets.LINE_USER_ID
-    }
+    SMILEZEMI_USERNAME: secrets.SMILEZEMI_USERNAME,
+    SMILEZEMI_PASSWORD: secrets.SMILEZEMI_PASSWORD,
+    LINE_CHANNEL_ACCESS_TOKEN: secrets.LINE_CHANNEL_ACCESS_TOKEN,
+    LINE_USER_ID: secrets.LINE_USER_ID
   };
 }
 

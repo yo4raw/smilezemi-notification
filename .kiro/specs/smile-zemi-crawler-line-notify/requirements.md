@@ -6,6 +6,27 @@ githubsecretsにログイン時のユーザ名とパスワードが登録され�
 ## Introduction
 本プロジェクトは、スマイルゼミの「みまもるネット」サイトに自動ログインし、サイト内の情報をクローリングしてLINE通知を送信するGitHub Actionsワークフローを実装します。GitHub Secretsに保存された認証情報を使用してセキュアに動作し、定期的または手動トリガーでの実行をサポートします。
 
+## 実装方針
+
+### セレクタの事前確認が不可能な理由
+
+スマイルゼミの「みまもるネット」サイトは認証が必要なWebアプリケーションであり、実際にログインしてサイト構造を確認するまで、正確なDOM構造やCSS/XPathセレクタを特定することができません。そのため、以下の実装方針を採用します。
+
+### 段階的実装アプローチ（必須）
+
+1. **ローカル環境でのブラウザ確認**: 必ずローカル環境でPlaywright等のブラウザ自動化ツールを使用し、実際にブラウザを開いて目視確認しながら実装を進める
+2. **ステップバイステップでの実装**: 各機能（ログイン、ページ遷移、データ取得、ユーザー切り替え等）を1ステップずつ確認しながら実装する
+3. **セレクタの段階的特定**: 各ステップでDOM構造を調査し、適切なセレクタ（CSS Selector、XPath、テキストコンテンツ等）を特定して実装に反映する
+4. **スクリーンショット保存**: 各ステップでスクリーンショットを保存し、DOM構造とセレクタの対応関係を記録する
+5. **デバッグ用スクリプトの活用**: `scripts/investigate-selectors.js`等のデバッグ用スクリプトを作成・活用してセレクタを確認する
+
+### 実装時の注意事項
+
+- 事前にセレクタを仮定してコードを書かず、必ず実際のサイトで確認してから実装する
+- DOM要素が動的に生成される可能性を考慮し、適切な待機処理（`waitForSelector`等）を実装する
+- セレクタが変更される可能性を考慮し、複数の代替セレクタや柔軟な要素検索ロジックを実装する
+- エラー発生時にはスクリーンショットとDOM構造をログに記録し、問題の特定を容易にする
+
 ## Requirements
 
 ### Requirement 1: GitHub Secrets統合
@@ -31,7 +52,7 @@ githubsecretsにログイン時のユーザ名とパスワードが登録され�
 6. If ログインが失敗する, then the Smile Zemi Crawlerワークフロー shall エラー詳細をログに記録してワークフローを終了する
 7. The Smile Zemi Crawlerワークフロー shall セッションCookieを保持して認証状態を維持する
 
-### Requirement 3: ミッション数取得機能
+### Requirement 3: 学習日、ミッション数、勉強時間取得機能
 **Objective:** As a 保護者, I want 当日の学習日のこなしたミッション数を自動的に取得する機能, so that 子供の学習進捗をリアルタイムで確認できる
 
 #### Acceptance Criteria
@@ -55,7 +76,7 @@ githubsecretsにログイン時のユーザ名とパスワードが登録され�
 4. When ユーザーリストが抽出される, the Smile Zemi Crawlerワークフロー shall 各ユーザーに対して順次処理を実行する
 5. When 各ユーザーを処理する, the Smile Zemi Crawlerワークフロー shall ユーザー選択UIをクリックしてユーザーを切り替える
 6. When ユーザーが切り替わる, the Smile Zemi Crawlerワークフロー shall ページが更新されるまで待機する
-7. When ページ更新が完了する, the Smile Zemi Crawlerワークフロー shall 当該ユーザーのミッション数を取得する（Requirement 3に従う）
+7. When ページ更新が完了する, the Smile Zemi Crawlerワークフロー shall 当該ユーザーの学習日、ミッション数、勉強時間を取得する（Requirement 3に従う）
 8. When 全ユーザーの処理が完了する, the Smile Zemi Crawlerワークフロー shall 全ユーザーのデータを統合して保存する
 9. If ユーザー切り替えが失敗する, then the Smile Zemi Crawlerワークフロー shall エラーをログに記録して次のユーザーに進む
 10. The Smile Zemi Crawlerワークフロー shall 各ユーザーのデータを個別に識別可能な形式で保存する
@@ -68,8 +89,8 @@ githubsecretsにログイン時のユーザ名とパスワードが登録され�
 2. When 通知を送信する, the Smile Zemi Crawlerワークフロー shall `LINE_CHANNEL_ACCESS_TOKEN`を認証ヘッダー（Authorization: Bearer）に含める
 3. When 通知を送信する, the Smile Zemi Crawlerワークフロー shall Push Message APIエンドポイント（`https://api.line.me/v2/bot/message/push`）を使用する
 4. When 通知を送信する, the Smile Zemi Crawlerワークフロー shall `LINE_USER_ID`を使用して通知先ユーザーを指定する
-5. When 通知メッセージを作成する, the Smile Zemi Crawlerワークフロー shall 全ユーザーのミッション数を含めた要約を生成する
-6. When 通知メッセージに複数ユーザーが含まれる, the Smile Zemi Crawlerワークフロー shall 各ユーザー名とミッション数を個別に表示する
+5. When 通知メッセージを作成する, the Smile Zemi Crawlerワークフロー shall 全ユーザーの学習日、ミッション数、勉強時間を生成する
+6. When 通知メッセージに複数ユーザーが含まれる, the Smile Zemi Crawlerワークフロー shall 各ユーザー名と学習日、ミッション数、勉強時間を個別に表示する
 7. When データに変更がある, the Smile Zemi Crawlerワークフロー shall 変更があったユーザーとミッション数の差分を強調表示して通知する
 8. When データに変更がない, the Smile Zemi Crawlerワークフロー shall 「変更なし」のステータスメッセージを送信する
 9. If LINE通知の送信が失敗する, then the Smile Zemi Crawlerワークフロー shall エラーをログに記録してリトライを3回実行する
