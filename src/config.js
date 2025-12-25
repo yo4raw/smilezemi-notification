@@ -25,11 +25,20 @@ const SENSITIVE_FIELDS = [
  * @throws {Error} 必須環境変数が欠落している場合
  */
 function loadConfig() {
+  // デバッグ: 環境変数の存在確認
+  if (process.env.NODE_ENV !== 'test') {
+    console.log('🔍 [config.js] 環境変数の読み込み状態:');
+    console.log(`  SMILEZEMI_USERNAME: ${process.env.SMILEZEMI_USERNAME ? `存在 (長さ: ${process.env.SMILEZEMI_USERNAME.length})` : '未設定'}`);
+    console.log(`  SMILEZEMI_PASSWORD: ${process.env.SMILEZEMI_PASSWORD ? `存在 (長さ: ${process.env.SMILEZEMI_PASSWORD.length})` : '未設定'}`);
+    console.log(`  LINE_CHANNEL_ACCESS_TOKEN: ${process.env.LINE_CHANNEL_ACCESS_TOKEN ? `存在 (長さ: ${process.env.LINE_CHANNEL_ACCESS_TOKEN.length})` : '未設定'}`);
+    console.log(`  LINE_USER_ID: ${process.env.LINE_USER_ID ? `存在 (長さ: ${process.env.LINE_USER_ID.length})` : '未設定'}`);
+  }
+
   const secrets = {
-    SMILEZEMI_USERNAME: process.env.SMILEZEMI_USERNAME,
-    SMILEZEMI_PASSWORD: process.env.SMILEZEMI_PASSWORD,
-    LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-    LINE_USER_ID: process.env.LINE_USER_ID
+    SMILEZEMI_USERNAME: process.env.SMILEZEMI_USERNAME?.trim(),
+    SMILEZEMI_PASSWORD: process.env.SMILEZEMI_PASSWORD?.trim(),
+    LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim(),
+    LINE_USER_ID: process.env.LINE_USER_ID?.trim()
   };
 
   const validation = validateSecrets(secrets);
