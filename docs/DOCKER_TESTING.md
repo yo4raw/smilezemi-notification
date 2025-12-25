@@ -128,7 +128,7 @@ LINE_USER_ID=your_line_user_id
 npm run validate:env
 
 # またはDockerコンテナ内で検証
-docker-compose run --rm app node scripts/validate-env.js
+docker-compose run --rm crawler node scripts/validate-env.js
 ```
 
 **成功時の出力:**
@@ -164,7 +164,7 @@ docker images | grep smilezemi
 
 **期待される出力:**
 ```
-smilezemi-notification_app   latest   <image-id>   X minutes ago   1.5GB
+smilezemi-notification-crawler   latest   <image-id>   X minutes ago   1.5GB
 ```
 
 **注意:**
@@ -177,7 +177,7 @@ smilezemi-notification_app   latest   <image-id>   X minutes ago   1.5GB
 
 ```bash
 # コンテナ内でテストを実行
-docker-compose run --rm app npm test
+docker-compose run --rm crawler npm test
 ```
 
 **期待される出力:**
@@ -202,13 +202,13 @@ docker-compose run --rm app npm test
 
 ```bash
 # 認証モジュールのみテスト
-docker-compose run --rm app npm test tests/auth.test.js
+docker-compose run --rm crawler npm test tests/auth.test.js
 
 # クローラーモジュールのみテスト
-docker-compose run --rm app npm test tests/crawler.test.js
+docker-compose run --rm crawler npm test tests/crawler.test.js
 
 # 通知モジュールのみテスト
-docker-compose run --rm app npm test tests/notifier.test.js
+docker-compose run --rm crawler npm test tests/notifier.test.js
 ```
 
 ### ステップ5: エンドツーエンドテストの実行
@@ -392,7 +392,7 @@ ERROR: failed to solve: process "/bin/sh -c npm ci" did not complete successfull
 4. **docker-compose.ymlの確認**
    ```yaml
    services:
-     app:
+     crawler:
        env_file:
          - .env  # この行があるか確認
    ```
@@ -415,13 +415,13 @@ ERROR: failed to solve: process "/bin/sh -c npm ci" did not complete successfull
 2. **コンテナのログ確認**
    ```bash
    # 詳細なログを表示
-   docker-compose run --rm app npm test -- --reporter=spec
+   docker-compose run --rm crawler npm test -- --reporter=spec
    ```
 
 3. **コンテナに入って手動確認**
    ```bash
    # コンテナのシェルに入る
-   docker-compose run --rm app /bin/bash
+   docker-compose run --rm crawler /bin/bash
 
    # コンテナ内で確認
    node --version  # Node.jsバージョン
@@ -513,7 +513,7 @@ ERROR: Browser is not installed
 
 2. **手動でブラウザをインストール**
    ```bash
-   docker-compose run --rm app npx playwright install chromium --with-deps
+   docker-compose run --rm crawler npx playwright install chromium --with-deps
    ```
 
 3. **Playwrightバージョンの確認**
@@ -533,7 +533,7 @@ ERROR: Browser is not installed
 **docker-compose.yml:**
 ```yaml
 services:
-  app:
+  crawler:
     ports:
       - "3001:3000"  # ホスト:コンテナ
 ```
@@ -543,7 +543,7 @@ services:
 **docker-compose.yml:**
 ```yaml
 services:
-  app:
+  crawler:
     mem_limit: 2g
     memswap_limit: 2g
 ```
@@ -553,7 +553,7 @@ services:
 **docker-compose.yml:**
 ```yaml
 services:
-  app:
+  crawler:
     environment:
       - LOG_LEVEL=debug
 ```
@@ -565,7 +565,7 @@ services:
 **docker-compose.dev.yml:**
 ```yaml
 services:
-  app:
+  crawler:
     environment:
       - NODE_ENV=development
     command: npm run dev
@@ -581,7 +581,7 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 **docker-compose.prod.yml:**
 ```yaml
 services:
-  app:
+  crawler:
     environment:
       - NODE_ENV=production
     restart: always
@@ -598,7 +598,7 @@ docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 ```bash
 # コンテナのシェルに入る
-docker-compose run --rm app /bin/bash
+docker-compose run --rm crawler /bin/bash
 
 # コンテナ内で個別にコマンドを実行
 root@container:/app# node src/index.js

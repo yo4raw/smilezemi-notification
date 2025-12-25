@@ -765,6 +765,218 @@ interface ArtifactData {
 - 終了コード: 0（成功）、1（失敗）
 - アーティファクト存在確認（データ保存成功判定）
 
+## Implementation Strategy
+
+### Selector Discovery and Incremental Implementation
+
+**Context**: みまもるネットは認証が必要なWebアプリケーションであり、実際にログインするまで正確なDOM構造やCSS/XPathセレクタを特定できません。このため、事前にセレクタを仮定してコードを書くことは不可能であり、段階的な実装アプローチが必須です。
+
+**Requirements Coverage**: 実装方針全体（requirements.md「実装方針」セクション参照）
+
+### Incremental Implementation Approach (Mandatory)
+
+以下の5ステップを厳守して実装を進めます。
+
+#### 1. ローカル環境でのブラウザ確認（必須）
+
+**Tool**: `scripts/investigate-selectors.js`
+
+```bash
+node scripts/investigate-selectors.js
+```
+
+**Purpose**:
+- 実際のブラウザを開いて（`headless: false`）DOM構造を目視確認
+- 複数のセレクタ候補を試行して動作するセレクタを特定
+- スクリーンショットを保存してDOM構造を記録
+
+**Implementation**:
+- Playwright を `headless: false`, `slowMo: 500` で起動
+- 各ページ遷移後に `waitForTimeout()` で確認時間を確保
+- 候補セレクタのリストを順次試行して存在確認
+- 動作するセレクタの属性情報を console に出力
+
+**Validation**:
+- スクリーンショット保存先: `screenshots/debug-*.png`
+- セレクタ候補リスト: `src/config/selectors.js` に定義
+- 調査結果を元に `selectors.js` を更新
+
+#### 2. ステップバイステップでの実装
+
+各機能（ログイン、ページ遷移、データ取得、ユーザー切り替え等）を1ステップずつ確認しながら実装します。
+
+**Prohibited**:
+- ❌ 全機能を一度に実装
+- ❌ セレクタ動作確認前にコード記述
+- ❌ エラーハンドリングを後回し
+
+**Required**:
+- ✅ 1機能実装 → ローカル確認 → 次機能実装
+- ✅ 各ステップでスクリーンショット保存
+- ✅ エラー時の早期検出と記録
+
+**Implementation Order**:
+1. ログインフォーム操作（username, password, submit button）
+2. ログイン後ページ遷移確認
+3. ユーザー選択UI特定とユーザーリスト取得
+4. 1人目のユーザーのミッション数取得
+5. ユーザー切り替え処理
+6. 全ユーザーループ処理
+
+#### 3. セレクタの段階的特定
+
+各ステップでDOM構造を調査し、適切なセレクタ（CSS Selector、XPath、テキストコンテンツ等）を特定して実装に反映します。
+
+**Selector Strategy**:
+- **Primary Selector**: 最も安定性が高いセレクタ（ID、data属性）
+- **Fallback Selectors**: 代替セレクタ（class、要素タイプ、テキストコンテンツ）
+- **Dynamic Selectors**: 動的生成要素用の待機ロジック
+
+**Selector Definition** (`src/config/selectors.js`):
+```javascript
+module.exports = {
+  login: {
+    usernameField: 'input[name="username"]',
+    passwordField: 'input[type="password"]',
+    submitButton: 'button[type="submit"]',
+    // Fallback selectors
+    usernameFieldAlt: 'input[type="email"]',
+    submitButtonAlt: 'input[value*="ログイン"]'
+  },
+  dashboard: {
+    userSelector: 'select[name="user"]',
+    userSelectorAlternative: '.user-select',
+    missionCount: '[class*="mission-count"]',
+    missionCountAlternative: 'text=/\\d+ミッション/',
+    missionText: '[class*="mission"]'
+  }
+};
+```
+
+**Selector Validation**:
+- `waitForSelector()` を使用して要素の存在を確認
+- タイムアウト時は alternative selector にフォールバック
+- 全セレクタ失敗時はエラーログとスクリーンショット保存
+
+#### 4. スクリーンショット保存
+
+各ステップでスクリーンショットを `screenshots/` ディレクトリに保存し、DOM構造とセレクタの対応関係を記録します。
+
+**Screenshot Points**:
+- ログインページ読み込み後: `screenshots/debug-login-page.png`
+- ログインフォーム入力後: `screenshots/debug-login-filled.png`
+- ログイン成功後: `screenshots/debug-after-login.png`
+- ユーザー切り替え後: `screenshots/debug-user-{userId}.png`
+- エラー発生時: `screenshots/debug-error-{timestamp}.png`
+
+**Implementation**:
+```javascript
+await page.screenshot({
+  path: `screenshots/debug-${stepName}-${timestamp}.png`,
+  fullPage: true
+});
+```
+
+**Purpose**:
+- DOM構造の視覚的記録
+- セレクタ変更時の比較材料
+- エラー原因の特定支援
+
+#### 5. デバッグ用スクリプトの活用
+
+`scripts/investigate-selectors.js` 等のデバッグ用スクリプトを作成・活用してセレクタを確認します。
+
+**Debug Scripts**:
+- `scripts/investigate-selectors.js`: セレクタ調査用（既存）
+- `scripts/investigate-dashboard.js`: ダッシュボード要素調査用
+- `scripts/investigate-user-selector.js`: ユーザー選択UI調査用
+- `scripts/final-working-test.js`: 統合動作確認用
+
+**Usage Pattern**:
+```bash
+# Step 1: セレクタ調査
+node scripts/investigate-selectors.js
+
+# Step 2: ダッシュボード構造確認
+node scripts/investigate-dashboard.js
+
+# Step 3: 統合テスト
+node scripts/final-working-test.js
+```
+
+### Implementation Constraints
+
+**Prohibited Practices**:
+- ❌ **事前セレクタ仮定**: 実際のサイト確認前にセレクタを決定しない
+- ❌ **同期処理**: DOM要素が動的生成される可能性を無視しない
+- ❌ **単一セレクタ依存**: 代替セレクタなしの実装を避ける
+- ❌ **エラー無視**: セレクタ未検出エラーをスキップしない
+
+**Required Practices**:
+- ✅ **実サイト確認**: 必ず実際のブラウザで動作確認してから実装
+- ✅ **待機処理**: `waitForSelector()`, `waitForLoadState()` を適切に使用
+- ✅ **代替セレクタ**: 複数のフォールバックセレクタを実装
+- ✅ **エラー記録**: スクリーンショットとDOM構造をログに記録
+
+**Dynamic Element Handling**:
+```javascript
+// NG: 待機なしで即座にアクセス
+const element = await page.$('selector');
+
+// OK: 要素出現を待機してからアクセス
+await page.waitForSelector('selector', { timeout: 10000 });
+const element = await page.$('selector');
+
+// Better: フォールバックセレクタ付き
+let element;
+try {
+  await page.waitForSelector('primary-selector', { timeout: 5000 });
+  element = await page.$('primary-selector');
+} catch (error) {
+  await page.waitForSelector('fallback-selector', { timeout: 5000 });
+  element = await page.$('fallback-selector');
+}
+```
+
+### Error Handling During Implementation
+
+**Selector Not Found**:
+1. スクリーンショット保存（`screenshots/selector-error-{timestamp}.png`）
+2. DOM構造をログ出力（`console.log(await page.content())`）
+3. エラー詳細記録（selector、timeout、page URL）
+4. デバッグスクリプトで再調査
+
+**Page Transition Timeout**:
+1. `waitForLoadState('networkidle')` で安定待機
+2. タイムアウト時は `waitForLoadState('domcontentloaded')` にフォールバック
+3. スクリーンショットで状態確認
+4. リトライ処理（最大3回）
+
+**User Switch Failure**:
+1. 現在のユーザーをスキップ
+2. 他ユーザーの処理継続
+3. エラーログに失敗ユーザーID記録
+4. 最終サマリーで通知
+
+### Maintenance Strategy
+
+**Selector Change Detection**:
+- 定期的な `investigate-selectors.js` 実行（月1回推奨）
+- セレクタエラー発生時の即座調査
+- スクリーンショット比較による変更検出
+
+**Selector Update Process**:
+1. `investigate-selectors.js` で新セレクタ特定
+2. `src/config/selectors.js` 更新
+3. ローカル環境でテスト（`node src/index.js`）
+4. 動作確認後、GitHub にプッシュ
+5. GitHub Actions での動作確認
+
+**Rollback Strategy**:
+- `selectors.js` のgit履歴から前バージョン復元
+- セレクタ変更をコミット単位で管理
+- 緊急時は手動実行で動作確認
+
 ## Testing Strategy
 
 ### Unit Tests

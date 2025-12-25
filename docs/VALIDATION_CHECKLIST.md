@@ -169,7 +169,7 @@ npm run test:docker
 **または手動で:**
 ```bash
 # コンテナでテストを実行
-docker-compose run --rm app npm test
+docker-compose run --rm crawler npm test
 
 # コンテナでクローラーを実行
 docker-compose up

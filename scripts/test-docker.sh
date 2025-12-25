@@ -64,7 +64,7 @@ echo ""
 echo "📋 4. コンテナでのテスト実行"
 echo -e "${BLUE}テスト実行中...${NC}"
 
-if docker-compose run --rm app npm test; then
+if docker-compose run --rm crawler npm test; then
   echo -e "${GREEN}✅ テストが成功しました${NC}"
 else
   echo -e "${RED}❌ テストに失敗しました${NC}"

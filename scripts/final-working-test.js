@@ -80,18 +80,23 @@ async function switchToUser(page, userName) {
   console.log(`🔄 "${userName}"に切り替え中...`);
 
   try {
-    // ユーザー名エリアをクリックしてサイドバーを開く（既に開いているかもしれないが念のため）
+    // ユーザー名エリアをクリックしてサイドバーを開く
     const userArea = page.locator('div').filter({ hasText: 'さん' }).first();
     await userArea.click();
     await page.waitForTimeout(1500);
 
-    // ユーザーを選択（正確に一致する要素を探す）
+    // ユーザーを選択
     const targetUser = page.locator(`text="${userName}"`).first();
 
     if (await targetUser.isVisible()) {
-      await targetUser.click({ force: true });  // force: true で確実にクリック
+      await targetUser.click({ force: true });
       console.log(`  ✅ "${userName}"をクリックしました`);
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(2000);
+
+      // サイドバーを閉じる（ESCキー）
+      await page.keyboard.press('Escape');
+      console.log('  ✅ サイドバーを閉じました');
+      await page.waitForTimeout(1000);
 
       // 「日々のとりくみ」タブをクリック
       const dailyTab = page.locator('text="日々のとりくみ"');
@@ -116,58 +121,72 @@ async function getTodayMissionCount(page, userName) {
     const today = getTodayDate();
     console.log(`  📅 今日の日付: ${today}`);
 
-    // Playwrightのlocatorを使って今日の日付を探す
-    const dateElements = await page.locator(`text=/${today.replace('/', '\\/')}/`).all();
+    // Playwrightのlocatorで今日の日付を含む行を探す
+    // スクリーンショットから "2/25(木)" のような表記であることを確認
+    const datePattern = new RegExp(`${today}.*?[月火水木金土日]`);
+    const todayHeader = page.locator(`text=${datePattern}`).first();
 
-    if (dateElements.length === 0) {
+    if (!(await todayHeader.isVisible())) {
       console.log(`  ⚠️  今日(${today})のデータが見つかりません`);
       return 0;
     }
 
     console.log(`  ✅ 今日(${today})のセクションを発見`);
 
-    // 今日の日付要素の親要素を取得し、その配下のミッションを数える
-    // より確実な方法: 画面に表示されている全ての「ミッション」テキストを探し、
-    // 日付セクション内に含まれるものだけをカウント
+    // 今日の日付セクション内の「ミッション」テキストを数える
+    // 方法: 今日の日付要素から次の日付要素までの範囲を特定し、その中のミッション数を数える
 
-    // まず、今日の日付が含まれる行を特定
-    const todayRow = page.locator(`text=/${today.replace('/', '\\/')}/`).first();
+    // まず、全ての日付要素を取得
+    const allDates = await page.locator('text=/\\d+\\/\\d+/').all();
+    console.log(`  全体の日付要素数: ${allDates.length}`);
 
-    // スクリーンショットから確認すると、各ミッションには「ミッション」というテキストがある
-    // 今日のセクション（12/25から次の日付12/24まで）のミッション数を数える
+    // 今日の日付のインデックスを見つける
+    let todayIndex = -1;
+    for (let i = 0; i < allDates.length; i++) {
+      const dateText = await allDates[i].textContent();
+      if (dateText.includes(today)) {
+        todayIndex = i;
+        break;
+      }
+    }
 
-    // 簡略版: ページ内の今日のセクションのHTMLを取得してカウント
-    const pageContent = await page.content();
-
-    // HTMLから今日の日付の位置を特定
-    // 注意: HTMLでは "2/25" という表記になっている
-    const todayPattern = new RegExp(`>${today}`, 'g');
-    const matches = pageContent.match(todayPattern);
-
-    if (!matches) {
-      console.log('  ⚠️  HTML内に今日の日付が見つかりません');
+    if (todayIndex === -1) {
+      console.log('  ⚠️  今日の日付のインデックスが見つかりません');
       return 0;
     }
 
-    const todayIndex = pageContent.indexOf(`>${today}`);
+    // より簡単な方法: ページ全体の「ミッション」要素を取得し、
+    // 今日の日付の後に出現する最初の数個をカウント
+    const allMissions = await page.locator('text=/ミッション/').all();
+    console.log(`  全体のミッション要素数: ${allMissions.length}`);
 
-    // 今日の日付から次の日付までのセクションを抽出
-    // 次の日付パターン: >数字/数字<
-    const nextDatePattern = />(\d+)\/(\d+)</g;
-    const restContent = pageContent.substring(todayIndex + today.length + 1);
-    const nextDateMatch = nextDatePattern.exec(restContent);
+    // 今日のセクション内のミッションのみをカウント
+    // 今日の日付要素のbounding boxを取得
+    const todayBox = await todayHeader.boundingBox();
 
-    let sectionContent;
-    if (nextDateMatch) {
-      sectionContent = pageContent.substring(todayIndex, todayIndex + nextDateMatch.index + 50);
-    } else {
-      // 次の日付がない場合は、適当な長さを切り出す
-      sectionContent = pageContent.substring(todayIndex, todayIndex + 3000);
+    if (!todayBox) {
+      console.log('  ⚠️  今日の日付のbounding boxが取得できません');
+      return 0;
     }
 
-    // セクション内の「ミッション」の出現回数を数える
-    const missionMatches = sectionContent.match(/ミッション/g);
-    const missionCount = missionMatches ? missionMatches.length : 0;
+    // 今日の日付より下で、次の日付より上にあるミッション要素を数える
+    let missionCount = 0;
+    const nextDateIndex = todayIndex + 1;
+    let nextDateY = Infinity;
+
+    if (nextDateIndex < allDates.length) {
+      const nextDateBox = await allDates[nextDateIndex].boundingBox();
+      if (nextDateBox) {
+        nextDateY = nextDateBox.y;
+      }
+    }
+
+    for (const mission of allMissions) {
+      const missionBox = await mission.boundingBox();
+      if (missionBox && missionBox.y > todayBox.y && missionBox.y < nextDateY) {
+        missionCount++;
+      }
+    }
 
     console.log(`  📊 ミッション数: ${missionCount}\n`);
     return missionCount;

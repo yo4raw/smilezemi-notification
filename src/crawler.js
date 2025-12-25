@@ -13,49 +13,51 @@ const selectors = require('./config/selectors');
  */
 async function getUserList(page) {
   try {
-    // ユーザー選択UIの要素を取得
-    const userElements = await page.locator(selectors.dashboard.userSelector).all();
+    // 画面右上のユーザー名エリアをクリックしてサイドバーを開く
+    const userArea = page.locator('div').filter({ hasText: 'さん' }).first();
+    await userArea.click();
+    await page.waitForTimeout(2000);
 
-    // 代替セレクタも試行
-    if (userElements.length === 0) {
-      const alternativeElements = await page
-        .locator(selectors.dashboard.userSelectorAlternative)
-        .all();
+    // 「お子さま」セクションの後に続くユーザー名を探す
+    const childrenHeader = page.locator('text="お子さま"');
 
-      if (alternativeElements.length === 0) {
-        return {
-          success: false,
-          error: 'ユーザー要素が見つかりません。画面構造が変更された可能性があります。'
-        };
-      }
-
-      // 代替セレクタで取得
-      const users = [];
-      for (let i = 0; i < alternativeElements.length; i++) {
-        const name = await alternativeElements[i].textContent();
-        users.push({
-          name: name.trim(),
-          index: i
-        });
-      }
-
+    if (!(await childrenHeader.isVisible())) {
       return {
-        success: true,
-        users
+        success: false,
+        error: '「お子さま」セクションが見つかりません。画面構造が変更された可能性があります。'
       };
     }
 
-    // ユーザー一覧を構築
+    // 「お子さま」の後に続く要素でユーザー名（「さん」で終わる）を探す
+    const userElements = await page.locator('text=/.*さん$/').all();
     const users = [];
-    for (let i = 0; i < userElements.length; i++) {
-      const name = await userElements[i].textContent();
-      users.push({
-        name: name.trim(),
-        index: i
-      });
+
+    for (const element of userElements) {
+      const text = await element.textContent();
+      const userName = text.trim();
+
+      // 「お子さま」や「おとうさん」などを除外し、子アカウント名のみを取得
+      if (userName.length < 20 &&
+          userName !== 'お子さま' &&
+          !userName.includes('おとう') &&
+          !userName.includes('おかあ')) {
+        users.push({
+          name: userName,
+          index: users.length
+        });
+      }
     }
 
-    if (users.length === 0) {
+    // 重複を除去
+    const uniqueUsers = users.filter((user, index, self) =>
+      index === self.findIndex((u) => u.name === user.name)
+    );
+
+    // サイドバーを閉じる（ESCキー）
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(1000);
+
+    if (uniqueUsers.length === 0) {
       return {
         success: false,
         error: 'ユーザーが見つかりません。'
@@ -64,7 +66,7 @@ async function getUserList(page) {
 
     return {
       success: true,
-      users
+      users: uniqueUsers
     };
   } catch (error) {
     if (error.message.includes('Timeout')) {
@@ -82,91 +84,165 @@ async function getUserList(page) {
 }
 
 /**
- * 指定ユーザーのミッション数を取得
- *
- * @param {import('playwright').Page} page - Playwrightページインスタンス
- * @param {number} userIndex - ユーザーのインデックス（0から始まる）
- * @returns {Promise<{success: boolean, count?: number, error?: string}>}
+ * 指定ユーザーに切り替える
+ * @private
  */
-async function getMissionCount(page, userIndex) {
+async function switchToUser(page, userName) {
   try {
-    // パラメータ検証
-    if (userIndex < 0 || !Number.isInteger(userIndex)) {
+    // ユーザー名エリアをクリックしてサイドバーを開く
+    const userArea = page.locator('div').filter({ hasText: 'さん' }).first();
+    await userArea.click();
+    await page.waitForTimeout(1500);
+
+    // ユーザーを選択
+    const targetUser = page.locator(`text="${userName}"`).first();
+
+    if (!(await targetUser.isVisible())) {
       return {
         success: false,
-        error: '無効なユーザーインデックスです。0以上の整数を指定してください。'
+        error: `ユーザー "${userName}" が表示されていません`
       };
     }
 
-    // ユーザーを選択（クリック）
-    const userElements = await page.locator(selectors.dashboard.userSelector).all();
+    await targetUser.click({ force: true });
+    await page.waitForTimeout(2000);
 
-    // 代替セレクタも試行
-    let targetElement;
-    if (userElements.length > userIndex) {
-      targetElement = userElements[userIndex];
-    } else {
-      const alternativeElements = await page
-        .locator(selectors.dashboard.userSelectorAlternative)
-        .all();
+    // サイドバーを閉じる（ESCキー）
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(1000);
 
-      if (alternativeElements.length > userIndex) {
-        targetElement = alternativeElements[userIndex];
-      } else {
-        return {
-          success: false,
-          error: `ユーザーインデックス ${userIndex} が範囲外です。`
-        };
+    // 「日々のとりくみ」タブをクリック
+    const dailyTab = page.locator('text="日々のとりくみ"');
+    if (await dailyTab.isVisible()) {
+      await dailyTab.click();
+      await page.waitForTimeout(3000);
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: `ユーザー切り替えエラー: ${error.message}`
+    };
+  }
+}
+
+/**
+ * 今日の日付を取得（M/D形式）
+ * @private
+ */
+function getTodayDate() {
+  const today = new Date();
+  return `${today.getMonth() + 1}/${today.getDate()}`;
+}
+
+/**
+ * 今日のミッション数を取得
+ * @private
+ */
+async function getTodayMissionCount(page) {
+  try {
+    const today = getTodayDate();
+
+    // 今日の日付を含む要素を探す（例: "12/25(木)"）
+    const datePattern = new RegExp(`${today}.*?[月火水木金土日]`);
+    const todayHeader = page.locator(`text=${datePattern}`).first();
+
+    if (!(await todayHeader.isVisible())) {
+      return {
+        success: false,
+        error: `今日(${today})のデータが見つかりません`,
+        count: 0
+      };
+    }
+
+    // 全ての日付要素を取得
+    const allDates = await page.locator('text=/\\d+\\/\\d+/').all();
+
+    // 今日の日付のインデックスを見つける
+    let todayIndex = -1;
+    for (let i = 0; i < allDates.length; i++) {
+      const dateText = await allDates[i].textContent();
+      if (dateText.includes(today)) {
+        todayIndex = i;
+        break;
       }
     }
 
-    // ユーザーをクリック
-    await targetElement.click();
-
-    // ページの安定化を待機
-    await page.waitForTimeout(selectors.waitStrategies.userSwitchDelay);
-
-    // ミッション数要素を取得
-    let missionElements = await page.locator(selectors.dashboard.missionCount).all();
-
-    // 代替セレクタも試行
-    if (missionElements.length === 0) {
-      missionElements = await page
-        .locator(selectors.dashboard.missionCountAlternative)
-        .all();
-    }
-
-    // テキストベースのセレクタも試行
-    if (missionElements.length === 0) {
-      missionElements = await page.locator(selectors.dashboard.missionText).all();
-    }
-
-    if (missionElements.length === 0) {
+    if (todayIndex === -1) {
       return {
         success: false,
-        error: 'ミッション数要素が見つかりません。画面構造が変更された可能性があります。'
+        error: '今日の日付のインデックスが見つかりません',
+        count: 0
       };
     }
 
-    // 最初の要素からテキストを取得
-    const missionText = await missionElements[0].textContent();
+    // 全ての「ミッション」要素を取得
+    const allMissions = await page.locator('text=/ミッション/').all();
 
-    // ミッション数をパース（例: "5ミッション" → 5）
-    const match = missionText.match(/(\d+)/);
+    // 今日の日付要素のbounding boxを取得
+    const todayBox = await todayHeader.boundingBox();
 
-    if (!match) {
+    if (!todayBox) {
       return {
         success: false,
-        error: `ミッション数のパースに失敗しました。テキスト: "${missionText}"`
+        error: '今日の日付のbounding boxが取得できません',
+        count: 0
       };
     }
 
-    const count = parseInt(match[1], 10);
+    // 次の日付の位置を取得
+    let nextDateY = Infinity;
+    const nextDateIndex = todayIndex + 1;
+
+    if (nextDateIndex < allDates.length) {
+      const nextDateBox = await allDates[nextDateIndex].boundingBox();
+      if (nextDateBox) {
+        nextDateY = nextDateBox.y;
+      }
+    }
+
+    // 今日の日付より下で、次の日付より上にあるミッション要素を数える
+    let missionCount = 0;
+    for (const mission of allMissions) {
+      const missionBox = await mission.boundingBox();
+      if (missionBox && missionBox.y > todayBox.y && missionBox.y < nextDateY) {
+        missionCount++;
+      }
+    }
 
     return {
       success: true,
-      count
+      count: missionCount
     };
+  } catch (error) {
+    return {
+      success: false,
+      error: `ミッション数取得エラー: ${error.message}`,
+      count: 0
+    };
+  }
+}
+
+/**
+ * 指定ユーザーのミッション数を取得
+ *
+ * @param {import('playwright').Page} page - Playwrightページインスタンス
+ * @param {string} userName - ユーザー名
+ * @returns {Promise<{success: boolean, count?: number, error?: string}>}
+ */
+async function getMissionCount(page, userName) {
+  try {
+    // ユーザーに切り替える
+    const switchResult = await switchToUser(page, userName);
+    if (!switchResult.success) {
+      return switchResult;
+    }
+
+    // 今日のミッション数を取得
+    const missionResult = await getTodayMissionCount(page);
+    return missionResult;
+
   } catch (error) {
     if (error.message.includes('Timeout')) {
       return {
@@ -211,7 +287,7 @@ async function getAllUsersMissionCounts(page) {
     // 各ユーザーのミッション数を取得
     for (let i = 0; i < users.length; i++) {
       const user = users[i];
-      const missionResult = await getMissionCount(page, user.index);
+      const missionResult = await getMissionCount(page, user.name);
 
       if (missionResult.success) {
         data.push({
