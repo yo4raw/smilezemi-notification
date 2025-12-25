@@ -158,47 +158,6 @@ async function investigateUserSelector() {
               }
             }
           }
-
-          // 特定のユーザーをクリックしてみる
-          console.log('\n6. ユーザーの切り替えテスト:');
-
-          // ページ内の「吉岡千晴さん」を探す
-          const targetUser = '吉岡千晴さん';
-          const userElements = await page.$$(`text="${targetUser}"`);
-
-          console.log(`  "${targetUser}"の要素数: ${userElements.length}`);
-
-          if (userElements.length > 0) {
-            // 最初の要素をクリック
-            try {
-              await userElements[0].click();
-              console.log(`  ✅ "${targetUser}"をクリックしました`);
-
-              await page.waitForTimeout(3000);
-
-              // スクリーンショット（切り替え後）
-              await page.screenshot({ path: 'screenshots/user-switched.png' });
-              console.log('  📸 スクリーンショット保存: screenshots/user-switched.png');
-
-              // 現在のユーザー名を確認
-              const currentUserButton = await page.evaluateHandle(() => {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                return buttons.find(btn => {
-                  const rect = btn.getBoundingClientRect();
-                  const text = btn.textContent || '';
-                  return rect.x > 800 && rect.y < 100 && text.includes('さん');
-                });
-              });
-
-              if (currentUserButton) {
-                const element = currentUserButton.asElement();
-                const text = await element.textContent();
-                console.log(`  現在のユーザー: ${text.trim()}`);
-              }
-            } catch (error) {
-              console.log(`  ❌ クリックエラー: ${error.message}`);
-            }
-          }
         }
       }
     } catch (error) {
