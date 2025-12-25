@@ -18,70 +18,43 @@ jobs:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
-      # 2. Node.js環境のセットアップ
-      - name: Node.js 24.x をセットアップ
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24.x'
-          cache: 'npm'
+      # 2. .envファイルを作成
+      - name: .envファイルを作成
+        run: |
+          echo "SMILEZEMI_USERNAME=${{ secrets.SMILEZEMI_USERNAME }}" >> .env
+          echo "SMILEZEMI_PASSWORD=${{ secrets.SMILEZEMI_PASSWORD }}" >> .env
+          echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" >> .env
+          echo "LINE_USER_ID=${{ secrets.LINE_USER_ID }}" >> .env
 
-      # 3. 依存関係のインストール
-      - name: 依存関係をインストール
-        run: npm ci
-
-      # 4. Playwrightブラウザのインストール
-      - name: Playwrightブラウザをインストール
-        run: npx playwright install --with-deps chromium
-
-      # 4.5. 必要なディレクトリを作成
-      - name: 必要なディレクトリを作成
-        run: mkdir -p screenshots data logs
-
-      # 4.6. 環境変数の検証
+      # 3. 環境変数の検証
       - name: 環境変数を検証
-        env:
-          SMILEZEMI_USERNAME: ${{ secrets.SMILEZEMI_USERNAME }}
-          SMILEZEMI_PASSWORD: ${{ secrets.SMILEZEMI_PASSWORD }}
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
         run: |
           echo "環境変数の検証中..."
-          if [ -z "$SMILEZEMI_USERNAME" ]; then
+          if [ -z "${{ secrets.SMILEZEMI_USERNAME }}" ]; then
             echo "❌ SMILEZEMI_USERNAME が設定されていません"
             exit 1
           fi
-          if [ -z "$SMILEZEMI_PASSWORD" ]; then
+          if [ -z "${{ secrets.SMILEZEMI_PASSWORD }}" ]; then
             echo "❌ SMILEZEMI_PASSWORD が設定されていません"
             exit 1
           fi
-          if [ -z "$LINE_CHANNEL_ACCESS_TOKEN" ]; then
+          if [ -z "${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" ]; then
             echo "❌ LINE_CHANNEL_ACCESS_TOKEN が設定されていません"
             exit 1
           fi
-          if [ -z "$LINE_USER_ID" ]; then
+          if [ -z "${{ secrets.LINE_USER_ID }}" ]; then
             echo "❌ LINE_USER_ID が設定されていません"
             exit 1
           fi
           echo "✅ 全ての環境変数が設定されています"
-          echo "SMILEZEMI_USERNAME: ${SMILEZEMI_USERNAME:0:10}..."
-          echo "LINE_USER_ID: ${LINE_USER_ID:0:10}..."
 
-      # 5. メインスクリプトの実行
+      # 4. Dockerイメージをビルド
+      - name: Dockerイメージをビルド
+        run: docker-compose build
+
+      # 5. クローラーを実行
       - name: クローラーを実行
-        env:
-          SMILEZEMI_USERNAME: ${{ secrets.SMILEZEMI_USERNAME }}
-          SMILEZEMI_PASSWORD: ${{ secrets.SMILEZEMI_PASSWORD }}
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
-        run: |
-          echo "🔍 デバッグ: 環境変数の確認"
-          echo "SMILEZEMI_USERNAME length: ${#SMILEZEMI_USERNAME}"
-          echo "SMILEZEMI_PASSWORD length: ${#SMILEZEMI_PASSWORD}"
-          echo "LINE_CHANNEL_ACCESS_TOKEN length: ${#LINE_CHANNEL_ACCESS_TOKEN}"
-          echo "LINE_USER_ID length: ${#LINE_USER_ID}"
-          echo ""
-          echo "🚀 クローラー実行開始"
-          node src/index.js
+        run: docker-compose up --abort-on-container-exit
 
       # 6. スクリーンショットをアーティファクトとして保存（常に実行）
       - name: スクリーンショットを保存
@@ -102,3 +75,8 @@ jobs:
           path: data/mission_data.json
           retention-days: 90
           if-no-files-found: ignore
+
+      # 8. .envファイルを削除（セキュリティ対策）
+      - name: .envファイルを削除
+        if: always()
+        run: rm -f .env
