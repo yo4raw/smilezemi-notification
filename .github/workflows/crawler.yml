@@ -73,7 +73,15 @@ jobs:
           SMILEZEMI_PASSWORD: ${{ secrets.SMILEZEMI_PASSWORD }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
-        run: node src/index.js
+        run: |
+          echo "🔍 デバッグ: 環境変数の確認"
+          echo "SMILEZEMI_USERNAME length: ${#SMILEZEMI_USERNAME}"
+          echo "SMILEZEMI_PASSWORD length: ${#SMILEZEMI_PASSWORD}"
+          echo "LINE_CHANNEL_ACCESS_TOKEN length: ${#LINE_CHANNEL_ACCESS_TOKEN}"
+          echo "LINE_USER_ID length: ${#LINE_USER_ID}"
+          echo ""
+          echo "🚀 クローラー実行開始"
+          node src/index.js
 
       # 6. スクリーンショットをアーティファクトとして保存（常に実行）
       - name: スクリーンショットを保存
