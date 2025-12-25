@@ -133,6 +133,7 @@ npm run docker:run
 
 ### 詳細なドキュメント
 
+- [Notifier API リファレンス](docs/API_NOTIFIER.md): LINE通知モジュールのAPI仕様書
 - [検証チェックリスト](docs/VALIDATION_CHECKLIST.md): 統合テストと本番環境検証の完全ガイド
 - [Docker環境テスト手順書](docs/DOCKER_TESTING.md): Docker環境でのテスト詳細手順
 
@@ -164,6 +165,7 @@ smilezemi-notification/
 │   ├── validate-security.sh    # セキュリティ検証スクリプト
 │   └── test-docker.sh          # Docker環境テストスクリプト
 ├── docs/
+│   ├── API_NOTIFIER.md         # Notifier APIリファレンス
 │   ├── VALIDATION_CHECKLIST.md # 統合テスト・本番検証チェックリスト
 │   └── DOCKER_TESTING.md       # Docker環境テスト詳細手順
 ├── data/                       # データ保存ディレクトリ
