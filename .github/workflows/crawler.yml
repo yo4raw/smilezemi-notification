@@ -50,11 +50,11 @@ jobs:
 
       # 4. Dockerイメージをビルド
       - name: Dockerイメージをビルド
-        run: docker-compose build
+        run: docker compose build
 
       # 5. クローラーを実行
       - name: クローラーを実行
-        run: docker-compose up --abort-on-container-exit
+        run: docker compose up --abort-on-container-exit
 
       # 6. スクリーンショットをアーティファクトとして保存（常に実行）
       - name: スクリーンショットを保存
