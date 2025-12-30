@@ -318,9 +318,9 @@ async function getTodayMissionCount(page) {
     const todayHeader = page.locator(`text=${datePattern}`).first();
 
     if (!(await todayHeader.isVisible())) {
+      console.log(`  ℹ️ 今日(${today})のデータはまだありません（0件として扱います）`);
       return {
-        success: false,
-        error: `今日(${today})のデータが見つかりません`,
+        success: true,
         count: 0
       };
     }
@@ -339,9 +339,9 @@ async function getTodayMissionCount(page) {
     }
 
     if (todayIndex === -1) {
+      console.log(`  ℹ️ 今日(${today})のデータインデックスが見つかりません（0件として扱います）`);
       return {
-        success: false,
-        error: '今日の日付のインデックスが見つかりません',
+        success: true,
         count: 0
       };
     }
@@ -350,9 +350,9 @@ async function getTodayMissionCount(page) {
     const todayBox = await todayHeader.boundingBox();
 
     if (!todayBox) {
+      console.log(`  ℹ️ 今日(${today})の日付要素の位置情報が取得できません（0件として扱います）`);
       return {
-        success: false,
-        error: '今日の日付のbounding boxが取得できません',
+        success: true,
         count: 0
       };
     }
