@@ -46,7 +46,12 @@ async function main() {
     try {
       browser = await chromium.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu'
+        ]
       });
       console.log('✅ ブラウザの起動が完了しました');
     } catch (error) {

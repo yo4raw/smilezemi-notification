@@ -3,8 +3,6 @@
  * Requirements: 3.1, 3.2, 3.3, 3.4
  */
 
-const selectors = require('./config/selectors');
-
 /**
  * ログイン後のページからユーザー一覧を取得
  *
@@ -84,42 +82,213 @@ async function getUserList(page) {
 }
 
 /**
+ * 右上に表示されている現在のユーザー名を取得
+ * @private
+ */
+async function getCurrentUserName(page) {
+  try {
+    const viewport = page.viewportSize();
+    const rightHalfX = viewport.width * 0.5; // 画面の右半分
+    const topAreaY = viewport.height * 0.2; // 画面の上部20%
+
+    const candidates = await page.locator('div').filter({ hasText: 'さん' }).all();
+
+    for (const candidate of candidates) {
+      const box = await candidate.boundingBox().catch(() => null);
+      const text = await candidate.innerText().catch(() => '');
+      const isVisible = await candidate.isVisible().catch(() => false);
+
+      // 右上エリアに位置し、短いテキスト（ユーザー名）で、可視であること
+      if (box &&
+          box.x >= rightHalfX &&
+          box.y <= topAreaY &&
+          isVisible &&
+          text.trim().length > 0 &&
+          text.trim().length < 20 &&
+          text.trim().endsWith('さん')) {
+        return text.trim();
+      }
+    }
+
+    throw new Error('右上のユーザー名が見つかりません');
+  } catch (error) {
+    throw new Error(`現在のユーザー名取得エラー: ${error.message}`);
+  }
+}
+
+/**
  * 指定ユーザーに切り替える
  * @private
  */
 async function switchToUser(page, userName) {
   try {
-    // ユーザー名エリアをクリックしてサイドバーを開く
-    const userArea = page.locator('div').filter({ hasText: 'さん' }).first();
-    await userArea.click();
-    await page.waitForTimeout(1500);
+    console.log(`\n  ユーザーを ${userName} に切り替え中...`);
 
-    // ユーザーを選択
-    const targetUser = page.locator(`text="${userName}"`).first();
+    // 切り替え前の右上のユーザー名を確認
+    const beforeUserName = await getCurrentUserName(page);
+    console.log(`  切り替え前の右上表示ユーザー: ${beforeUserName}`);
 
-    if (!(await targetUser.isVisible())) {
-      return {
-        success: false,
-        error: `ユーザー "${userName}" が表示されていません`
-      };
+    // 既に目的のユーザーであればスキップ
+    if (beforeUserName === userName) {
+      console.log(`  ✅ 既に ${userName} です（切り替え不要）`);
+      return { success: true };
     }
 
-    await targetUser.click({ force: true });
-    await page.waitForTimeout(2000);
-
-    // サイドバーを閉じる（ESCキー）
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(1000);
-
-    // 「日々のとりくみ」タブをクリック
-    const dailyTab = page.locator('text="日々のとりくみ"');
-    if (await dailyTab.isVisible()) {
-      await dailyTab.click();
-      await page.waitForTimeout(3000);
+    // 既にサイドバーが開いている場合は閉じる
+    const sidebarOpenCheck = await page.locator('text="お子さま"').isVisible().catch(() => false);
+    if (sidebarOpenCheck) {
+      console.log(`  既にサイドバーが開いているため、閉じます`);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(1000);
     }
 
-    return { success: true };
+    // 方法1: 左上のMENUボタンからユーザー切り替えを試みる
+    console.log(`  [方法1] 左上のMENUボタンをクリック...`);
+    const menuButton = page.locator('text="MENU"').first();
+    const menuVisible = await menuButton.isVisible().catch(() => false);
+
+    if (menuVisible) {
+      await menuButton.click();
+      await page.waitForTimeout(2000);
+
+      // メニュー/サイドバー内でユーザー名を探す
+      const userInMenu = await page.locator(`text="${userName}"`).first().isVisible({ timeout: 3000 }).catch(() => false);
+
+      if (userInMenu) {
+        console.log(`  ✅ メニュー内にユーザー名 "${userName}" を発見`);
+        await page.locator(`text="${userName}"`).first().click();
+        await page.waitForTimeout(3000);
+
+        // 切り替え成功確認
+        await page.waitForLoadState('networkidle').catch(() => {});
+
+        // 切り替え後の右上のユーザー名を確認
+        const afterUserName = await getCurrentUserName(page);
+        console.log(`  切り替え後の右上表示ユーザー: ${afterUserName}`);
+
+        if (afterUserName !== userName) {
+          throw new Error(`ユーザー切り替え検証失敗: 期待=${userName}, 実際=${afterUserName}`);
+        }
+
+        console.log(`  ✅ ユーザー切り替え成功: ${userName}`);
+        return { success: true };
+      } else {
+        console.log(`  ⚠️ メニュー内にユーザー名が見つかりません、メニューを閉じます`);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(1000);
+      }
+    } else {
+      console.log(`  ⚠️ MENUボタンが見つかりません`);
+    }
+
+    // 方法2: 右上のユーザーエリアをクリックしてサイドバーを開く
+    console.log(`  [方法2] 右上のユーザーエリアを探索...`);
+
+    // 右上のユーザー名エリアを位置基準で探す
+    const viewport = page.viewportSize();
+    const rightHalfX = viewport.width * 0.5;
+    const topAreaY = viewport.height * 0.2;
+
+    const userNameCandidates = await page.locator('div').filter({ hasText: 'さん' }).all();
+    let userArea = null;
+
+    for (const candidate of userNameCandidates) {
+      const box = await candidate.boundingBox().catch(() => null);
+      const text = await candidate.innerText().catch(() => '');
+      const isVisible = await candidate.isVisible().catch(() => false);
+
+      // 右上エリアに位置し、短いテキスト（ユーザー名）で、可視であること
+      if (box &&
+          box.x >= rightHalfX &&
+          box.y <= topAreaY &&
+          isVisible &&
+          text.trim().length > 0 &&
+          text.trim().length < 20 &&
+          text.trim().endsWith('さん')) {
+        userArea = candidate;
+        break;
+      }
+    }
+
+    if (!userArea) {
+      throw new Error('右上のユーザーエリアが見つかりません');
+    }
+
+    console.log(`  右上のユーザーエリアをクリック...`);
+
+    // クリックしてサイドバーまたはメニューを開く
+    await userArea.click({ timeout: 5000 });
+    await page.waitForTimeout(3000);
+
+    // プロフィールページに遷移した場合は戻る（ここではユーザー切り替えできない）
+    const isProfilePage = await page.locator('text="プロフィール設定"').isVisible().catch(() => false);
+    if (isProfilePage) {
+      console.log(`  ⚠️ プロフィール設定ページに遷移しました（ユーザー切り替えには使えません）`);
+      await page.goBack();
+      await page.waitForTimeout(2000);
+      throw new Error('プロフィールページではユーザー切り替えができません。別の方法を探す必要があります。');
+    }
+
+    // サイドバーが開いたか確認
+    const sidebarOpened = await page.locator('text="お子さま"').isVisible().catch(() => false);
+    if (sidebarOpened) {
+      console.log(`  ✅ サイドバーが開きました`);
+
+      // サイドバー内でユーザーを探してクリック
+      // まずすべてのユーザー名要素を取得
+      const allUserElements = await page.locator(`text="${userName}"`).all();
+      console.log(`  🔍 "${userName}" を含む要素数: ${allUserElements.length}`);
+
+      // サイドバー内（右上以外）の要素を探す
+      let targetElement = null;
+      for (let i = 0; i < allUserElements.length; i++) {
+        const box = await allUserElements[i].boundingBox().catch(() => null);
+        if (box) {
+          console.log(`  🔍 [${i}] 位置: x=${Math.round(box.x)}, y=${Math.round(box.y)}`);
+
+          // 右上のユーザー名エリア以外の要素を選択
+          // （右上は画面の右半分 x >= width * 0.5 かつ上部 y <= height * 0.2）
+          const viewport = page.viewportSize();
+          if (!(box.x >= viewport.width * 0.5 && box.y <= viewport.height * 0.2)) {
+            targetElement = allUserElements[i];
+            console.log(`  ✅ サイドバー内にユーザー名 "${userName}" を発見 [${i}]`);
+            break;
+          }
+        }
+      }
+
+      if (targetElement) {
+        await targetElement.click();
+        await page.waitForTimeout(3000);
+
+        // サイドバーを閉じる
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(1000);
+
+        // 切り替え成功確認
+        await page.waitForLoadState('networkidle').catch(() => {});
+
+        // 切り替え後の右上のユーザー名を確認
+        const afterUserName = await getCurrentUserName(page);
+        console.log(`  切り替え後の右上表示ユーザー: ${afterUserName}`);
+
+        if (afterUserName !== userName) {
+          throw new Error(`ユーザー切り替え検証失敗: 期待=${userName}, 実際=${afterUserName}`);
+        }
+
+        console.log(`  ✅ ユーザー切り替え成功: ${userName}`);
+        return { success: true };
+      } else {
+        throw new Error(`サイドバー内にユーザー "${userName}" が見つかりません`);
+      }
+    }
+
+    // どの方法でもサイドバー/メニューが開かなかった
+    await page.screenshot({ path: `screenshots/user-switch-failed-${Date.now()}.png` });
+    throw new Error('サイドバーまたはメニューを開くことができませんでした');
+
   } catch (error) {
+    console.error(`  エラー: ${error.message}`);
     return {
       success: false,
       error: `ユーザー切り替えエラー: ${error.message}`
@@ -137,7 +306,7 @@ function getTodayDate() {
 }
 
 /**
- * 今日のミッション数を取得
+ * 今日の完了したミッション数を取得
  * @private
  */
 async function getTodayMissionCount(page) {
@@ -177,9 +346,6 @@ async function getTodayMissionCount(page) {
       };
     }
 
-    // 全ての「ミッション」要素を取得
-    const allMissions = await page.locator('text=/ミッション/').all();
-
     // 今日の日付要素のbounding boxを取得
     const todayBox = await todayHeader.boundingBox();
 
@@ -202,18 +368,34 @@ async function getTodayMissionCount(page) {
       }
     }
 
-    // 今日の日付より下で、次の日付より上にあるミッション要素を数える
-    let missionCount = 0;
-    for (const mission of allMissions) {
-      const missionBox = await mission.boundingBox();
-      if (missionBox && missionBox.y > todayBox.y && missionBox.y < nextDateY) {
-        missionCount++;
+    // 今日の日付セクション内のミッション要素を取得
+    // class="missionIcon__i6nW8"を持つ<span>ミッション</span>のみを対象
+    const allMissionIcons = await page.locator('.missionIcon__i6nW8').all();
+    let completedMissionCount = 0;
+    let totalMissionCount = 0;
+
+    for (const missionIcon of allMissionIcons) {
+      const box = await missionIcon.boundingBox();
+      if (box && box.y > todayBox.y && box.y < nextDateY) {
+        totalMissionCount++;
+
+        // 親要素（subIcon__p_BWc）を取得して、NEWラベルの有無を確認
+        const parent = missionIcon.locator('..');
+        const hasNewLabel = await parent.locator('text="NEW"').count() > 0;
+
+        // NEWラベルがない = 完了したミッション
+        if (!hasNewLabel) {
+          completedMissionCount++;
+        }
       }
     }
 
+    console.log(`📊 今日(${today})の総ミッション数: ${totalMissionCount}件`);
+    console.log(`📊 今日(${today})の完了ミッション数: ${completedMissionCount}件`);
+
     return {
       success: true,
-      count: missionCount
+      count: completedMissionCount
     };
   } catch (error) {
     return {
@@ -233,6 +415,8 @@ async function getTodayMissionCount(page) {
  */
 async function getMissionCount(page, userName) {
   try {
+    console.log(`\n👤 ${userName}のミッション数を取得中...`);
+
     // ユーザーに切り替える
     const switchResult = await switchToUser(page, userName);
     if (!switchResult.success) {
@@ -241,6 +425,9 @@ async function getMissionCount(page, userName) {
 
     // 今日のミッション数を取得
     const missionResult = await getTodayMissionCount(page);
+
+    console.log(`✅ ${userName}: ${missionResult.count}件`);
+
     return missionResult;
 
   } catch (error) {
