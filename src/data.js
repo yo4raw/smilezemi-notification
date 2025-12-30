@@ -205,8 +205,142 @@ async function saveData(data) {
   }
 }
 
+/**
+ * ミッション詳細レベルの変更を検出
+ * Requirements: 点数変化、新規ミッション、変化なしの検出
+ *
+ * @param {Array} previousData - 前回のユーザーデータ（v2.0形式）
+ * @param {Array} currentData - 現在のユーザーデータ（v2.0形式）
+ * @returns {{
+ *   success: boolean,
+ *   userChanges: Array<{
+ *     userName: string,
+ *     missionChanges: Array<{
+ *       missionName: string,
+ *       type: 'score_change' | 'new_mission' | 'no_change',
+ *       previousScore?: number,
+ *       currentScore: number,
+ *       scoreChange?: number,
+ *       completed: boolean
+ *     }>
+ *   }>
+ * }}
+ */
+function compareMissionDetails(previousData, currentData) {
+  try {
+    // データ形式の検証
+    if (!Array.isArray(previousData) || !Array.isArray(currentData)) {
+      return {
+        success: false,
+        error: 'データ形式エラー: 両方とも配列である必要があります',
+        userChanges: []
+      };
+    }
+
+    // 前回データをユーザー名でマッピング
+    const previousMap = new Map();
+    previousData.forEach(user => {
+      if (user.userName && Array.isArray(user.missions)) {
+        previousMap.set(user.userName, user.missions);
+      }
+    });
+
+    const userChanges = [];
+
+    // 現在データを走査
+    currentData.forEach(currentUser => {
+      if (!currentUser.userName || !Array.isArray(currentUser.missions)) {
+        return;
+      }
+
+      const previousMissions = previousMap.get(currentUser.userName);
+
+      // 前回データがない場合、全て新規ミッションとして扱う
+      if (!previousMissions) {
+        const missionChanges = currentUser.missions.map(mission => ({
+          missionName: mission.name,
+          type: 'new_mission',
+          currentScore: mission.score,
+          completed: mission.completed
+        }));
+
+        if (missionChanges.length > 0) {
+          userChanges.push({
+            userName: currentUser.userName,
+            missionChanges
+          });
+        }
+        return;
+      }
+
+      // 前回のミッションを名前でマッピング
+      const previousMissionMap = new Map();
+      previousMissions.forEach(mission => {
+        // 同名ミッションが複数ある場合、最初のものを使用
+        if (!previousMissionMap.has(mission.name)) {
+          previousMissionMap.set(mission.name, mission);
+        }
+      });
+
+      const missionChanges = [];
+
+      // 現在のミッションを走査
+      currentUser.missions.forEach(currentMission => {
+        const previousMission = previousMissionMap.get(currentMission.name);
+
+        if (!previousMission) {
+          // 新規ミッション
+          missionChanges.push({
+            missionName: currentMission.name,
+            type: 'new_mission',
+            currentScore: currentMission.score,
+            completed: currentMission.completed
+          });
+        } else if (currentMission.score !== previousMission.score) {
+          // 点数変化
+          missionChanges.push({
+            missionName: currentMission.name,
+            type: 'score_change',
+            previousScore: previousMission.score,
+            currentScore: currentMission.score,
+            scoreChange: currentMission.score - previousMission.score,
+            completed: currentMission.completed
+          });
+        } else {
+          // 変化なし
+          missionChanges.push({
+            missionName: currentMission.name,
+            type: 'no_change',
+            currentScore: currentMission.score,
+            completed: currentMission.completed
+          });
+        }
+      });
+
+      if (missionChanges.length > 0) {
+        userChanges.push({
+          userName: currentUser.userName,
+          missionChanges
+        });
+      }
+    });
+
+    return {
+      success: true,
+      userChanges
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `ミッション詳細比較エラー: ${error.message}`,
+      userChanges: []
+    };
+  }
+}
+
 module.exports = {
   loadPreviousData,
   compareData,
+  compareMissionDetails,
   saveData
 };
