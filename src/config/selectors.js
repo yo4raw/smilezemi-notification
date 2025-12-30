@@ -62,5 +62,58 @@ module.exports = {
     loginError: '.error-message, [role="alert"], .alert-danger',
     networkError: 'text=/ネットワークエラー|通信エラー/',
     sessionExpired: 'text=/セッション|タイムアウト/'
+  },
+
+  // ミッション詳細のセレクタ（Requirements: 1.1, 2.2, 3.1）
+  // DOM調査日: 2025-12-30 (scripts/investigate-study-details.js で確認)
+  missionDetails: {
+    // 勉強時間セレクタ（確定）
+    // 調査結果: .totalStudyTime__ZyyiE, .minute__SnMnp が存在
+    // パターン: "5分" のような表示（時間は別要素の可能性あり）
+    studyTime: {
+      selector: 'text=/\\d+時間\\d+分/',
+      alternativeSelectors: [
+        '.totalStudyTime__ZyyiE',
+        '.minute__SnMnp',
+        '[class*="studyTime"]',
+        '[class*="study-time"]',
+        'text=/\\d+分/'  // 分のみの表示も対応
+      ],
+      pattern: /(\d+)時間(\d+)分/  // hours, minutes をキャプチャ
+    },
+
+    // ミッション要素（既存、確認済み: 26件検出）
+    missionIcon: '.missionIcon__i6nW8',
+
+    // ミッション名セレクタ（確定）
+    // 調査結果: .title__C3bzF が実際のミッション名クラス
+    // 親要素: .subIcon__p_BWc
+    missionName: {
+      selector: '.title__C3bzF',
+      alternativeSelectors: [
+        '[class*="title"]',
+        '[class*="mission-title"]',
+        '[class*="missionTitle"]',
+        '.missionIcon__i6nW8 + *'  // アイコンの兄弟要素（フォールバック）
+      ],
+      defaultName: 'ミッション'  // 取得失敗時のデフォルト値
+    },
+
+    // ミッション点数セレクタ（確定）
+    // 調査結果: .scoreLabel__LpVbL が「前回 XX点」の形式
+    // パターン: "100点" のような表示（38件検出）
+    missionScore: {
+      selector: 'text=/\\d+点/',
+      alternativeSelectors: [
+        '.scoreLabel__LpVbL',
+        '[class*="score"]',
+        '[class*="point"]'
+      ],
+      pattern: /(\d+)点/,  // score をキャプチャ
+      defaultScore: 0      // 取得失敗時のデフォルト値
+    },
+
+    // NEWラベル（確認済み: "NEWミッション" として検出）
+    newLabel: 'text="NEW"'
   }
 };

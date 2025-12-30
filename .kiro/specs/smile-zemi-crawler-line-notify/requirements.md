@@ -14,7 +14,7 @@ githubsecretsにログイン時のユーザ名とパスワードが登録され�
 
 ### 段階的実装アプローチ（必須）
 
-1. **ローカル環境でのブラウザ確認**: 必ずローカル環境でPlaywright等のブラウザ自動化ツールを使用し、実際にブラウザを開いて目視確認しながら実装を進める
+1. **ローカル環境でのブラウザ確認**: 必ずローカル環境(docker-compose)でPlaywright等のブラウザ自動化ツールを使用し、実際にブラウザを開いて目視確認しながら実装を進める
 2. **ステップバイステップでの実装**: 各機能（ログイン、ページ遷移、データ取得、ユーザー切り替え等）を1ステップずつ確認しながら実装する
 3. **セレクタの段階的特定**: 各ステップでDOM構造を調査し、適切なセレクタ（CSS Selector、XPath、テキストコンテンツ等）を特定して実装に反映する
 4. **スクリーンショット保存**: 各ステップでスクリーンショットを保存し、DOM構造とセレクタの対応関係を記録する
@@ -53,13 +53,13 @@ githubsecretsにログイン時のユーザ名とパスワードが登録され�
 7. The Smile Zemi Crawlerワークフロー shall セッションCookieを保持して認証状態を維持する
 
 ### Requirement 3: 学習日、ミッション数、勉強時間取得機能
-**Objective:** As a 保護者, I want 当日の学習日のこなしたミッション数を自動的に取得する機能, so that 子供の学習進捗をリアルタイムで確認できる
+**Objective:** As a 保護者, I want 当日の学習日のこなしたミッション情報（勉強時間、ミッション名、ミッション数）を自動的に取得する機能, so that 子供の学習進捗をリアルタイムで確認できる
 
 #### Acceptance Criteria
 1. When ログインが完了する, the Smile Zemi Crawlerワークフロー shall 学習状況を表示するページに遷移する
 2. When 学習状況ページが読み込まれる, the Smile Zemi Crawlerワークフロー shall DOMが完全に読み込まれるまで待機する
 3. When ページが完全に読み込まれる, the Smile Zemi Crawlerワークフロー shall 当日の日付の学習日を特定する
-4. When 当日の学習日が特定される, the Smile Zemi Crawlerワークフロー shall こなしたミッション数を表示する要素を特定する
+4. When 当日の学習日が特定される, the Smile Zemi Crawlerワークフロー shall こなしたミッション名を表示する要素を特定する
 5. When ミッション数要素が特定される, the Smile Zemi Crawlerワークフロー shall セレクタまたはXPathを使用してミッション数の数値を抽出する
 6. When ミッション数が抽出される, the Smile Zemi Crawlerワークフロー shall ユーザー情報とともに構造化データ（JSON）として保存する
 7. If ページ読み込みがタイムアウトする, then the Smile Zemi Crawlerワークフロー shall リトライ処理を最大3回実行する

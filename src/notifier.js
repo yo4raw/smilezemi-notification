@@ -347,8 +347,104 @@ function formatUserListMessage(users) {
   return message.trim();
 }
 
+/**
+ * 詳細データをLINE通知用のメッセージにフォーマット
+ * Requirements: 4.1, 4.2, 4.3, 4.4
+ *
+ * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} userData - ユーザーデータ配列（v2.0形式）
+ * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} [previousData] - 前回のユーザーデータ配列（v2.0形式、オプション）
+ * @returns {string} - フォーマットされたメッセージ
+ */
+function formatDetailedMessage(userData, previousData = []) {
+  // ヘッダー
+  let message = '📊 スマイルゼミ 学習状況\n\n';
+
+  // データがない場合
+  if (!userData || userData.length === 0) {
+    message += '本日のデータはありません。';
+    return message.trim();
+  }
+
+  // 各ユーザーのデータを追加
+  userData.forEach((user, index) => {
+    // ユーザー名
+    message += `👤 ${user.userName}\n`;
+
+    // 勉強時間
+    const hours = user.studyTime?.hours ?? 0;
+    const minutes = user.studyTime?.minutes ?? 0;
+    message += `⏱️ 勉強時間: ${hours}:${minutes.toString().padStart(2, '0')}\n`;
+
+    // 完了ミッション数
+    const missionCount = user.missionCount ?? 0;
+    message += `✅ 完了ミッション: ${missionCount}件\n`;
+
+    // 前回データを検索
+    const previousUser = previousData.find(prev => prev.userName === user.userName);
+
+    // ミッション詳細
+    const missions = user.missions ?? [];
+    if (missions.length > 0) {
+      message += '\n📋 ミッション詳細:\n';
+      missions.forEach(mission => {
+        // 前回の同名ミッションを検索（完了状態が同じものを優先）
+        let previousMission = null;
+        if (previousUser && previousUser.missions) {
+          // まず完了状態が同じものを探す
+          previousMission = previousUser.missions.find(
+            prev => prev.name === mission.name && prev.completed === mission.completed
+          );
+          // 見つからなければ名前だけで探す
+          if (!previousMission) {
+            previousMission = previousUser.missions.find(prev => prev.name === mission.name);
+          }
+        }
+
+        // 点数表示（前回データがあり、点数が変化している場合は矢印表示）
+        let scoreDisplay;
+        if (previousMission && previousMission.score !== mission.score) {
+          scoreDisplay = `${previousMission.score}→${mission.score}点`;
+        } else {
+          scoreDisplay = `${mission.score}点`;
+        }
+
+        message += `  ・${mission.name}: ${scoreDisplay}\n`;
+      });
+    } else {
+      message += '\n📋 ミッション詳細なし\n';
+    }
+
+    // ユーザー間のセパレータ（最後のユーザー以外）
+    if (index < userData.length - 1) {
+      message += '\n';
+    }
+  });
+
+  return message.trim();
+}
+
+/**
+ * メッセージを5000文字以内に切り詰める
+ * Requirements: 4.5
+ *
+ * @param {string} message - メッセージ文字列
+ * @returns {string} - 切り詰められたメッセージ
+ */
+function truncateToLimit(message) {
+  // 5000文字以下の場合はそのまま返す
+  if (message.length <= MAX_MESSAGE_LENGTH) {
+    return message;
+  }
+
+  // 4950文字で切り詰め、省略メッセージを追加（50文字の安全マージン）
+  const truncated = message.substring(0, 4950);
+  return truncated + '\n\n...（メッセージが長すぎるため省略）';
+}
+
 module.exports = {
   sendNotification,
   formatMessage,
-  sendUserListNotification
+  sendUserListNotification,
+  formatDetailedMessage,
+  truncateToLimit
 };

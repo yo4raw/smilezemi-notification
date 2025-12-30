@@ -1,7 +1,9 @@
 /**
  * クローラーモジュール - みまもるネットデータ取得
- * Requirements: 3.1, 3.2, 3.3, 3.4
+ * Requirements: 3.1, 3.2, 3.3, 3.4, 1.1, 1.2, 2.1, 2.2, 3.1
  */
+
+const selectors = require('./config/selectors');
 
 /**
  * ログイン後のページからユーザー一覧を取得
@@ -407,6 +409,287 @@ async function getTodayMissionCount(page) {
 }
 
 /**
+ * 勉強時間を取得
+ * Requirements: 1.1, 1.2, 1.3, 6.1
+ * @private
+ * @param {import('playwright').Page} page - Playwrightページインスタンス
+ * @returns {Promise<{success: boolean, hours?: number, minutes?: number, error?: string}>}
+ */
+async function getStudyTime(page) {
+  try {
+    const { studyTime } = selectors.missionDetails;
+
+    // パース用の柔軟な関数
+    const parseStudyTime = (text) => {
+      // "X時間Y分" 形式
+      const fullMatch = text.match(/(\d+)時間(\d+)分/);
+      if (fullMatch) {
+        return {
+          hours: parseInt(fullMatch[1], 10),
+          minutes: parseInt(fullMatch[2], 10)
+        };
+      }
+
+      // "Y分" のみの形式
+      const minutesMatch = text.match(/(\d+)分/);
+      if (minutesMatch) {
+        return {
+          hours: 0,
+          minutes: parseInt(minutesMatch[1], 10)
+        };
+      }
+
+      // "X時間" のみの形式
+      const hoursMatch = text.match(/(\d+)時間/);
+      if (hoursMatch) {
+        return {
+          hours: parseInt(hoursMatch[1], 10),
+          minutes: 0
+        };
+      }
+
+      return null;
+    };
+
+    // 勉強時間要素を探す（タイムアウト5秒）
+    const timeElement = page.locator(studyTime.selector).first();
+    const isVisible = await timeElement.isVisible({ timeout: 5000 }).catch(() => false);
+
+    if (!isVisible) {
+      // セレクタで見つからない場合、代替セレクタを試行
+      for (const altSelector of studyTime.alternativeSelectors) {
+        const altElement = page.locator(altSelector).first();
+        const altVisible = await altElement.isVisible({ timeout: 2000 }).catch(() => false);
+
+        if (altVisible) {
+          const text = await altElement.textContent();
+          const parsed = parseStudyTime(text);
+
+          if (parsed) {
+            console.log(`📚 勉強時間: ${parsed.hours}時間${parsed.minutes}分`);
+            return {
+              success: true,
+              hours: parsed.hours,
+              minutes: parsed.minutes
+            };
+          }
+        }
+      }
+
+      // 全て失敗した場合はデフォルト値
+      console.log(`  ℹ️ 勉強時間要素が見つかりません（0時間0分として扱います）`);
+      return {
+        success: true,
+        hours: 0,
+        minutes: 0
+      };
+    }
+
+    // テキストを取得してパース
+    const text = await timeElement.textContent();
+    const parsed = parseStudyTime(text);
+
+    if (!parsed) {
+      console.log(`  ℹ️ 勉強時間のパースに失敗: "${text}"（0時間0分として扱います）`);
+      return {
+        success: true,
+        hours: 0,
+        minutes: 0
+      };
+    }
+
+    console.log(`📚 勉強時間: ${parsed.hours}時間${parsed.minutes}分`);
+
+    return {
+      success: true,
+      hours: parsed.hours,
+      minutes: parsed.minutes
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `勉強時間取得エラー: ${error.message}`,
+      hours: 0,
+      minutes: 0
+    };
+  }
+}
+
+/**
+ * 今日のミッション詳細を取得（名前と点数）
+ * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.3, 6.2
+ * @private
+ * @param {import('playwright').Page} page - Playwrightページインスタンス
+ * @returns {Promise<{success: boolean, missions?: Array<{name: string, score: number, completed: boolean}>, error?: string}>}
+ */
+async function getMissionDetails(page) {
+  try {
+    const today = getTodayDate();
+
+    // 今日の日付要素を探す
+    const datePattern = new RegExp(`${today}.*?[月火水木金土日]`);
+    const todayHeader = page.locator(`text=${datePattern}`).first();
+
+    if (!(await todayHeader.isVisible({ timeout: 10000 }))) {
+      console.log(`  ℹ️ 今日(${today})のデータはまだありません（空配列として扱います）`);
+      return {
+        success: true,
+        missions: []
+      };
+    }
+
+    // 全ての日付要素を取得
+    const allDates = await page.locator('text=/\\d+\\/\\d+/').all();
+
+    // 今日の日付のインデックスを見つける
+    let todayIndex = -1;
+    for (let i = 0; i < allDates.length; i++) {
+      const dateText = await allDates[i].textContent();
+      if (dateText.includes(today)) {
+        todayIndex = i;
+        break;
+      }
+    }
+
+    if (todayIndex === -1) {
+      console.log(`  ℹ️ 今日(${today})のデータインデックスが見つかりません（空配列として扱います）`);
+      return {
+        success: true,
+        missions: []
+      };
+    }
+
+    // 今日の日付要素の位置を取得
+    const todayBox = await todayHeader.boundingBox();
+    if (!todayBox) {
+      console.log(`  ℹ️ 今日(${today})の日付要素の位置情報が取得できません（空配列として扱います）`);
+      return {
+        success: true,
+        missions: []
+      };
+    }
+
+    // 次の日付の位置を取得
+    let nextDateY = Infinity;
+    const nextDateIndex = todayIndex + 1;
+    if (nextDateIndex < allDates.length) {
+      const nextDateBox = await allDates[nextDateIndex].boundingBox();
+      if (nextDateBox) {
+        nextDateY = nextDateBox.y;
+      }
+    }
+
+    // 今日のセクション内のミッションアイコンを取得
+    const allMissionIcons = await page.locator('.missionIcon__i6nW8').all();
+    const missions = [];
+
+    for (const missionIcon of allMissionIcons) {
+      const box = await missionIcon.boundingBox();
+
+      // 今日のセクション内のミッションのみ処理
+      if (box && box.y > todayBox.y && box.y < nextDateY) {
+        // 親要素を取得
+        const parent = missionIcon.locator('..');
+
+        // NEWラベルの有無で完了判定
+        const hasNewLabel = await parent.locator('text="NEW"').count() > 0;
+        const completed = !hasNewLabel;
+
+        // ミッション名を取得（親要素の兄弟として.title__C3bzFを探す）
+        let missionName = selectors.missionDetails.missionName.defaultName;
+
+        // 親要素の兄弟要素を取得（grandparent > children）
+        const grandparent = parent.locator('..');
+        const titleElements = await grandparent.locator('.title__C3bzF').all();
+
+        if (titleElements.length > 0) {
+          const titleText = await titleElements[0].textContent().catch(() => '');
+          if (titleText && titleText.trim().length > 0) {
+            missionName = titleText.trim();
+          }
+        } else {
+          // fallback: 親要素のテキストから抽出
+          const parentText = await parent.textContent().catch(() => '');
+          const cleanText = parentText.replace(/NEW/g, '').replace(/\d+点/g, '').replace(/前回/g, '').trim();
+          if (cleanText.length > 0 && cleanText.length < 100) {
+            missionName = cleanText;
+          }
+        }
+
+        // 点数を取得（祖父母要素レベルで.scoreLabel__LpVbLを探す）
+        let score = selectors.missionDetails.missionScore.defaultScore;
+
+        // まずgrandparent内で.scoreLabel__LpVbLを探す（「前回 XX点」形式）
+        let scoreLabelElements = await grandparent.locator('.scoreLabel__LpVbL').all();
+
+        // grandparentで見つからない場合、さらに上の階層を探す
+        if (scoreLabelElements.length === 0) {
+          const greatGrandparent = grandparent.locator('..');
+          scoreLabelElements = await greatGrandparent.locator('.scoreLabel__LpVbL').all();
+        }
+
+        if (scoreLabelElements.length > 0) {
+          const scoreText = await scoreLabelElements[0].textContent().catch(() => '');
+          // "前回 95点" → 95 を抽出
+          const scoreMatch = scoreText.match(/(\d+)点/);
+          if (scoreMatch) {
+            score = parseInt(scoreMatch[1], 10);
+          }
+        } else {
+          // fallback: 正規表現パターンで探す
+          const scoreElements = await grandparent.locator('text=/\\d+点/').all();
+          if (scoreElements.length > 0) {
+            const scoreText = await scoreElements[0].textContent().catch(() => '');
+            const scoreMatch = scoreText.match(/(\d+)点/);
+            if (scoreMatch) {
+              score = parseInt(scoreMatch[1], 10);
+            }
+          }
+        }
+
+        missions.push({
+          name: missionName,
+          score,
+          completed
+        });
+
+        // 最大10件に制限
+        if (missions.length >= 10) {
+          break;
+        }
+      }
+    }
+
+    console.log(`📋 今日(${today})のミッション詳細: ${missions.length}件`);
+
+    return {
+      success: true,
+      missions
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `ミッション詳細取得エラー: ${error.message}`,
+      missions: []
+    };
+  }
+}
+
+/**
+ * ミッション配列から合計点数を計算
+ * Requirements: 3.2, 3.4
+ * @param {Array<{name: string, score: number, completed: boolean}>} missions - ミッション配列
+ * @returns {number} 合計点数
+ */
+function getTotalScore(missions) {
+  if (!Array.isArray(missions) || missions.length === 0) {
+    return 0;
+  }
+
+  return missions.reduce((total, mission) => total + (mission.score || 0), 0);
+}
+
+/**
  * 指定ユーザーのミッション数を取得
  *
  * @param {import('playwright').Page} page - Playwrightページインスタンス
@@ -441,6 +724,121 @@ async function getMissionCount(page, userName) {
     return {
       success: false,
       error: `ミッション数取得エラー: ${error.message}`
+    };
+  }
+}
+
+/**
+ * 全ユーザーの詳細データを取得（v2.0形式）
+ * Requirements: 1.1, 2.1, 3.1, 4.1, 5.1, 6.1, 6.2, 6.3, 6.4
+ *
+ * @param {import('playwright').Page} page - Playwrightページインスタンス
+ * @returns {Promise<{success: boolean, data?: Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array}>, error?: string, partialFailure?: boolean, detailsAvailable?: boolean}>}
+ */
+async function getAllUsersDetailedData(page) {
+  try {
+    // ユーザー一覧を取得
+    const userListResult = await getUserList(page);
+
+    if (!userListResult.success) {
+      return {
+        success: false,
+        error: userListResult.error,
+        detailsAvailable: false
+      };
+    }
+
+    const users = userListResult.users;
+    const data = [];
+    let hasPartialFailure = false;
+    let detailsAvailable = true;
+
+    // 当日の日付を取得（YYYY-MM-DD形式）
+    const today = new Date();
+    const dateString = today.toISOString().split('T')[0];
+
+    // 各ユーザーのデータを取得
+    for (let i = 0; i < users.length; i++) {
+      const user = users[i];
+
+      console.log(`\n👤 ${user.name}のデータを取得中...`);
+
+      // ユーザーに切り替える
+      const switchResult = await switchToUser(page, user.name);
+
+      if (!switchResult.success) {
+        hasPartialFailure = true;
+        console.error(`  ❌ ユーザー切り替え失敗: ${switchResult.error}`);
+        continue;
+      }
+
+      // 勉強時間を取得
+      const studyTimeResult = await getStudyTime(page);
+      const studyTime = studyTimeResult.success
+        ? { hours: studyTimeResult.hours, minutes: studyTimeResult.minutes }
+        : { hours: 0, minutes: 0 };
+
+      if (!studyTimeResult.success) {
+        console.warn(`  ⚠️ 勉強時間取得失敗: ${studyTimeResult.error}`);
+        hasPartialFailure = true;
+      }
+
+      // ミッション数を取得
+      const missionCountResult = await getTodayMissionCount(page);
+      const missionCount = missionCountResult.success ? missionCountResult.count : 0;
+
+      if (!missionCountResult.success) {
+        console.warn(`  ⚠️ ミッション数取得失敗: ${missionCountResult.error}`);
+        hasPartialFailure = true;
+      }
+
+      // ミッション詳細を取得
+      const missionsResult = await getMissionDetails(page);
+      const missions = missionsResult.success ? missionsResult.missions : [];
+
+      if (!missionsResult.success) {
+        console.warn(`  ⚠️ ミッション詳細取得失敗: ${missionsResult.error}`);
+        hasPartialFailure = true;
+        detailsAvailable = false;
+      }
+
+      // 合計点数を計算
+      const totalScore = getTotalScore(missions);
+
+      // v2.0データ構造で格納
+      data.push({
+        userName: user.name,
+        missionCount,
+        date: dateString,
+        studyTime,
+        totalScore,
+        missions
+      });
+
+      console.log(`  ✅ ${user.name}: 勉強時間=${studyTime.hours}h${studyTime.minutes}m, ミッション=${missionCount}件, 点数=${totalScore}点`);
+    }
+
+    // 少なくとも1件成功していれば、部分的な成功として扱う
+    if (data.length > 0) {
+      return {
+        success: true,
+        data,
+        partialFailure: hasPartialFailure,
+        detailsAvailable
+      };
+    }
+
+    // 全て失敗した場合
+    return {
+      success: false,
+      error: '全てのユーザーのデータ取得に失敗しました。',
+      detailsAvailable: false
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `全ユーザーの詳細データ取得エラー: ${error.message}`,
+      detailsAvailable: false
     };
   }
 }
@@ -516,5 +914,9 @@ async function getAllUsersMissionCounts(page) {
 module.exports = {
   getUserList,
   getMissionCount,
-  getAllUsersMissionCounts
+  getAllUsersMissionCounts,
+  getAllUsersDetailedData,
+  getStudyTime,
+  getMissionDetails,
+  getTotalScore
 };
