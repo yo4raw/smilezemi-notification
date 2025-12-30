@@ -616,33 +616,43 @@ async function getMissionDetails(page) {
           }
         }
 
-        // 点数を取得（祖父母要素レベルで.scoreLabel__LpVbLを探す）
+        // 点数を取得（学習結果エリアから現在の点数を取得）
+        // 点数は右側の「学習結果」カラムにあり、ミッションアイコンから離れた場所にあるため、
+        // より広い範囲（行全体レベル）で検索する
         let score = selectors.missionDetails.missionScore.defaultScore;
 
-        // まずgrandparent内で.scoreLabel__LpVbLを探す（「前回 XX点」形式）
-        let scoreLabelElements = await grandparent.locator('.scoreLabel__LpVbL').all();
+        // 複数の階層レベルで点数を検索
+        const searchLevels = [
+          grandparent,                           // 親の親
+          grandparent.locator('..'),              // 親の親の親（great-grandparent）
+          grandparent.locator('..').locator('..') // さらに上の階層
+        ];
 
-        // grandparentで見つからない場合、さらに上の階層を探す
-        if (scoreLabelElements.length === 0) {
-          const greatGrandparent = grandparent.locator('..');
-          scoreLabelElements = await greatGrandparent.locator('.scoreLabel__LpVbL').all();
-        }
+        for (const level of searchLevels) {
+          const scoreElements = await level.locator('text=/\\d+点/').all();
 
-        if (scoreLabelElements.length > 0) {
-          const scoreText = await scoreLabelElements[0].textContent().catch(() => '');
-          // "前回 95点" → 95 を抽出
-          const scoreMatch = scoreText.match(/(\d+)点/);
-          if (scoreMatch) {
-            score = parseInt(scoreMatch[1], 10);
-          }
-        } else {
-          // fallback: 正規表現パターンで探す
-          const scoreElements = await grandparent.locator('text=/\\d+点/').all();
           if (scoreElements.length > 0) {
-            const scoreText = await scoreElements[0].textContent().catch(() => '');
-            const scoreMatch = scoreText.match(/(\d+)点/);
-            if (scoreMatch) {
-              score = parseInt(scoreMatch[1], 10);
+            const scores = [];
+
+            for (const scoreElement of scoreElements) {
+              const scoreText = await scoreElement.textContent().catch(() => '');
+
+              // 「前回」を含むテキストは除外（前回の点数ではなく現在の点数を取得）
+              if (scoreText.includes('前回')) {
+                continue;
+              }
+
+              // 数値を抽出
+              const scoreMatch = scoreText.match(/(\d+)点/);
+              if (scoreMatch) {
+                scores.push(parseInt(scoreMatch[1], 10));
+              }
+            }
+
+            // 点数が見つかった場合、最大値を使用（現在の点数）
+            if (scores.length > 0) {
+              score = Math.max(...scores);
+              break; // 点数が見つかったので検索終了
             }
           }
         }

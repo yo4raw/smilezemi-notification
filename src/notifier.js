@@ -355,7 +355,7 @@ function formatUserListMessage(users) {
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} [previousData] - 前回のユーザーデータ配列（v2.0形式、オプション）
  * @returns {string} - フォーマットされたメッセージ
  */
-function formatDetailedMessage(userData, previousData = []) {
+function formatDetailedMessage(userData, missionChanges = null) {
   // ヘッダー
   let message = '📊 スマイルゼミ 学習状況\n\n';
 
@@ -363,6 +363,18 @@ function formatDetailedMessage(userData, previousData = []) {
   if (!userData || userData.length === 0) {
     message += '本日のデータはありません。';
     return message.trim();
+  }
+
+  // ミッション変化情報をユーザー名でマッピング
+  const changesMap = new Map();
+  if (missionChanges && missionChanges.userChanges) {
+    missionChanges.userChanges.forEach(userChange => {
+      const missionMap = new Map();
+      userChange.missionChanges.forEach(change => {
+        missionMap.set(change.missionName, change);
+      });
+      changesMap.set(userChange.userName, missionMap);
+    });
   }
 
   // 各ユーザーのデータを追加
@@ -379,36 +391,44 @@ function formatDetailedMessage(userData, previousData = []) {
     const missionCount = user.missionCount ?? 0;
     message += `✅ 完了ミッション: ${missionCount}件\n`;
 
-    // 前回データを検索
-    const previousUser = previousData.find(prev => prev.userName === user.userName);
-
     // ミッション詳細
     const missions = user.missions ?? [];
     if (missions.length > 0) {
       message += '\n📋 ミッション詳細:\n';
-      missions.forEach(mission => {
-        // 前回の同名ミッションを検索（完了状態が同じものを優先）
-        let previousMission = null;
-        if (previousUser && previousUser.missions) {
-          // まず完了状態が同じものを探す
-          previousMission = previousUser.missions.find(
-            prev => prev.name === mission.name && prev.completed === mission.completed
-          );
-          // 見つからなければ名前だけで探す
-          if (!previousMission) {
-            previousMission = previousUser.missions.find(prev => prev.name === mission.name);
-          }
-        }
 
-        // 点数表示（前回データがあり、点数が変化している場合は矢印表示）
+      // ユーザーの変化情報を取得
+      const userChangesMap = changesMap.get(user.userName);
+
+      missions.forEach(mission => {
         let scoreDisplay;
-        if (previousMission && previousMission.score !== mission.score) {
-          scoreDisplay = `${previousMission.score}→${mission.score}点`;
+        let changeIcon = '';
+
+        if (userChangesMap) {
+          const change = userChangesMap.get(mission.name);
+
+          if (change) {
+            if (change.type === 'score_change') {
+              // 点数変化: 95→100点 📈 または 100→95点 📉
+              scoreDisplay = `${change.previousScore}→${change.currentScore}点`;
+              changeIcon = change.scoreChange > 0 ? ' 📈' : ' 📉';
+            } else if (change.type === 'new_mission') {
+              // 新規ミッション: 100点（NEW）✨
+              scoreDisplay = `${change.currentScore}点（NEW）`;
+              changeIcon = '✨';
+            } else {
+              // 変化なし: 100点
+              scoreDisplay = `${change.currentScore}点`;
+            }
+          } else {
+            // 変化情報がない場合
+            scoreDisplay = `${mission.score}点`;
+          }
         } else {
+          // missionChanges が提供されていない場合（後方互換性）
           scoreDisplay = `${mission.score}点`;
         }
 
-        message += `  ・${mission.name}: ${scoreDisplay}\n`;
+        message += `  ・${mission.name}: ${scoreDisplay}${changeIcon}\n`;
       });
     } else {
       message += '\n📋 ミッション詳細なし\n';

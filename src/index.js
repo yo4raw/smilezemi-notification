@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList } = require('./crawler');
-const { loadPreviousData, compareData, saveData } = require('./data');
+const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
 const { sendNotification, sendUserListNotification, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const fs = require('fs').promises;
 const path = require('path');
@@ -217,7 +217,12 @@ async function main() {
 
     // 7. データ比較（変更検出）
     console.log('🔄 データを比較しています...');
+
+    // ミッション数の変化（既存機能）
     const compareResult = compareData(previousData, currentData);
+
+    // ミッション詳細の変化（新機能）
+    const missionChangesResult = compareMissionDetails(previousData, currentData);
 
     if (compareResult.success) {
       console.log(`✅ データ比較が完了しました（${compareResult.changes.length}件の変更）`);
@@ -230,8 +235,8 @@ async function main() {
     // Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     console.log('📤 LINE通知を送信しています...');
 
-    // 詳細メッセージをフォーマット（前回データと比較）
-    let message = formatDetailedMessage(currentData, previousData);
+    // 詳細メッセージをフォーマット（ミッション変化情報を含む）
+    let message = formatDetailedMessage(currentData, missionChangesResult);
 
     // 文字数制限を適用
     message = truncateToLimit(message);
