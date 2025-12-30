@@ -231,7 +231,7 @@ Error: browserType.launch: Executable doesn't exist
   "timestamp": "2025-12-25T08:35:01.283Z",
   "users": [
     {
-      "userName": "吉岡光志郎さん",
+      "userName": "山田太郎さん",
       "missionCount": 5,
       "date": "2025-12-25"
     }

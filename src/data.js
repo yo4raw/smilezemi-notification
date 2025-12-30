@@ -1,6 +1,24 @@
 /**
  * データ管理モジュール - ミッションデータの保存・取得・比較
- * Requirements: 3.6, 3.9, 4.6, 4.7
+ * Requirements: 3.6, 3.9, 4.6, 4.7, 1.4, 2.2, 3.2, 5.1, 5.2
+ *
+ * データ構造v2.0:
+ * {
+ *   version: "2.0",
+ *   timestamp: "ISO 8601",
+ *   users: [
+ *     {
+ *       userName: "string",
+ *       missionCount: number,
+ *       date: "YYYY-MM-DD",
+ *       studyTime: { hours: number, minutes: number },
+ *       totalScore: number,
+ *       missions: [
+ *         { name: "string", score: number, completed: boolean }
+ *       ]
+ *     }
+ *   ]
+ * }
  */
 
 const fs = require('fs').promises;
@@ -9,6 +27,22 @@ const path = require('path');
 // データファイルのパス
 const DATA_DIR = path.join(__dirname, '../data');
 const DATA_FILE = path.join(DATA_DIR, 'mission_data.json');
+
+/**
+ * v1.0データをv2.0形式に移行
+ * Requirements: 3.6
+ *
+ * @param {Array} v1Data - v1.0形式のユーザーデータ
+ * @returns {Array} v2.0形式のユーザーデータ
+ */
+function migrateDataV1toV2(v1Data) {
+  return v1Data.map(user => ({
+    ...user,  // userName, missionCount, date を保持
+    studyTime: { hours: 0, minutes: 0 },
+    totalScore: 0,
+    missions: []
+  }));
+}
 
 /**
  * 前回実行時のデータを読み込む
@@ -34,8 +68,19 @@ async function loadPreviousData() {
     // JSONをパース
     const jsonData = JSON.parse(fileContent);
 
-    // users配列を取得（存在しない場合は空配列）
-    const users = jsonData.users || [];
+    // バージョン判定と移行
+    const version = jsonData.version || '1.0';
+    let users = jsonData.users || [];
+
+    if (version === '1.0') {
+      // v1.0 → v2.0 自動マイグレーション
+      users = migrateDataV1toV2(users);
+    } else if (version !== '2.0') {
+      return {
+        success: false,
+        error: `未知のデータバージョン: ${version}`
+      };
+    }
 
     return {
       success: true,
@@ -138,7 +183,7 @@ async function saveData(data) {
 
     // 保存用のJSONオブジェクトを構築
     const saveObject = {
-      version: '1.0',
+      version: '2.0',
       timestamp: new Date().toISOString(),
       users: data
     };

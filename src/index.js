@@ -6,9 +6,9 @@
 const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
-const { getAllUsersMissionCounts, getUserList } = require('./crawler');
+const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList } = require('./crawler');
 const { loadPreviousData, compareData, saveData } = require('./data');
-const { sendNotification, sendUserListNotification } = require('./notifier');
+const { sendNotification, sendUserListNotification, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -46,7 +46,12 @@ async function main() {
     try {
       browser = await chromium.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu'
+        ]
       });
       console.log('✅ ブラウザの起動が完了しました');
     } catch (error) {
@@ -126,41 +131,88 @@ async function main() {
       console.log('ℹ️ 初回実行として続行します');
     }
 
-    // 6. クローリング（ユーザーリストとミッション数の取得）
-    console.log('🔍 ミッション数を取得しています...');
-    const crawlResult = await getAllUsersMissionCounts(page);
+    // 6. クローリング（詳細データ取得 - v2.0）
+    // Requirements: 1.1, 2.1, 3.1, 4.1, 5.1
+    console.log('🔍 詳細データを取得しています...');
+    const crawlResult = await getAllUsersDetailedData(page);
 
     if (!crawlResult.success) {
       console.error('❌ クローリングに失敗しました:', crawlResult.error);
       errors.push(crawlResult.error);
 
-      // エラー通知を送信
-      try {
-        await sendNotification(
-          [],
-          config.LINE_CHANNEL_ACCESS_TOKEN,
-          config.LINE_USER_ID
-        );
-      } catch (notifyError) {
-        console.error('❌ エラー通知の送信にも失敗しました:', notifyError.message);
-      }
-
       // スクリーンショットを保存
       await saveErrorScreenshot(page, 'crawling-failed');
 
+      // グレースフルデグラデーション: 基本機能にフォールバック
+      // Requirements: 6.1, 6.2, 6.3, 6.4
+      console.log('⚠️ 基本機能（ミッション数のみ）にフォールバックします...');
+      const basicCrawlResult = await getAllUsersMissionCounts(page);
+
+      if (!basicCrawlResult.success) {
+        console.error('❌ 基本機能でもクローリングに失敗しました:', basicCrawlResult.error);
+        errors.push(basicCrawlResult.error);
+
+        // エラー通知を送信
+        try {
+          await sendNotification(
+            [],
+            config.LINE_CHANNEL_ACCESS_TOKEN,
+            config.LINE_USER_ID
+          );
+        } catch (notifyError) {
+          console.error('❌ エラー通知の送信にも失敗しました:', notifyError.message);
+        }
+
+        return {
+          success: false,
+          exitCode: 1,
+          error: crawlResult.error,
+          errors
+        };
+      }
+
+      // 基本データで続行（v1.0形式なので自動でv2.0に変換される）
+      const currentData = basicCrawlResult.data;
+      console.log(`✅ 基本データの取得が完了しました（${currentData.length}件）`);
+
+      // データ比較と通知（基本モード）
+      const compareResult = compareData(previousData, currentData);
+      const notifyResult = await sendNotification(
+        compareResult.changes,
+        config.LINE_CHANNEL_ACCESS_TOKEN,
+        config.LINE_USER_ID
+      );
+
+      if (notifyResult.success) {
+        console.log('✅ 基本モードでのLINE通知が完了しました');
+      } else {
+        console.error('❌ 基本モードでのLINE通知に失敗しました:', notifyResult.error);
+        errors.push(notifyResult.error);
+      }
+
+      // データ保存（v2.0形式、デフォルト値付き）
+      const saveResult = await saveData(currentData);
+      if (!saveResult.success) {
+        console.error('❌ データの保存に失敗しました:', saveResult.error);
+        errors.push(saveResult.error);
+      }
+
       return {
-        success: false,
-        exitCode: 1,
-        error: crawlResult.error,
-        errors
+        success: errors.length === 0,
+        exitCode: errors.length === 0 ? 0 : 1,
+        errors: errors.length > 0 ? errors : undefined
       };
     }
 
     const currentData = crawlResult.data;
-    console.log(`✅ ミッション数の取得が完了しました（${currentData.length}件）`);
+    console.log(`✅ 詳細データの取得が完了しました（${currentData.length}件）`);
 
     if (crawlResult.partialFailure) {
-      console.warn('⚠️ 一部のユーザーのデータ取得に失敗しました');
+      console.warn('⚠️ 一部のデータ取得に失敗しました');
+    }
+
+    if (!crawlResult.detailsAvailable) {
+      console.warn('⚠️ 詳細情報の一部が取得できませんでした');
     }
 
     // 7. データ比較（変更検出）
@@ -174,20 +226,48 @@ async function main() {
       errors.push(compareResult.error);
     }
 
-    // 8. LINE通知送信（ミッション数の変更）
+    // 8. LINE通知送信（詳細データモード）
+    // Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     console.log('📤 LINE通知を送信しています...');
-    const notifyResult = await sendNotification(
-      compareResult.changes,
-      config.LINE_CHANNEL_ACCESS_TOKEN,
-      config.LINE_USER_ID
-    );
 
-    if (notifyResult.success) {
-      console.log('✅ LINE通知の送信が完了しました');
-    } else {
-      console.error('❌ LINE通知の送信に失敗しました:', notifyResult.error);
-      errors.push(notifyResult.error);
-      // 通知失敗してもデータ保存は続行
+    // 詳細メッセージをフォーマット（前回データと比較）
+    let message = formatDetailedMessage(currentData, previousData);
+
+    // 文字数制限を適用
+    message = truncateToLimit(message);
+
+    // LINE API リクエストボディを構築
+    const requestBody = {
+      to: config.LINE_USER_ID,
+      messages: [
+        {
+          type: 'text',
+          text: message
+        }
+      ]
+    };
+
+    // 通知送信（fetch APIを直接使用）
+    try {
+      const response = await fetch('https://api.line.me/v2/bot/message/push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.LINE_CHANNEL_ACCESS_TOKEN}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ LINE通知の送信に失敗しました:', response.status, errorText);
+        errors.push(`LINE API エラー: ${response.status}`);
+      } else {
+        console.log('✅ 詳細モードでのLINE通知が完了しました');
+      }
+    } catch (notifyError) {
+      console.error('❌ LINE通知の送信に失敗しました:', notifyError.message);
+      errors.push(notifyError.message);
     }
 
     // 9. 新しいデータの保存

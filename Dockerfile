@@ -1,5 +1,5 @@
 # Playwright公式イメージを使用（Node.js + ブラウザ環境）
-FROM mcr.microsoft.com/playwright:v1.40.0-jammy
+FROM mcr.microsoft.com/playwright:v1.57.0-jammy
 
 # 作業ディレクトリ設定
 WORKDIR /app

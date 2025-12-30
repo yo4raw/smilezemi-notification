@@ -1,0 +1,42 @@
+{
+  "feature_name": "line-notify-study-details",
+  "created_at": "2025-12-30T07:30:00Z",
+  "updated_at": "2025-12-30T06:30:00Z",
+  "language": "ja",
+  "phase": "implementation-complete",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true,
+  "implementation": {
+    "started_at": "2025-12-30T03:30:00Z",
+    "completed_at": "2025-12-30T04:02:00Z",
+    "testing_completed_at": "2025-12-30T05:05:00Z",
+    "improvements_completed_at": "2025-12-30T06:30:00Z",
+    "phases_completed": 6,
+    "total_phases": 6,
+    "automated_tests_passed": 5,
+    "automated_tests_total": 5,
+    "manual_tests_pending": 1,
+    "performance_targets_met": true,
+    "data_quality": "100%",
+    "improvements": [
+      "DOM traversal修正（grandparent検索）",
+      "柔軟な時間パース（分のみ表示対応）",
+      "時間表示形式変更（H:MM形式）",
+      "点数比較機能追加",
+      "合計点数の通知削除"
+    ]
+  }
+}
