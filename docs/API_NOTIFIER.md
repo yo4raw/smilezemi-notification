@@ -20,7 +20,7 @@ LINE Messaging APIを使用した通知機能を提供するモジュールのAP
 ### 主な機能
 
 - ミッション数の変更通知
-- ユーザー一覧の通知
+- 詳細データ通知
 - 自動リトライ機能
 - センシティブデータのマスキング
 - メッセージ長制限の自動処理
@@ -28,7 +28,7 @@ LINE Messaging APIを使用した通知機能を提供するモジュールのAP
 ### インポート
 
 ```javascript
-const { sendNotification, sendUserListNotification, formatMessage } = require('./notifier');
+const { sendNotification, formatMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
 ```
 
 ## 公開API
@@ -116,78 +116,6 @@ if (result.success) {
 - リトライ間隔は指数バックオフで増加します（1秒 → 2秒 → 4秒）
 - 認証エラーはリトライされません
 - エラーメッセージ内のトークンは自動的にマスキングされます
-
----
-
-### sendUserListNotification
-
-登録ユーザーの一覧情報をLINEに通知します。
-
-#### シグネチャ
-
-```javascript
-async function sendUserListNotification(users, accessToken, userId, options = {})
-```
-
-#### パラメータ
-
-| パラメータ | 型 | 必須 | 説明 |
-|-----------|-----|------|------|
-| `users` | `Array<User>` | ✓ | ユーザー情報の配列 |
-| `accessToken` | `string` | ✓ | LINE Channel Access Token |
-| `userId` | `string` | ✓ | 通知送信先のLINE User ID |
-| `options` | `object` | - | オプション設定（sendNotificationと同じ） |
-
-#### User オブジェクト
-
-```javascript
-{
-  name: string,   // ユーザー名
-  index: number   // ユーザーインデックス
-}
-```
-
-#### 戻り値
-
-```javascript
-Promise<{
-  success: boolean,  // 通知送信の成功/失敗
-  error?: string    // エラーメッセージ（失敗時）
-}>
-```
-
-#### 使用例
-
-```javascript
-const users = [
-  { name: '太郎', index: 0 },
-  { name: '花子', index: 1 }
-];
-
-const result = await sendUserListNotification(
-  users,
-  process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  process.env.LINE_USER_ID
-);
-
-if (result.success) {
-  console.log('ユーザー一覧通知送信成功');
-}
-```
-
-#### 通知内容
-
-通知メッセージには以下の情報が含まれます：
-
-```
-👥 スマイルゼミ ユーザー一覧
-
-登録ユーザー数: 2名
-```
-
-**注意**: プライバシー保護のため、個別のユーザー名は含まれません（ユーザー数のみ表示）。
-
----
 
 ### formatMessage
 
@@ -406,6 +334,13 @@ const result = await sendNotification(
 ---
 
 ## 変更履歴
+
+### v1.2.0 (2026-01-05)
+
+- **削除**: ユーザー一覧通知機能の完全削除
+  - `sendUserListNotification`関数を削除
+  - `formatUserListMessage`関数を削除
+  - 通知の重複を解消し、詳細データ通知のみを送信
 
 ### v1.1.0 (2025-12-25)
 

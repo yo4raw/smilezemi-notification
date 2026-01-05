@@ -240,114 +240,6 @@ function formatMessage(changes) {
 }
 
 /**
- * ユーザー一覧をLINEに通知する
- *
- * @param {Array<{name: string, index: number}>} users - ユーザー一覧
- * @param {string} accessToken - LINE Channel Access Token
- * @param {string} userId - LINE User ID
- * @param {object} [options] - オプション設定
- * @param {number} [options.maxRetries=3] - 最大リトライ回数
- * @param {number} [options.retryDelay=1000] - リトライ間隔（ms、指数バックオフ）
- * @returns {Promise<{success: boolean, error?: string}>}
- */
-async function sendUserListNotification(users, accessToken, userId, options = {}) {
-  const { maxRetries = 3, retryDelay = 1000 } = options;
-
-  // パラメータ検証
-  if (!accessToken || !userId) {
-    return {
-      success: false,
-      error: '必須パラメータが欠けています: accessToken と userId が必要です'
-    };
-  }
-
-  if (!users || users.length === 0) {
-    return {
-      success: false,
-      error: 'ユーザー一覧が空です'
-    };
-  }
-
-  // メッセージを構築
-  const message = formatUserListMessage(users);
-
-  // リクエストボディを構築
-  const requestBody = {
-    to: userId,
-    messages: [
-      {
-        type: 'text',
-        text: message
-      }
-    ]
-  };
-
-  // リトライロジック
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const result = await attemptSendNotification(requestBody, accessToken);
-
-      if (result.success) {
-        return result;
-      }
-
-      // 認証エラー（401）の場合はリトライしない
-      if (result.error && result.error.includes('401')) {
-        return result;
-      }
-
-      // 最後の試行でなければリトライ
-      if (attempt < maxRetries) {
-        const delay = retryDelay * Math.pow(2, attempt - 1); // 指数バックオフ
-        await new Promise(resolve => setTimeout(resolve, delay));
-        continue;
-      }
-
-      // 最後の試行でも失敗
-      return result;
-
-    } catch (error) {
-      const maskedError = maskTokenInError(error.message, accessToken);
-
-      // 最後の試行でなければリトライ
-      if (attempt < maxRetries) {
-        const delay = retryDelay * Math.pow(2, attempt - 1);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        continue;
-      }
-
-      // 最後の試行でも失敗
-      return {
-        success: false,
-        error: `ユーザー一覧通知送信失敗（${attempt}回試行）: ${maskedError}`
-      };
-    }
-  }
-
-  // ここには到達しないはずだが、念のため
-  return {
-    success: false,
-    error: `ユーザー一覧通知送信失敗: 最大リトライ回数（${maxRetries}回）に達しました`
-  };
-}
-
-/**
- * ユーザー一覧をLINE通知用のメッセージにフォーマット
- *
- * @param {Array<{name: string, index: number}>} users - ユーザー一覧
- * @returns {string} - フォーマットされたメッセージ
- */
-function formatUserListMessage(users) {
-  // ヘッダー
-  let message = '👥 スマイルゼミ ユーザー一覧\n\n';
-
-  // ユーザー数のみ表示
-  message += `登録ユーザー数: ${users.length}名`;
-
-  return message.trim();
-}
-
-/**
  * 詳細データをLINE通知用のメッセージにフォーマット
  * Requirements: 4.1, 4.2, 4.3, 4.4
  *
@@ -505,7 +397,6 @@ function truncateToLimit(message) {
 module.exports = {
   sendNotification,
   formatMessage,
-  sendUserListNotification,
   formatDetailedMessage,
   truncateToLimit
 };

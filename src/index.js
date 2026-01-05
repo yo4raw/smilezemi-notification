@@ -8,7 +8,7 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
-const { sendNotification, sendUserListNotification, formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { sendNotification, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -96,22 +96,6 @@ async function main() {
     if (userListResult.success) {
       const users = userListResult.users;
       console.log(`✅ ユーザー一覧の取得が完了しました（${users.length}名）`);
-
-      // ユーザー一覧をLINEに通知
-      console.log('📤 ユーザー一覧をLINEに通知しています...');
-      const userListNotifyResult = await sendUserListNotification(
-        users,
-        config.LINE_CHANNEL_ACCESS_TOKEN,
-        config.LINE_USER_ID
-      );
-
-      if (userListNotifyResult.success) {
-        console.log('✅ ユーザー一覧のLINE通知が完了しました');
-      } else {
-        console.error('❌ ユーザー一覧のLINE通知に失敗しました:', userListNotifyResult.error);
-        errors.push(userListNotifyResult.error);
-        // 通知失敗してもクローリングは続行
-      }
     } else {
       console.warn('⚠️ ユーザー一覧の取得に失敗しました:', userListResult.error);
       errors.push(userListResult.error);
