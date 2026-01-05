@@ -288,4 +288,36 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.match(result.error, /\*\*\*/, 'トークンがマスキングされること');
     });
   });
+
+  describe('ユーザー一覧通知関数の削除確認 (Requirement 3.2, 3.3)', () => {
+    it('sendUserListNotification関数が存在しないこと', () => {
+      assert.strictEqual(
+        typeof notifier.sendUserListNotification,
+        'undefined',
+        'sendUserListNotification関数はエクスポートされていないこと'
+      );
+    });
+
+    it('formatUserListMessage関数が存在しないこと', () => {
+      assert.strictEqual(
+        typeof notifier.formatUserListMessage,
+        'undefined',
+        'formatUserListMessage関数はエクスポートされていないこと'
+      );
+    });
+
+    it('module.exportsに詳細データ通知関連の関数のみが含まれること', () => {
+      const exports = Object.keys(notifier);
+
+      // 存在すべき関数
+      assert.strictEqual(exports.includes('sendNotification'), true, 'sendNotificationが含まれること');
+      assert.strictEqual(exports.includes('formatMessage'), true, 'formatMessageが含まれること');
+      assert.strictEqual(exports.includes('formatDetailedMessage'), true, 'formatDetailedMessageが含まれること');
+      assert.strictEqual(exports.includes('truncateToLimit'), true, 'truncateToLimitが含まれること');
+
+      // 削除されるべき関数
+      assert.strictEqual(exports.includes('sendUserListNotification'), false, 'sendUserListNotificationが含まれないこと');
+      assert.strictEqual(exports.includes('formatUserListMessage'), false, 'formatUserListMessageが含まれないこと');
+    });
+  });
 });
