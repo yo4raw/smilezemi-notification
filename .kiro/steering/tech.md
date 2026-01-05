@@ -37,6 +37,48 @@ GitHub Actions ワークフローベースの自動化システム。ブラウ�
 - ワークフロー実行時間制限（30分以内）
 - データ検証とセレクタエラーハンドリング
 
+### DOM Manipulation Patterns
+
+- **日付フォーマット**: MM/DD形式、ゼロパディング必須（例: "01/05"）
+- **座標ベースフィルタリング**: X座標 < 250 で左側UI要素（日付ラベル）を識別
+- **位置ベース範囲計算**: boundingBox() で Y座標範囲を計算してセクション分離
+- **進捗表示の除外**: 日付形式の進捗表示（例: "2/5"）を X座標で区別
+
+### Debugging Techniques
+
+- **スクリーンショット検証**: fullPage: true で画面全体を撮影して DOM構造を視覚的に確認
+- **DOM階層トラバース**: 親要素を順次遡って構造を調査
+- **座標デバッグ**: boundingBox() で要素の位置情報を可視化
+- **デバッグスクリプト**: scripts/investigate-*.js パターンで段階的に問題を分析
+
+### Implementation Examples
+
+```javascript
+// 日付フォーマット（ゼロパディング）
+function getTodayDate() {
+  const today = new Date();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${month}/${day}`;
+}
+
+// X座標フィルタリング（左側の日付ラベルのみ抽出）
+const allDateElements = await page.locator('text=/\\d+\\/\\d+/').all();
+for (const el of allDateElements) {
+  const box = await el.boundingBox();
+  if (box && box.x < 250) {
+    allDates.push({ element: el, text: await el.textContent(), box });
+  }
+}
+
+// Y座標範囲計算（今日のセクション判定）
+const todayBox = await todayHeader.boundingBox();
+const nextDateY = nextDateIndex < allDates.length
+  ? allDates[nextDateIndex].box.y
+  : Infinity;
+// フィルタリング: todayBox.y < missionBox.y < nextDateY
+```
+
 ## Development Environment
 
 ### Required Secrets (GitHub Secrets)

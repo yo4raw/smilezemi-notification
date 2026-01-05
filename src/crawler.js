@@ -299,12 +299,14 @@ async function switchToUser(page, userName) {
 }
 
 /**
- * 今日の日付を取得（M/D形式）
+ * 今日の日付を取得（MM/DD形式、ゼロパディング）
  * @private
  */
 function getTodayDate() {
   const today = new Date();
-  return `${today.getMonth() + 1}/${today.getDate()}`;
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${month}/${day}`;
 }
 
 /**
@@ -538,14 +540,23 @@ async function getMissionDetails(page) {
       };
     }
 
-    // 全ての日付要素を取得
-    const allDates = await page.locator('text=/\\d+\\/\\d+/').all();
+    // 全ての日付要素を取得（左側のラベルのみ、X座標 < 250）
+    const allDateElements = await page.locator('text=/\\d+\\/\\d+/').all();
+    const allDates = [];
+
+    // 日付ラベル（左側）のみをフィルタリング
+    for (const el of allDateElements) {
+      const box = await el.boundingBox();
+      if (box && box.x < 250) {
+        const text = await el.textContent();
+        allDates.push({ element: el, text, box });
+      }
+    }
 
     // 今日の日付のインデックスを見つける
     let todayIndex = -1;
     for (let i = 0; i < allDates.length; i++) {
-      const dateText = await allDates[i].textContent();
-      if (dateText.includes(today)) {
+      if (allDates[i].text.includes(today)) {
         todayIndex = i;
         break;
       }
@@ -569,14 +580,11 @@ async function getMissionDetails(page) {
       };
     }
 
-    // 次の日付の位置を取得
+    // 次の日付の位置を取得（左側の日付ラベルのみ）
     let nextDateY = Infinity;
     const nextDateIndex = todayIndex + 1;
     if (nextDateIndex < allDates.length) {
-      const nextDateBox = await allDates[nextDateIndex].boundingBox();
-      if (nextDateBox) {
-        nextDateY = nextDateBox.y;
-      }
+      nextDateY = allDates[nextDateIndex].box.y;
     }
 
     // 今日のセクション内のミッションアイコンを取得
@@ -928,5 +936,6 @@ module.exports = {
   getAllUsersDetailedData,
   getStudyTime,
   getMissionDetails,
-  getTotalScore
+  getTotalScore,
+  switchToUser
 };

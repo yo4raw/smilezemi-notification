@@ -75,5 +75,50 @@ GitHub Secrets → Auth → Crawler → Data Comparison → LINE Notification
               Error Handler → LINE Error Notification
 ```
 
+### Data Aggregation Patterns
+
+- **Map-based Grouping**: 同名ミッションを Map でグループ化して重複排除
+- **State Detection**: `completed: false` プロパティで NEW ミッション判定
+- **Display Optimization**: 複数回実施ミッションを「最初→最後」形式で1行集約表示
+- **Change Icons**: 点数変化に応じた絵文字（📈 上昇、📉 下降、✨ NEW）
+
+### Example Implementation
+
+```javascript
+// ミッション集約パターン
+const missionGroups = new Map();
+missions.forEach(mission => {
+  if (!missionGroups.has(mission.name)) {
+    missionGroups.set(mission.name, []);
+  }
+  missionGroups.get(mission.name).push(mission);
+});
+
+// 集約表示ロジック
+missionGroups.forEach((group, missionName) => {
+  if (group.length === 1) {
+    // 1回のみ実施
+    const mission = group[0];
+    scoreDisplay = `${mission.score}点`;
+    if (!mission.completed) {
+      changeIcon = ' ✨'; // NEW判定
+    }
+  } else {
+    // 複数回実施（最初→最後の点数）
+    const firstMission = group[0];
+    const lastMission = group[group.length - 1];
+    if (firstMission.score !== lastMission.score) {
+      scoreDisplay = `${firstMission.score}→${lastMission.score}点`;
+      changeIcon = lastMission.score > firstMission.score ? ' 📈' : ' 📉';
+    } else {
+      scoreDisplay = `${lastMission.score}点`;
+    }
+    if (!lastMission.completed) {
+      changeIcon += ' ✨';
+    }
+  }
+});
+```
+
 ---
 _created: 2025-12-25_
