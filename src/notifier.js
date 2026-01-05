@@ -399,36 +399,77 @@ function formatDetailedMessage(userData, missionChanges = null) {
       // ユーザーの変化情報を取得
       const userChangesMap = changesMap.get(user.userName);
 
+      // 同名ミッションを集約（最初の点数→最後の点数）
+      const missionGroups = new Map();
       missions.forEach(mission => {
+        if (!missionGroups.has(mission.name)) {
+          missionGroups.set(mission.name, []);
+        }
+        missionGroups.get(mission.name).push(mission);
+      });
+
+      // 集約したミッションを表示
+      missionGroups.forEach((group, missionName) => {
         let scoreDisplay;
         let changeIcon = '';
 
-        if (userChangesMap) {
-          const change = userChangesMap.get(mission.name);
+        if (group.length === 1) {
+          // 1回のみ実施
+          const mission = group[0];
 
-          if (change) {
-            if (change.type === 'score_change') {
-              // 点数変化: 95→100点 📈 または 100→95点 📉
-              scoreDisplay = `${change.previousScore}→${change.currentScore}点`;
-              changeIcon = change.scoreChange > 0 ? ' 📈' : ' 📉';
-            } else if (change.type === 'new_mission') {
-              // 新規ミッション: 100点（NEW）✨
-              scoreDisplay = `${change.currentScore}点（NEW）`;
-              changeIcon = '✨';
+          if (userChangesMap) {
+            const change = userChangesMap.get(mission.name);
+
+            if (change) {
+              if (change.type === 'score_change') {
+                // 点数変化: 95→100点 📈 または 100→95点 📉
+                scoreDisplay = `${change.previousScore}→${change.currentScore}点`;
+                changeIcon = change.scoreChange > 0 ? ' 📈' : ' 📉';
+              } else if (change.type === 'new_mission') {
+                // 新規ミッション: 100点（NEW）✨
+                scoreDisplay = `${change.currentScore}点（NEW）`;
+                changeIcon = ' ✨';
+              } else {
+                // 変化なし: 100点
+                scoreDisplay = `${change.currentScore}点`;
+              }
             } else {
-              // 変化なし: 100点
-              scoreDisplay = `${change.currentScore}点`;
+              // 変化情報がない場合
+              scoreDisplay = `${mission.score}点`;
+              // NEWマーク判定（completed: false）
+              if (!mission.completed) {
+                changeIcon = ' ✨';
+              }
             }
           } else {
-            // 変化情報がない場合
+            // missionChanges が提供されていない場合（後方互換性）
             scoreDisplay = `${mission.score}点`;
+            // NEWマーク判定（completed: false）
+            if (!mission.completed) {
+              changeIcon = ' ✨';
+            }
           }
         } else {
-          // missionChanges が提供されていない場合（後方互換性）
-          scoreDisplay = `${mission.score}点`;
+          // 複数回実施（最初→最後の点数で表示）
+          const firstMission = group[0];
+          const lastMission = group[group.length - 1];
+
+          if (firstMission.score !== lastMission.score) {
+            // 点数が変化した場合: 80→100点
+            scoreDisplay = `${firstMission.score}→${lastMission.score}点`;
+            changeIcon = lastMission.score > firstMission.score ? ' 📈' : ' 📉';
+          } else {
+            // 点数が同じ場合: 100点（複数回）
+            scoreDisplay = `${lastMission.score}点`;
+          }
+
+          // NEWマーク判定（最後の実施が未完了）
+          if (!lastMission.completed) {
+            changeIcon += ' ✨';
+          }
         }
 
-        message += `  ・${mission.name}: ${scoreDisplay}${changeIcon}\n`;
+        message += `  ・${missionName}: ${scoreDisplay}${changeIcon}\n`;
       });
     } else {
       message += '\n📋 ミッション詳細なし\n';
