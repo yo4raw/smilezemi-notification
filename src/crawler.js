@@ -36,11 +36,12 @@ async function getUserList(page) {
       const text = await element.textContent();
       const userName = text.trim();
 
-      // 「お子さま」や「おとうさん」などを除外し、子アカウント名のみを取得
+      // 「お子さま」や「おとうさん」、「コース」などを除外し、子アカウント名のみを取得
       if (userName.length < 20 &&
           userName !== 'お子さま' &&
           !userName.includes('おとう') &&
-          !userName.includes('おかあ')) {
+          !userName.includes('おかあ') &&
+          !userName.includes('コース')) {
         users.push({
           name: userName,
           index: users.length
