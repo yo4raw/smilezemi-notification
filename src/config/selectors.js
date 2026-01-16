@@ -64,6 +64,16 @@ module.exports = {
     sessionExpired: 'text=/セッション|タイムアウト/'
   },
 
+  // コース選択のセレクタ
+  // DOM調査日: 2026-01-16 (scripts/investigate-course-selection.js で確認)
+  courseSelection: {
+    // ユーザー選択後に表示されるコース選択画面
+    juniorHighSchool: 'text="中学生コース"',  // 中学生コース
+    elementarySchool: 'text="小学生コース"',  // 小学生コース
+    // コース選択確認用の待機時間
+    courseSelectionWaitTime: 2000  // 2秒
+  },
+
   // ミッション詳細のセレクタ（Requirements: 1.1, 2.2, 3.1）
   // DOM調査日: 2025-12-30 (scripts/investigate-study-details.js で確認)
   missionDetails: {

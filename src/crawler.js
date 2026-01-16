@@ -120,6 +120,89 @@ async function getCurrentUserName(page) {
 }
 
 /**
+ * コース選択画面が表示されているかチェック
+ * @private
+ */
+async function checkCourseSelection(page) {
+  try {
+    const { courseSelection } = selectors;
+
+    // 中学生コースまたは小学生コースの要素が表示されているか確認
+    const juniorHighSchoolVisible = await page.locator(courseSelection.juniorHighSchool)
+      .isVisible({ timeout: courseSelection.courseSelectionWaitTime })
+      .catch(() => false);
+
+    const elementarySchoolVisible = await page.locator(courseSelection.elementarySchool)
+      .isVisible({ timeout: courseSelection.courseSelectionWaitTime })
+      .catch(() => false);
+
+    return {
+      hasCourseSelection: juniorHighSchoolVisible || elementarySchoolVisible,
+      hasJuniorHighSchool: juniorHighSchoolVisible,
+      hasElementarySchool: elementarySchoolVisible
+    };
+  } catch (error) {
+    return {
+      hasCourseSelection: false,
+      hasJuniorHighSchool: false,
+      hasElementarySchool: false
+    };
+  }
+}
+
+/**
+ * コースを選択する
+ * @private
+ */
+async function selectCourse(page, courseName) {
+  try {
+    const { courseSelection } = selectors;
+
+    console.log(`  📚 コース選択: ${courseName}`);
+
+    let courseLocator;
+    if (courseName === '中学生コース') {
+      courseLocator = page.locator(courseSelection.juniorHighSchool).first();
+    } else if (courseName === '小学生コース') {
+      courseLocator = page.locator(courseSelection.elementarySchool).first();
+    } else {
+      return {
+        success: false,
+        error: `不明なコース名: ${courseName}`
+      };
+    }
+
+    // コース要素が表示されているか確認
+    const isVisible = await courseLocator.isVisible({ timeout: 5000 }).catch(() => false);
+
+    if (!isVisible) {
+      return {
+        success: false,
+        error: `コース "${courseName}" が見つかりません`
+      };
+    }
+
+    // コースをクリック
+    await courseLocator.click();
+    await page.waitForTimeout(3000);
+
+    // ページ遷移を待機
+    await page.waitForLoadState('networkidle').catch(() => {});
+
+    console.log(`  ✅ ${courseName}を選択しました`);
+
+    return {
+      success: true
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `コース選択エラー: ${error.message}`
+    };
+  }
+}
+
+/**
  * 指定ユーザーに切り替える
  * @private
  */
@@ -300,14 +383,19 @@ async function switchToUser(page, userName) {
 }
 
 /**
- * 今日の日付を取得（MM/DD形式、ゼロパディング）
+ * 今日の日付を取得（MM/DD形式）
  * @private
+ * @returns {Object} - { withPadding: "01/16", withoutPadding: "1/16" }
  */
 function getTodayDate() {
   const today = new Date();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  return `${month}/${day}`;
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+
+  return {
+    withPadding: `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`,
+    withoutPadding: `${month}/${day}`
+  };
 }
 
 /**
@@ -316,14 +404,26 @@ function getTodayDate() {
  */
 async function getTodayMissionCount(page) {
   try {
-    const today = getTodayDate();
+    const todayDates = getTodayDate();
 
-    // 今日の日付を含む要素を探す（例: "12/25(木)"）
-    const datePattern = new RegExp(`${today}.*?[月火水木金土日]`);
-    const todayHeader = page.locator(`text=${datePattern}`).first();
+    // 両方のパターンで検索（ゼロパディングあり・なし）
+    const patterns = [todayDates.withPadding, todayDates.withoutPadding];
+    let today = null;
+    let todayHeader = null;
 
-    if (!(await todayHeader.isVisible())) {
-      console.log(`  ℹ️ 今日(${today})のデータはまだありません（0件として扱います）`);
+    for (const pattern of patterns) {
+      const datePattern = new RegExp(`${pattern.replace('/', '\\/')}.*?[月火水木金土日]`);
+      const header = page.locator(`text=${datePattern}`).first();
+
+      if (await header.isVisible().catch(() => false)) {
+        today = pattern;
+        todayHeader = header;
+        break;
+      }
+    }
+
+    if (!todayHeader || !today) {
+      console.log(`  ℹ️ 今日(${todayDates.withPadding}または${todayDates.withoutPadding})のデータはまだありません（0件として扱います）`);
       return {
         success: true,
         count: 0
@@ -424,34 +524,40 @@ async function getStudyTime(page) {
 
     // パース用の柔軟な関数
     const parseStudyTime = (text) => {
+      let hours = 0;
+      let minutes = 0;
+
       // "X時間Y分" 形式
       const fullMatch = text.match(/(\d+)時間(\d+)分/);
       if (fullMatch) {
-        return {
-          hours: parseInt(fullMatch[1], 10),
-          minutes: parseInt(fullMatch[2], 10)
-        };
+        hours = parseInt(fullMatch[1], 10);
+        minutes = parseInt(fullMatch[2], 10);
+      } else {
+        // "Y分" のみの形式
+        const minutesMatch = text.match(/(\d+)分/);
+        if (minutesMatch) {
+          minutes = parseInt(minutesMatch[1], 10);
+        } else {
+          // "X時間" のみの形式
+          const hoursMatch = text.match(/(\d+)時間/);
+          if (hoursMatch) {
+            hours = parseInt(hoursMatch[1], 10);
+          } else {
+            return null;
+          }
+        }
       }
 
-      // "Y分" のみの形式
-      const minutesMatch = text.match(/(\d+)分/);
-      if (minutesMatch) {
-        return {
-          hours: 0,
-          minutes: parseInt(minutesMatch[1], 10)
-        };
+      // 分が60以上の場合は時間に変換
+      if (minutes >= 60) {
+        hours += Math.floor(minutes / 60);
+        minutes = minutes % 60;
       }
 
-      // "X時間" のみの形式
-      const hoursMatch = text.match(/(\d+)時間/);
-      if (hoursMatch) {
-        return {
-          hours: parseInt(hoursMatch[1], 10),
-          minutes: 0
-        };
-      }
-
-      return null;
+      return {
+        hours,
+        minutes
+      };
     };
 
     // 勉強時間要素を探す（タイムアウト5秒）
@@ -527,22 +633,76 @@ async function getStudyTime(page) {
  */
 async function getMissionDetails(page) {
   try {
-    const today = getTodayDate();
+    const todayDates = getTodayDate();
 
-    // 今日の日付要素を探す
-    const datePattern = new RegExp(`${today}.*?[月火水木金土日]`);
-    const todayHeader = page.locator(`text=${datePattern}`).first();
+    // ページを上部にスクロールして最新のデータを表示
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(1000); // スクロール後の安定を待つ
 
-    if (!(await todayHeader.isVisible({ timeout: 10000 }))) {
-      console.log(`  ℹ️ 今日(${today})のデータはまだありません（空配列として扱います）`);
-      return {
-        success: true,
-        missions: []
-      };
+    // デバッグ用スクリーンショット
+    await page.screenshot({ path: 'screenshots/mission-details-debug.png', fullPage: true });
+    console.log(`  📸 スクリーンショット保存: screenshots/mission-details-debug.png`);
+
+    // ページ内の全ての日付テキストを取得してログ出力
+    const allDateElements = await page.locator('text=/\\d+\\/\\d+/').all();
+    const allDatesText = [];
+    for (const el of allDateElements) {
+      const text = await el.textContent();
+      allDatesText.push(text);
+    }
+    console.log(`  📅 検出された日付: ${allDatesText.join(', ')}`);
+    console.log(`  🔍 検索中の日付: ${todayDates.withPadding} または ${todayDates.withoutPadding}`);
+
+    // 今日の日付要素を探す（両方のパターンで検索）
+    let targetDate = null;
+    let todayHeader = null;
+    let isTodayVisible = false;
+
+    for (const pattern of [todayDates.withPadding, todayDates.withoutPadding]) {
+      const datePattern = new RegExp(`${pattern.replace('/', '\\/')}.*?[月火水木金土日]`);
+      const header = page.locator(`text=${datePattern}`).first();
+
+      if (await header.isVisible({ timeout: 2000 }).catch(() => false)) {
+        targetDate = pattern;
+        todayHeader = header;
+        isTodayVisible = true;
+        console.log(`  ✅ 今日(${pattern})のデータが見つかりました`);
+        break;
+      }
+    }
+
+    // 今日の日付が見つからない場合、最新の日付を使用
+    if (!isTodayVisible) {
+      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません。最新の学習日のデータを取得します。`);
+
+      // 日付の正規表現パターン（例：01/12(月), 1/5(木)）
+      const latestDateElement = page.locator('text=/\\d+\\/\\d+\\s*\\([月火水木金土日]\\)/').first();
+
+      if (await latestDateElement.isVisible({ timeout: 5000 }).catch(() => false)) {
+        const latestDateText = await latestDateElement.textContent();
+        const dateMatch = latestDateText.match(/(\d+\/\d+)/);
+        if (dateMatch) {
+          targetDate = dateMatch[1];
+          const latestDatePattern = new RegExp(`${targetDate.replace('/', '\\/')}.*?[月火水木金土日]`);
+          todayHeader = page.locator(`text=${latestDatePattern}`).first();
+          console.log(`  📅 最新の学習日: ${targetDate}`);
+        } else {
+          console.log(`  ℹ️ 学習データが見つかりません（空配列として扱います）`);
+          return {
+            success: true,
+            missions: []
+          };
+        }
+      } else {
+        console.log(`  ℹ️ 学習データが見つかりません（空配列として扱います）`);
+        return {
+          success: true,
+          missions: []
+        };
+      }
     }
 
     // 全ての日付要素を取得（左側のラベルのみ、X座標 < 250）
-    const allDateElements = await page.locator('text=/\\d+\\/\\d+/').all();
     const allDates = [];
 
     // 日付ラベル（左側）のみをフィルタリング
@@ -554,27 +714,27 @@ async function getMissionDetails(page) {
       }
     }
 
-    // 今日の日付のインデックスを見つける
+    // 対象日付のインデックスを見つける
     let todayIndex = -1;
     for (let i = 0; i < allDates.length; i++) {
-      if (allDates[i].text.includes(today)) {
+      if (allDates[i].text.includes(targetDate)) {
         todayIndex = i;
         break;
       }
     }
 
     if (todayIndex === -1) {
-      console.log(`  ℹ️ 今日(${today})のデータインデックスが見つかりません（空配列として扱います）`);
+      console.log(`  ℹ️ 対象日付(${targetDate})のデータインデックスが見つかりません（空配列として扱います）`);
       return {
         success: true,
         missions: []
       };
     }
 
-    // 今日の日付要素の位置を取得
+    // 対象日付要素の位置を取得
     const todayBox = await todayHeader.boundingBox();
     if (!todayBox) {
-      console.log(`  ℹ️ 今日(${today})の日付要素の位置情報が取得できません（空配列として扱います）`);
+      console.log(`  ℹ️ 対象日付(${targetDate})の日付要素の位置情報が取得できません（空配列として扱います）`);
       return {
         success: true,
         missions: []
@@ -679,7 +839,7 @@ async function getMissionDetails(page) {
       }
     }
 
-    console.log(`📋 今日(${today})のミッション詳細: ${missions.length}件`);
+    console.log(`📋 今日(${targetDate})のミッション詳細: ${missions.length}件`);
 
     return {
       success: true,
@@ -748,6 +908,69 @@ async function getMissionCount(page, userName) {
 }
 
 /**
+ * コースのデータを取得（共通処理）
+ * @private
+ */
+async function getCourseData(page, userName, courseName, dateString) {
+  try {
+    let detailsAvailable = true;
+
+    // 勉強時間を取得
+    const studyTimeResult = await getStudyTime(page);
+    const studyTime = studyTimeResult.success
+      ? { hours: studyTimeResult.hours, minutes: studyTimeResult.minutes }
+      : { hours: 0, minutes: 0 };
+
+    if (!studyTimeResult.success) {
+      console.warn(`      ⚠️ 勉強時間取得失敗: ${studyTimeResult.error}`);
+    }
+
+    // ミッション数を取得
+    const missionCountResult = await getTodayMissionCount(page);
+    const missionCount = missionCountResult.success ? missionCountResult.count : 0;
+
+    if (!missionCountResult.success) {
+      console.warn(`      ⚠️ ミッション数取得失敗: ${missionCountResult.error}`);
+    }
+
+    // ミッション詳細を取得
+    const missionsResult = await getMissionDetails(page);
+    const missions = missionsResult.success ? missionsResult.missions : [];
+
+    if (!missionsResult.success) {
+      console.warn(`      ⚠️ ミッション詳細取得失敗: ${missionsResult.error}`);
+      detailsAvailable = false;
+    }
+
+    // 合計点数を計算
+    const totalScore = getTotalScore(missions);
+
+    // ユーザー名にコース名を追加（コース選択がある場合）
+    const displayName = courseName ? `${userName} (${courseName})` : userName;
+
+    // v2.0データ構造で返却
+    return {
+      success: true,
+      data: {
+        userName: displayName,
+        missionCount,
+        date: dateString,
+        studyTime,
+        totalScore,
+        missions
+      },
+      detailsAvailable
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `コースデータ取得エラー: ${error.message}`,
+      detailsAvailable: false
+    };
+  }
+}
+
+/**
  * 全ユーザーの詳細データを取得（v2.0形式）
  * Requirements: 1.1, 2.1, 3.1, 4.1, 5.1, 6.1, 6.2, 6.3, 6.4
  *
@@ -791,50 +1014,72 @@ async function getAllUsersDetailedData(page) {
         continue;
       }
 
-      // 勉強時間を取得
-      const studyTimeResult = await getStudyTime(page);
-      const studyTime = studyTimeResult.success
-        ? { hours: studyTimeResult.hours, minutes: studyTimeResult.minutes }
-        : { hours: 0, minutes: 0 };
+      // コース選択画面が表示されているかチェック
+      const courseSelectionResult = await checkCourseSelection(page);
 
-      if (!studyTimeResult.success) {
-        console.warn(`  ⚠️ 勉強時間取得失敗: ${studyTimeResult.error}`);
-        hasPartialFailure = true;
+      if (courseSelectionResult.hasCourseSelection) {
+        console.log(`  📚 コース選択画面が表示されています`);
+        console.log(`    中学生コース: ${courseSelectionResult.hasJuniorHighSchool ? 'あり' : 'なし'}`);
+        console.log(`    小学生コース: ${courseSelectionResult.hasElementarySchool ? 'あり' : 'なし'}`);
+
+        // 中学生コース → 小学生コースの順に処理
+        const courses = [];
+        if (courseSelectionResult.hasJuniorHighSchool) {
+          courses.push('中学生コース');
+        }
+        if (courseSelectionResult.hasElementarySchool) {
+          courses.push('小学生コース');
+        }
+
+        // 各コースのデータを取得
+        for (const courseName of courses) {
+          console.log(`\n  📖 ${courseName}のデータを取得中...`);
+
+          // コースを選択
+          const selectResult = await selectCourse(page, courseName);
+
+          if (!selectResult.success) {
+            console.error(`    ❌ コース選択失敗: ${selectResult.error}`);
+            hasPartialFailure = true;
+            continue;
+          }
+
+          // コース選択後のデータ取得
+          const courseData = await getCourseData(page, user.name, courseName, dateString);
+
+          if (courseData.success) {
+            data.push(courseData.data);
+            console.log(`    ✅ ${courseName}: 勉強時間=${courseData.data.studyTime.hours}h${courseData.data.studyTime.minutes}m, ミッション=${courseData.data.missionCount}件, 点数=${courseData.data.totalScore}点`);
+          } else {
+            hasPartialFailure = true;
+            console.error(`    ❌ データ取得失敗: ${courseData.error}`);
+          }
+
+          // 次のコースのために、ユーザー選択画面に戻る
+          if (courses.indexOf(courseName) < courses.length - 1) {
+            console.log(`    🔙 ユーザー選択画面に戻ります...`);
+            const returnResult = await switchToUser(page, user.name);
+            if (!returnResult.success) {
+              console.error(`    ❌ ユーザー選択画面に戻る失敗: ${returnResult.error}`);
+              hasPartialFailure = true;
+              break;
+            }
+          }
+        }
+      } else {
+        // コース選択画面がない場合は、従来通りのデータ取得
+        console.log(`  📖 データを取得中（コース選択なし）...`);
+
+        const courseData = await getCourseData(page, user.name, null, dateString);
+
+        if (courseData.success) {
+          data.push(courseData.data);
+          console.log(`  ✅ ${user.name}: 勉強時間=${courseData.data.studyTime.hours}h${courseData.data.studyTime.minutes}m, ミッション=${courseData.data.missionCount}件, 点数=${courseData.data.totalScore}点`);
+        } else {
+          hasPartialFailure = true;
+          console.error(`  ❌ データ取得失敗: ${courseData.error}`);
+        }
       }
-
-      // ミッション数を取得
-      const missionCountResult = await getTodayMissionCount(page);
-      const missionCount = missionCountResult.success ? missionCountResult.count : 0;
-
-      if (!missionCountResult.success) {
-        console.warn(`  ⚠️ ミッション数取得失敗: ${missionCountResult.error}`);
-        hasPartialFailure = true;
-      }
-
-      // ミッション詳細を取得
-      const missionsResult = await getMissionDetails(page);
-      const missions = missionsResult.success ? missionsResult.missions : [];
-
-      if (!missionsResult.success) {
-        console.warn(`  ⚠️ ミッション詳細取得失敗: ${missionsResult.error}`);
-        hasPartialFailure = true;
-        detailsAvailable = false;
-      }
-
-      // 合計点数を計算
-      const totalScore = getTotalScore(missions);
-
-      // v2.0データ構造で格納
-      data.push({
-        userName: user.name,
-        missionCount,
-        date: dateString,
-        studyTime,
-        totalScore,
-        missions
-      });
-
-      console.log(`  ✅ ${user.name}: 勉強時間=${studyTime.hours}h${studyTime.minutes}m, ミッション=${missionCount}件, 点数=${totalScore}点`);
     }
 
     // 少なくとも1件成功していれば、部分的な成功として扱う
