@@ -383,6 +383,121 @@ async function switchToUser(page, userName) {
 }
 
 /**
+ * コース選択画面に戻る（サイドバーから同じユーザーを再選択）
+ * @private
+ */
+async function returnToCourseSelection(page, userName) {
+  try {
+    console.log(`    🔙 コース選択画面に戻ります...`);
+
+    const viewport = page.viewportSize();
+    const rightHalfX = viewport.width * 0.5;
+    const topAreaY = viewport.height * 0.2;
+
+    // サイドバーが既に開いている場合は閉じる
+    const sidebarAlreadyOpen = await page.locator('text="お子さま"').isVisible().catch(() => false);
+    if (sidebarAlreadyOpen) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(1000);
+    }
+
+    // 右上のユーザー名エリアを探す
+    const userNameCandidates = await page.locator('div').filter({ hasText: 'さん' }).all();
+    let userArea = null;
+
+    for (const candidate of userNameCandidates) {
+      const box = await candidate.boundingBox().catch(() => null);
+      const text = await candidate.innerText().catch(() => '');
+      const isVisible = await candidate.isVisible().catch(() => false);
+
+      if (box &&
+          box.x >= rightHalfX &&
+          box.y <= topAreaY &&
+          isVisible &&
+          text.trim().length > 0 &&
+          text.trim().length < 20 &&
+          text.trim().endsWith('さん')) {
+        userArea = candidate;
+        console.log(`    ✅ 右上のユーザー名エリアを発見: ${text.trim()}`);
+        break;
+      }
+    }
+
+    if (!userArea) {
+      return {
+        success: false,
+        error: '右上のユーザー名エリアが見つかりません'
+      };
+    }
+
+    // ユーザー名エリアをクリックしてサイドバーを開く
+    await userArea.click({ timeout: 5000 });
+    await page.waitForTimeout(3000);
+
+    // サイドバーが開いたか確認
+    const sidebarOpened = await page.locator('text="お子さま"').isVisible().catch(() => false);
+    if (!sidebarOpened) {
+      return {
+        success: false,
+        error: 'サイドバーを開くことができませんでした'
+      };
+    }
+
+    console.log(`    ✅ サイドバーが開きました`);
+
+    // サイドバー内で同じユーザー名を探してクリック
+    const allUserElements = await page.locator(`text="${userName}"`).all();
+    console.log(`    🔍 "${userName}" を含む要素数: ${allUserElements.length}`);
+
+    let targetElement = null;
+    for (let i = 0; i < allUserElements.length; i++) {
+      const box = await allUserElements[i].boundingBox().catch(() => null);
+      if (box) {
+        // 右上のユーザー名エリア以外の要素を選択
+        if (!(box.x >= rightHalfX && box.y <= topAreaY)) {
+          targetElement = allUserElements[i];
+          console.log(`    ✅ サイドバー内にユーザー名 "${userName}" を発見 [${i}]`);
+          break;
+        }
+      }
+    }
+
+    if (!targetElement) {
+      return {
+        success: false,
+        error: `サイドバー内にユーザー "${userName}" が見つかりません`
+      };
+    }
+
+    // 同じユーザーを再度クリック
+    await targetElement.click();
+    await page.waitForTimeout(3000);
+
+    // ページ遷移を待機
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(2000);
+
+    // コース選択画面が表示されているか確認
+    const courseSelectionResult = await checkCourseSelection(page);
+    if (courseSelectionResult.hasCourseSelection) {
+      console.log(`    ✅ コース選択画面に戻りました`);
+      return { success: true };
+    }
+
+    return {
+      success: false,
+      error: 'コース選択画面が表示されませんでした'
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      error: `コース選択画面への復帰エラー: ${error.message}`
+    };
+  }
+}
+
+/**
  * 今日の日付を取得（MM/DD形式）
  * @private
  * @returns {Object} - { withPadding: "01/16", withoutPadding: "1/16" }
@@ -520,7 +635,30 @@ async function getTodayMissionCount(page) {
  */
 async function getStudyTime(page) {
   try {
+    const todayDates = getTodayDate();
     const { studyTime } = selectors.missionDetails;
+
+    // まず今日の日付があるかチェック
+    let isTodayVisible = false;
+    for (const pattern of [todayDates.withPadding, todayDates.withoutPadding]) {
+      const datePattern = new RegExp(`${pattern.replace('/', '\\/')}.*?[月火水木金土日]`);
+      const header = page.locator(`text=${datePattern}`).first();
+
+      if (await header.isVisible({ timeout: 2000 }).catch(() => false)) {
+        isTodayVisible = true;
+        break;
+      }
+    }
+
+    // 今日の日付がない場合、0時間0分を返す
+    if (!isTodayVisible) {
+      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（勉強時間: 0時間0分）`);
+      return {
+        success: true,
+        hours: 0,
+        minutes: 0
+      };
+    }
 
     // パース用の柔軟な関数
     const parseStudyTime = (text) => {
@@ -671,35 +809,13 @@ async function getMissionDetails(page) {
       }
     }
 
-    // 今日の日付が見つからない場合、最新の日付を使用
+    // 今日の日付が見つからない場合、空の配列を返す
     if (!isTodayVisible) {
-      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません。最新の学習日のデータを取得します。`);
-
-      // 日付の正規表現パターン（例：01/12(月), 1/5(木)）
-      const latestDateElement = page.locator('text=/\\d+\\/\\d+\\s*\\([月火水木金土日]\\)/').first();
-
-      if (await latestDateElement.isVisible({ timeout: 5000 }).catch(() => false)) {
-        const latestDateText = await latestDateElement.textContent();
-        const dateMatch = latestDateText.match(/(\d+\/\d+)/);
-        if (dateMatch) {
-          targetDate = dateMatch[1];
-          const latestDatePattern = new RegExp(`${targetDate.replace('/', '\\/')}.*?[月火水木金土日]`);
-          todayHeader = page.locator(`text=${latestDatePattern}`).first();
-          console.log(`  📅 最新の学習日: ${targetDate}`);
-        } else {
-          console.log(`  ℹ️ 学習データが見つかりません（空配列として扱います）`);
-          return {
-            success: true,
-            missions: []
-          };
-        }
-      } else {
-        console.log(`  ℹ️ 学習データが見つかりません（空配列として扱います）`);
-        return {
-          success: true,
-          missions: []
-        };
-      }
+      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（空配列として扱います）`);
+      return {
+        success: true,
+        missions: []
+      };
     }
 
     // 全ての日付要素を取得（左側のラベルのみ、X座標 < 250）
@@ -1055,12 +1171,11 @@ async function getAllUsersDetailedData(page) {
             console.error(`    ❌ データ取得失敗: ${courseData.error}`);
           }
 
-          // 次のコースのために、ユーザー選択画面に戻る
+          // 次のコースのために、コース選択画面に戻る
           if (courses.indexOf(courseName) < courses.length - 1) {
-            console.log(`    🔙 ユーザー選択画面に戻ります...`);
-            const returnResult = await switchToUser(page, user.name);
+            const returnResult = await returnToCourseSelection(page, user.name);
             if (!returnResult.success) {
-              console.error(`    ❌ ユーザー選択画面に戻る失敗: ${returnResult.error}`);
+              console.error(`    ❌ コース選択画面への復帰失敗: ${returnResult.error}`);
               hasPartialFailure = true;
               break;
             }

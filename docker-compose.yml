@@ -12,6 +12,9 @@ services:
       - ./data:/app/data
       # ログ保存（オプション）
       - ./logs:/app/logs
+      # デバッグ用: ソースコードとスクリプト
+      - ./src:/app/src
+      - ./scripts:/app/scripts
     environment:
       # .envから自動読み込み
       - SMILEZEMI_USERNAME
