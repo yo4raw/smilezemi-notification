@@ -1308,5 +1308,8 @@ module.exports = {
   getStudyTime,
   getMissionDetails,
   getTotalScore,
-  switchToUser
+  switchToUser,
+  checkCourseSelection,
+  selectCourse,
+  returnToCourseSelection
 };

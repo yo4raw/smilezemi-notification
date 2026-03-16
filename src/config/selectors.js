@@ -125,5 +125,22 @@ module.exports = {
 
     // NEWラベル（確認済み: "NEWミッション" として検出）
     newLabel: 'text="NEW"'
+  },
+
+  // 週間レポート（指導レポート）のセレクタ
+  // DOM調査日: 2026-03-16 (scripts/explore-guidance-report.js で確認)
+  weeklyReport: {
+    // 指導レポートタブ
+    reportTab: 'button:has-text("指導レポート")',
+    // セクションタイトル（「とりくみの様子」「今後の指導」）
+    sectionTitle: '.title__jXeZJ',
+    // セクションキャプション（「週のとりくみ」）
+    sectionCaption: '.caption__dfUam',
+    // サブセクションキャプション（「褒めポイント」「とりくみ時間」）
+    subCaption: '.caption__mUTwZ',
+    // 注記
+    note: '.note__Kg016',
+    // タブクリック後の待機時間
+    tabClickWaitTime: 5000
   }
 };
