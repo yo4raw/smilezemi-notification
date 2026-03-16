@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js",
-    "test": "node --test --test-force-exit tests/**/*.test.js",
-    "test:watch": "node --test --test-force-exit --watch tests/**/*.test.js",
+    "test": "node --test --test-force-exit tests/*.test.js",
+    "test:watch": "node --test --test-force-exit --watch tests/*.test.js",
     "docker:build": "docker-compose build",
     "docker:run": "docker-compose up",
     "docker:dev": "docker-compose run --rm crawler",
