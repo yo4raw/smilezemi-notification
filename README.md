@@ -307,7 +307,7 @@ node scripts/investigate-selectors.js
 
 ## 作成者（つよつよ）👑
 
-Claude Code (AI Assistant) with Kiro Spec-Driven Development
+Claude Code (AI Assistant)
 
 ---
 
