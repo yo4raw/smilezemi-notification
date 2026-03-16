@@ -277,11 +277,7 @@ function formatDetailedMessage(userData, missionChanges = null) {
     // 勉強時間
     const hours = user.studyTime?.hours ?? 0;
     const minutes = user.studyTime?.minutes ?? 0;
-    message += `⏱️ 勉強時間: ${hours}:${minutes.toString().padStart(2, '0')}\n`;
-
-    // 完了ミッション数
-    const missionCount = user.missionCount ?? 0;
-    message += `✅ 完了ミッション: ${missionCount}件\n`;
+    message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
 
     // ミッション詳細
     const missions = user.missions ?? [];
