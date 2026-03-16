@@ -6,6 +6,16 @@
 const selectors = require('./config/selectors');
 
 /**
+ * 名前をマスクしてログ出力用にする（最後の1文字のみ表示）
+ * @param {string} name - ユーザー名
+ * @returns {string} マスクされた名前
+ */
+function maskName(name) {
+  if (!name || name.length <= 1) return name || '';
+  return '*'.repeat(name.length - 1) + name.slice(-1);
+}
+
+/**
  * ログイン後のページからユーザー一覧を取得
  *
  * @param {import('playwright').Page} page - Playwrightページインスタンス
@@ -208,15 +218,15 @@ async function selectCourse(page, courseName) {
  */
 async function switchToUser(page, userName) {
   try {
-    console.log(`\n  ユーザーを ${userName} に切り替え中...`);
+    console.log(`\n  ユーザーを ${maskName(userName)} に切り替え中...`);
 
     // 切り替え前の右上のユーザー名を確認
     const beforeUserName = await getCurrentUserName(page);
-    console.log(`  切り替え前の右上表示ユーザー: ${beforeUserName}`);
+    console.log(`  切り替え前の右上表示ユーザー: ${maskName(beforeUserName)}`);
 
     // 既に目的のユーザーであればスキップ
     if (beforeUserName === userName) {
-      console.log(`  ✅ 既に ${userName} です（切り替え不要）`);
+      console.log(`  ✅ 既に ${maskName(userName)} です（切り替え不要）`);
       return { success: true };
     }
 
@@ -241,7 +251,7 @@ async function switchToUser(page, userName) {
       const userInMenu = await page.locator(`text="${userName}"`).first().isVisible({ timeout: 3000 }).catch(() => false);
 
       if (userInMenu) {
-        console.log(`  ✅ メニュー内にユーザー名 "${userName}" を発見`);
+        console.log(`  ✅ メニュー内にユーザー名 "${maskName(userName)}" を発見`);
         await page.locator(`text="${userName}"`).first().click();
         await page.waitForTimeout(3000);
 
@@ -250,13 +260,13 @@ async function switchToUser(page, userName) {
 
         // 切り替え後の右上のユーザー名を確認
         const afterUserName = await getCurrentUserName(page);
-        console.log(`  切り替え後の右上表示ユーザー: ${afterUserName}`);
+        console.log(`  切り替え後の右上表示ユーザー: ${maskName(afterUserName)}`);
 
         if (afterUserName !== userName) {
-          throw new Error(`ユーザー切り替え検証失敗: 期待=${userName}, 実際=${afterUserName}`);
+          throw new Error(`ユーザー切り替え検証失敗: 期待=${maskName(userName)}, 実際=${maskName(afterUserName)}`);
         }
 
-        console.log(`  ✅ ユーザー切り替え成功: ${userName}`);
+        console.log(`  ✅ ユーザー切り替え成功: ${maskName(userName)}`);
         return { success: true };
       } else {
         console.log(`  ⚠️ メニュー内にユーザー名が見つかりません、メニューを閉じます`);
@@ -323,7 +333,7 @@ async function switchToUser(page, userName) {
       // サイドバー内でユーザーを探してクリック
       // まずすべてのユーザー名要素を取得
       const allUserElements = await page.locator(`text="${userName}"`).all();
-      console.log(`  🔍 "${userName}" を含む要素数: ${allUserElements.length}`);
+      console.log(`  🔍 "${maskName(userName)}" を含む要素数: ${allUserElements.length}`);
 
       // サイドバー内（右上以外）の要素を探す
       let targetElement = null;
@@ -337,7 +347,7 @@ async function switchToUser(page, userName) {
           const viewport = page.viewportSize();
           if (!(box.x >= viewport.width * 0.5 && box.y <= viewport.height * 0.2)) {
             targetElement = allUserElements[i];
-            console.log(`  ✅ サイドバー内にユーザー名 "${userName}" を発見 [${i}]`);
+            console.log(`  ✅ サイドバー内にユーザー名 "${maskName(userName)}" を発見 [${i}]`);
             break;
           }
         }
@@ -356,16 +366,16 @@ async function switchToUser(page, userName) {
 
         // 切り替え後の右上のユーザー名を確認
         const afterUserName = await getCurrentUserName(page);
-        console.log(`  切り替え後の右上表示ユーザー: ${afterUserName}`);
+        console.log(`  切り替え後の右上表示ユーザー: ${maskName(afterUserName)}`);
 
         if (afterUserName !== userName) {
-          throw new Error(`ユーザー切り替え検証失敗: 期待=${userName}, 実際=${afterUserName}`);
+          throw new Error(`ユーザー切り替え検証失敗: 期待=${maskName(userName)}, 実際=${maskName(afterUserName)}`);
         }
 
-        console.log(`  ✅ ユーザー切り替え成功: ${userName}`);
+        console.log(`  ✅ ユーザー切り替え成功: ${maskName(userName)}`);
         return { success: true };
       } else {
-        throw new Error(`サイドバー内にユーザー "${userName}" が見つかりません`);
+        throw new Error(`サイドバー内にユーザー "${maskName(userName)}" が見つかりません`);
       }
     }
 
@@ -418,7 +428,7 @@ async function returnToCourseSelection(page, userName) {
           text.trim().length < 20 &&
           text.trim().endsWith('さん')) {
         userArea = candidate;
-        console.log(`    ✅ 右上のユーザー名エリアを発見: ${text.trim()}`);
+        console.log(`    ✅ 右上のユーザー名エリアを発見: ${maskName(text.trim())}`);
         break;
       }
     }
@@ -447,7 +457,7 @@ async function returnToCourseSelection(page, userName) {
 
     // サイドバー内で同じユーザー名を探してクリック
     const allUserElements = await page.locator(`text="${userName}"`).all();
-    console.log(`    🔍 "${userName}" を含む要素数: ${allUserElements.length}`);
+    console.log(`    🔍 "${maskName(userName)}" を含む要素数: ${allUserElements.length}`);
 
     let targetElement = null;
     for (let i = 0; i < allUserElements.length; i++) {
@@ -456,7 +466,7 @@ async function returnToCourseSelection(page, userName) {
         // 右上のユーザー名エリア以外の要素を選択
         if (!(box.x >= rightHalfX && box.y <= topAreaY)) {
           targetElement = allUserElements[i];
-          console.log(`    ✅ サイドバー内にユーザー名 "${userName}" を発見 [${i}]`);
+          console.log(`    ✅ サイドバー内にユーザー名 "${maskName(userName)}" を発見 [${i}]`);
           break;
         }
       }
@@ -465,7 +475,7 @@ async function returnToCourseSelection(page, userName) {
     if (!targetElement) {
       return {
         success: false,
-        error: `サイドバー内にユーザー "${userName}" が見つかりません`
+        error: `サイドバー内にユーザー "${maskName(userName)}" が見つかりません`
       };
     }
 
@@ -993,7 +1003,7 @@ function getTotalScore(missions) {
  */
 async function getMissionCount(page, userName) {
   try {
-    console.log(`\n👤 ${userName}のミッション数を取得中...`);
+    console.log(`\n👤 ${maskName(userName)}のミッション数を取得中...`);
 
     // ユーザーに切り替える
     const switchResult = await switchToUser(page, userName);
@@ -1004,7 +1014,7 @@ async function getMissionCount(page, userName) {
     // 今日のミッション数を取得
     const missionResult = await getTodayMissionCount(page);
 
-    console.log(`✅ ${userName}: ${missionResult.count}件`);
+    console.log(`✅ ${maskName(userName)}: ${missionResult.count}件`);
 
     return missionResult;
 
@@ -1119,7 +1129,7 @@ async function getAllUsersDetailedData(page) {
     for (let i = 0; i < users.length; i++) {
       const user = users[i];
 
-      console.log(`\n👤 ${user.name}のデータを取得中...`);
+      console.log(`\n👤 ${maskName(user.name)}のデータを取得中...`);
 
       // ユーザーに切り替える
       const switchResult = await switchToUser(page, user.name);
@@ -1189,7 +1199,7 @@ async function getAllUsersDetailedData(page) {
 
         if (courseData.success) {
           data.push(courseData.data);
-          console.log(`  ✅ ${user.name}: 勉強時間=${courseData.data.studyTime.hours}h${courseData.data.studyTime.minutes}m, ミッション=${courseData.data.missionCount}件, 点数=${courseData.data.totalScore}点`);
+          console.log(`  ✅ ${maskName(user.name)}: 勉強時間=${courseData.data.studyTime.hours}h${courseData.data.studyTime.minutes}m, ミッション=${courseData.data.missionCount}件, 点数=${courseData.data.totalScore}点`);
         } else {
           hasPartialFailure = true;
           console.error(`  ❌ データ取得失敗: ${courseData.error}`);
@@ -1263,7 +1273,7 @@ async function getAllUsersMissionCounts(page) {
         // 一部失敗しても継続
         hasPartialFailure = true;
         console.error(
-          `ユーザー "${user.name}" のミッション数取得に失敗: ${missionResult.error}`
+          `ユーザー "${maskName(user.name)}" のミッション数取得に失敗: ${missionResult.error}`
         );
       }
     }
