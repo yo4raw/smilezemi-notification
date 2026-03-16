@@ -111,7 +111,9 @@ async function attemptLogin(browser, credentials) {
 
   try {
     // 新しいブラウザコンテキストとページを作成
-    context = await browser.newContext();
+    context = await browser.newContext({
+      ignoreHTTPSErrors: true
+    });
     page = await context.newPage();
 
     // ログインページにアクセス
