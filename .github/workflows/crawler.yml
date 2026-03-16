@@ -1,9 +1,9 @@
 name: スマイルゼミ クローラー
 
 on:
-  # 毎日 UTC 9:00 (JST 18:00) に自動実行
+  # 毎日 UTC 11:00 (JST 20:00) に自動実行
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '0 11 * * *'
 
   # 手動実行をサポート
   workflow_dispatch:
