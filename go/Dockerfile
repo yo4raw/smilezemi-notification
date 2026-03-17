@@ -1,23 +1,19 @@
 # ステージ1: Goビルド
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /build
 
-COPY go.mod go.sum ./
-RUN go mod download
-
+# ソースコード全体をコピー（vendor含む）
 COPY . .
 
-# 日次通知バイナリ
-RUN CGO_ENABLED=0 GOOS=linux go build -o /crawler .
+# vendorモードでビルド（ネットワーク不要）
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /crawler .
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /weekly ./cmd/weekly
 
-# 週間レポートバイナリ
-RUN CGO_ENABLED=0 GOOS=linux go build -o /weekly ./cmd/weekly
-
-# ステージ2: 実行環境（chromium-headless-shell + バイナリ）
+# ステージ2: 実行環境（chromium + バイナリ）
 FROM debian:bookworm-slim
 
-# chromium-headless-shell に必要なパッケージ
+# Chromiumと日本語フォント
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     ca-certificates \

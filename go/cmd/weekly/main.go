@@ -40,6 +40,7 @@ func run() int {
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("headless", true),
+		chromedp.Flag("ignore-certificate-errors", true),
 	)
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)

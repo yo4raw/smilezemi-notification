@@ -36,9 +36,26 @@ func GetUserList(ctx context.Context) ([]User, error) {
 	if err := chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
+				const vw = window.innerWidth;
+				const vh = window.innerHeight;
 				const divs = document.querySelectorAll('div');
 				for (const div of divs) {
-					if (div.textContent.includes('さん') && div.textContent.trim().length < 20) {
+					const text = div.textContent.trim();
+					if (text.endsWith('さん') && text.length < 20 && text.length > 1) {
+						const rect = div.getBoundingClientRect();
+						// 右上エリアの要素を優先
+						if (rect.x >= vw * 0.3 && rect.y <= vh * 0.3 &&
+							div.offsetParent !== null) {
+							div.click();
+							return true;
+						}
+					}
+				}
+				// フォールバック: 位置に関わらず最初の「さん」要素
+				for (const div of divs) {
+					const text = div.textContent.trim();
+					if (text.endsWith('さん') && text.length < 20 && text.length > 1 &&
+						div.offsetParent !== null && div.children.length === 0) {
 						div.click();
 						return true;
 					}
@@ -46,19 +63,31 @@ func GetUserList(ctx context.Context) ([]User, error) {
 				return false;
 			})()
 		`, nil),
-		chromedp.Sleep(2*time.Second),
+		chromedp.Sleep(3*time.Second),
 	); err != nil {
 		return nil, fmt.Errorf("ユーザーエリアクリックエラー: %w", err)
 	}
 
-	// 「お子さま」セクションの確認
+	// 「お子さま」セクションの確認（テキストを含む葉ノードを探す）
 	var childSectionVisible bool
 	if err := chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			(() => {
 				const els = document.querySelectorAll('*');
 				for (const el of els) {
-					if (el.textContent.trim() === 'お子さま' && el.offsetParent !== null) {
+					const text = el.textContent.trim();
+					if ((text === 'お子さま' || text === 'お子さま：') &&
+						el.offsetParent !== null &&
+						el.children.length === 0) {
+						return true;
+					}
+				}
+				// フォールバック: 部分一致で探す
+				for (const el of els) {
+					if (el.textContent.includes('お子さま') &&
+						el.offsetParent !== null &&
+						el.children.length <= 2 &&
+						el.textContent.trim().length < 30) {
 						return true;
 					}
 				}
@@ -847,6 +876,12 @@ func GetAllUsersDetailedData(ctx context.Context) ([]data.UserData, error) {
 					}
 				}
 			}
+
+			// 次のユーザーのためにタイムラインに戻る
+			chromedp.Run(ctx,
+				chromedp.Navigate(TimelineURL),
+				chromedp.Sleep(2*time.Second),
+			)
 		} else {
 			userData, err := getCourseData(ctx, user.Name, "")
 			if err != nil {
@@ -854,6 +889,12 @@ func GetAllUsersDetailedData(ctx context.Context) ([]data.UserData, error) {
 				continue
 			}
 			allData = append(allData, *userData)
+
+			// 次のユーザーのためにタイムラインに戻る
+			chromedp.Run(ctx,
+				chromedp.Navigate(TimelineURL),
+				chromedp.Sleep(2*time.Second),
+			)
 		}
 	}
 

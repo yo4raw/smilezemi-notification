@@ -25,6 +25,9 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Go
+go/vendor/
+
 # ビルド成果物
 dist/
 build/
