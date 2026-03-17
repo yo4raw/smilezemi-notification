@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -328,46 +330,28 @@ type CourseSelectionResult struct {
 }
 
 func CheckCourseSelection(ctx context.Context) CourseSelectionResult {
-	var result CourseSelectionResult
-
-	chromedp.Run(ctx,
-		chromedp.Evaluate(`
-			(() => {
-				const els = document.querySelectorAll('*');
-				let junior = false, elementary = false;
-				for (const el of els) {
-					const text = el.textContent.trim();
-					if (text === '中学生コース' && el.offsetParent !== null) junior = true;
-					if (text === '小学生コース' && el.offsetParent !== null) elementary = true;
-				}
-				return {junior, elementary};
-			})()
-		`, &result),
-	)
-
-	// resultの中身をパース（chromedpはmap[string]interface{}で返す）
 	var juniorHS, elemS bool
 	chromedp.Run(ctx,
-		chromedp.Evaluate(`
+		chromedp.Evaluate(fmt.Sprintf(`
 			(() => {
 				const els = document.querySelectorAll('*');
 				for (const el of els) {
-					if (el.textContent.trim() === '中学生コース' && el.offsetParent !== null && el.children.length === 0) return true;
+					if (el.textContent.trim() === '%s' && el.offsetParent !== null && el.children.length === 0) return true;
 				}
 				return false;
 			})()
-		`, &juniorHS),
+		`, escapeJS(JuniorHighSchoolText)), &juniorHS),
 	)
 	chromedp.Run(ctx,
-		chromedp.Evaluate(`
+		chromedp.Evaluate(fmt.Sprintf(`
 			(() => {
 				const els = document.querySelectorAll('*');
 				for (const el of els) {
-					if (el.textContent.trim() === '小学生コース' && el.offsetParent !== null && el.children.length === 0) return true;
+					if (el.textContent.trim() === '%s' && el.offsetParent !== null && el.children.length === 0) return true;
 				}
 				return false;
 			})()
-		`, &elemS),
+		`, escapeJS(ElementarySchoolText)), &elemS),
 	)
 
 	return CourseSelectionResult{
@@ -800,9 +784,18 @@ func GetTotalScore(missions []data.Mission) int {
 func getCourseData(ctx context.Context, userName, courseName string) (*data.UserData, error) {
 	dateString := time.Now().Format("2006-01-02")
 
-	hours, minutes, _ := GetStudyTime(ctx)
-	missionCount, _ := GetTodayMissionCount(ctx)
-	missions, _ := GetMissionDetails(ctx)
+	hours, minutes, err := GetStudyTime(ctx)
+	if err != nil {
+		log.Printf("    ⚠️ 勉強時間の取得に失敗: %v", err)
+	}
+	missionCount, err := GetTodayMissionCount(ctx)
+	if err != nil {
+		log.Printf("    ⚠️ ミッション数の取得に失敗: %v", err)
+	}
+	missions, err := GetMissionDetails(ctx)
+	if err != nil {
+		log.Printf("    ⚠️ ミッション詳細の取得に失敗: %v", err)
+	}
 	if missions == nil {
 		missions = []data.Mission{}
 	}
@@ -909,11 +902,16 @@ func GetAllUsersDetailedData(ctx context.Context) ([]data.UserData, error) {
 func SaveScreenshot(ctx context.Context, filename string) error {
 	var buf []byte
 	if err := chromedp.Run(ctx, chromedp.FullScreenshot(&buf, 90)); err != nil {
-		return err
+		return fmt.Errorf("スクリーンショット取得エラー: %w", err)
 	}
 
-	// os.WriteFileはmainから呼び出す
-	_ = buf
+	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+		return fmt.Errorf("ディレクトリ作成エラー: %w", err)
+	}
+	if err := os.WriteFile(filename, buf, 0644); err != nil {
+		return fmt.Errorf("スクリーンショット保存エラー: %w", err)
+	}
+
 	return nil
 }
 

@@ -84,11 +84,12 @@ func run() int {
 	sendOpts := notifier.DefaultSendOptions()
 	if err := lineClient.Send(message, sendOpts); err != nil {
 		log.Printf("❌ LINE通知の送信に失敗しました: %v", err)
-	} else {
-		log.Println("✅ 詳細モードでのLINE通知が完了しました")
+		log.Println("⚠️ 通知失敗のため、データ保存をスキップします（次回再送のため差分を保持）")
+		return 1
 	}
+	log.Println("✅ 詳細モードでのLINE通知が完了しました")
 
-	// 8. データ保存
+	// 8. データ保存（通知成功時のみ）
 	log.Println("💾 データを保存しています...")
 	if err := data.SaveData(dataPath, currentData); err != nil {
 		log.Printf("❌ データの保存に失敗しました: %v", err)

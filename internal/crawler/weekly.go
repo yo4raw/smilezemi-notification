@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -79,7 +80,7 @@ func NavigateToGuidanceReport(ctx context.Context) error {
 	var currentURL string
 	chromedp.Run(ctx, chromedp.Location(&currentURL))
 
-	if contains(currentURL, "guidance-report") {
+	if strings.Contains(currentURL, "guidance-report") {
 		log.Printf("✅ 指導レポートページに遷移しました")
 		return nil
 	}
@@ -284,20 +285,6 @@ func GetAllUsersWeeklyReport(ctx context.Context) ([]notifier.WeeklyReportEntry,
 	}
 
 	return results, nil
-}
-
-// contains は文字列に部分文字列が含まれるか確認する。
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) && containsStr(s, substr)
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // orDefault はsが空の場合にデフォルト値を返す。

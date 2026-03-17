@@ -176,8 +176,8 @@ func FormatMessage(changes []data.Change) string {
 
 		sb.WriteString(fmt.Sprintf("%s %s\n%s\n\n", icon, change.UserName, text))
 
-		// メッセージ長チェック
-		if sb.Len() > MaxMessageLength-100 {
+		// メッセージ長チェック（ルーン数で判定）
+		if utf8.RuneCountInString(sb.String()) > MaxMessageLength-100 {
 			remaining := len(changes) - i - 1
 			if remaining > 0 {
 				sb.WriteString(fmt.Sprintf("... 他%d件の変更があります", remaining))
@@ -188,8 +188,9 @@ func FormatMessage(changes []data.Change) string {
 
 	result := sb.String()
 	if utf8.RuneCountInString(result) > MaxMessageLength {
+		const suffix = "\n\n（メッセージが長すぎたため省略されました）"
 		runes := []rune(result)
-		result = string(runes[:MaxMessageLength-20]) + "\n\n（メッセージが長すぎたため省略されました）"
+		result = string(runes[:MaxMessageLength-utf8.RuneCountInString(suffix)]) + suffix
 	}
 
 	return strings.TrimSpace(result)

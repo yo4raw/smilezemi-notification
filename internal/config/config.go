@@ -16,6 +16,12 @@ var requiredSecrets = []string{
 	"LINE_USER_ID",
 }
 
+// マスキング用の正規表現（パッケージレベルで一度だけコンパイル）
+var (
+	rePassword = regexp.MustCompile(`(?i)password=[\w]+`)
+	reToken    = regexp.MustCompile(`(?i)token=[\w]+`)
+)
+
 // sensitiveFields はマスキング対象のフィールド名パターン。
 var sensitiveFields = []string{
 	"password",
@@ -83,8 +89,8 @@ func ValidateSecrets(secrets map[string]string) ValidationResult {
 // MaskSensitiveString は文字列中のパスワード・トークンパターンをマスキングする。
 func MaskSensitiveString(data string) string {
 	masked := data
-	masked = regexp.MustCompile(`(?i)password=[\w]+`).ReplaceAllString(masked, "password=***")
-	masked = regexp.MustCompile(`(?i)token=[\w]+`).ReplaceAllString(masked, "token=***")
+	masked = rePassword.ReplaceAllString(masked, "password=***")
+	masked = reToken.ReplaceAllString(masked, "token=***")
 	return masked
 }
 
