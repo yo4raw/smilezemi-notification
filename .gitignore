@@ -2,9 +2,9 @@
 .env
 
 # 実行時生成ファイル
-screenshots/
-data/
-logs/
+/screenshots/
+/data/
+/logs/
 
 # IDE設定
 .vscode/
