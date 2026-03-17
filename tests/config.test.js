@@ -29,10 +29,10 @@ describe('環境変数管理', () => {
 
       const config = loadConfig();
 
-      assert.strictEqual(config.smilezemi.username, 'testuser');
-      assert.strictEqual(config.smilezemi.password, 'testpass');
-      assert.strictEqual(config.line.channelAccessToken, 'test_token');
-      assert.strictEqual(config.line.userId, 'U1234567890');
+      assert.strictEqual(config.SMILEZEMI_USERNAME, 'testuser');
+      assert.strictEqual(config.SMILEZEMI_PASSWORD, 'testpass');
+      assert.strictEqual(config.LINE_CHANNEL_ACCESS_TOKEN, 'test_token');
+      assert.strictEqual(config.LINE_USER_ID, 'U1234567890');
     });
 
     it('環境変数が欠落している場合、エラーをスローする', () => {

@@ -237,7 +237,7 @@ describe('データ管理モジュール (src/data.js)', () => {
       const fileContent = await fs.readFile(testDataFile, 'utf-8');
       const savedData = JSON.parse(fileContent);
 
-      assert.strictEqual(savedData.version, '1.0', 'バージョン情報が含まれること');
+      assert.strictEqual(savedData.version, '2.0', 'バージョン情報が含まれること');
       assert.strictEqual(typeof savedData.timestamp, 'string', 'タイムスタンプが含まれること');
       assert.strictEqual(Array.isArray(savedData.users), true, 'users配列が含まれること');
       assert.strictEqual(savedData.users.length, 2, '2件のデータが保存されること');
