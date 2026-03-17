@@ -1,0 +1,17 @@
+services:
+  crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      # スクリーンショット保存
+      - ./screenshots:/app/screenshots
+      # データファイル保存
+      - ./data:/app/data
+    environment:
+      - SMILEZEMI_USERNAME
+      - SMILEZEMI_PASSWORD
+      - LINE_CHANNEL_ACCESS_TOKEN
+      - LINE_USER_ID

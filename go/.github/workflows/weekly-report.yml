@@ -1,0 +1,75 @@
+name: スマイルゼミ 週間レポート通知
+
+on:
+  # 毎週月曜 UTC 08:00 (JST 17:00) に自動実行
+  schedule:
+    - cron: '0 8 * * 1'
+
+  # 手動実行をサポート
+  workflow_dispatch:
+
+jobs:
+  weekly-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # 1. リポジトリのチェックアウト
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      # 2. .envファイルを作成
+      - name: .envファイルを作成
+        working-directory: go
+        run: |
+          echo "SMILEZEMI_USERNAME=${{ secrets.SMILEZEMI_USERNAME }}" >> .env
+          echo "SMILEZEMI_PASSWORD=${{ secrets.SMILEZEMI_PASSWORD }}" >> .env
+          echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" >> .env
+          echo "LINE_USER_ID=${{ secrets.LINE_USER_ID }}" >> .env
+
+      # 3. 環境変数の検証
+      - name: 環境変数を検証
+        run: |
+          echo "環境変数の検証中..."
+          if [ -z "${{ secrets.SMILEZEMI_USERNAME }}" ]; then
+            echo "❌ SMILEZEMI_USERNAME が設定されていません"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SMILEZEMI_PASSWORD }}" ]; then
+            echo "❌ SMILEZEMI_PASSWORD が設定されていません"
+            exit 1
+          fi
+          if [ -z "${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" ]; then
+            echo "❌ LINE_CHANNEL_ACCESS_TOKEN が設定されていません"
+            exit 1
+          fi
+          if [ -z "${{ secrets.LINE_USER_ID }}" ]; then
+            echo "❌ LINE_USER_ID が設定されていません"
+            exit 1
+          fi
+          echo "✅ 全ての環境変数が設定されています"
+
+      # 4. Dockerイメージをビルド
+      - name: Dockerイメージをビルド
+        working-directory: go
+        run: docker compose build
+
+      # 5. 週間レポート通知を実行
+      - name: 週間レポート通知を実行
+        working-directory: go
+        run: docker compose run --rm crawler /app/weekly
+
+      # 6. スクリーンショットをアーティファクトとして保存（常に実行）
+      - name: スクリーンショットを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-report-screenshots-${{ github.run_number }}
+          path: go/screenshots/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      # 7. .envファイルを削除（セキュリティ対策）
+      - name: .envファイルを削除
+        if: always()
+        run: rm -f go/.env
