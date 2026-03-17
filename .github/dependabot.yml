@@ -1,7 +1,7 @@
 version: 2
 updates:
-  # npm依存パッケージの自動更新
-  - package-ecosystem: "npm"
+  # Go依存パッケージの自動更新
+  - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"

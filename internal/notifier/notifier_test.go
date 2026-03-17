@@ -315,3 +315,174 @@ func TestTruncateToLimit_Long(t *testing.T) {
 		t.Error("truncated message should contain truncation indicator")
 	}
 }
+
+func TestFormatMessage_DefaultChangeType(t *testing.T) {
+	// defaultケース（increaseでもdecreaseでもnewでもない型）
+	changes := []data.Change{
+		{UserName: "太郎", PreviousCount: 5, CurrentCount: 5, Diff: 0, Type: "unknown"},
+	}
+
+	msg := FormatMessage(changes)
+	if !strings.Contains(msg, "太郎") {
+		t.Error("message should contain user name")
+	}
+	// defaultケースは "5 → 5" 形式（アイコンは📊）
+	if !strings.Contains(msg, "📊") {
+		t.Error("message should contain 📊 icon for default change type")
+	}
+}
+
+func TestFormatMessage_ExceedsMaxMessageLength(t *testing.T) {
+	// 各エントリが非常に長いユーザー名を持つ変更を大量に作り、
+	// utf8.RuneCountInString(result) > MaxMessageLength の分岐を通過させる
+	var changes []data.Change
+	// MaxMessageLength (5000) を超えるよう、長いユーザー名で大量のエントリを作成
+	longName := strings.Repeat("あ", 200) // 200文字のユーザー名
+	for i := 0; i < 30; i++ {
+		changes = append(changes, data.Change{
+			UserName:      fmt.Sprintf("%s%d", longName, i),
+			PreviousCount: 0,
+			CurrentCount:  5,
+			Diff:          5,
+			Type:          "new",
+		})
+	}
+
+	msg := FormatMessage(changes)
+	// utf8 truncation が走った場合、末尾に省略メッセージが含まれる
+	// または sb.Len() > MaxMessageLength-100 の早期break で「他N件」が含まれる
+	// どちらにせよ、最終的に MaxMessageLength 以内に収まること
+	if utf8.RuneCountInString(msg) > MaxMessageLength {
+		t.Errorf("message length %d exceeds MaxMessageLength %d", utf8.RuneCountInString(msg), MaxMessageLength)
+	}
+}
+
+func TestMaskTokenInError_EmptyToken(t *testing.T) {
+	errMsg := "some error with secret info"
+	// トークンが空の場合、メッセージはそのまま返る
+	result := maskTokenInError(errMsg, "")
+	if result != errMsg {
+		t.Errorf("empty token: expected original message %q, got %q", errMsg, result)
+	}
+}
+
+func TestMaskTokenInError_NonEmptyToken(t *testing.T) {
+	token := "mysecrettoken"
+	errMsg := fmt.Sprintf("connection failed with token %s in URL", token)
+	result := maskTokenInError(errMsg, token)
+	if strings.Contains(result, token) {
+		t.Errorf("token should be masked in error message, got: %s", result)
+	}
+}
+
+func TestFormatDetailedMessage_GroupedMissions(t *testing.T) {
+	// 同名ミッションが複数あり、スコアが異なる場合（増加・減少）
+	userData := []data.UserData{
+		{
+			UserName:  "太郎",
+			StudyTime: data.StudyTime{Hours: 0, Minutes: 30},
+			Missions: []data.Mission{
+				{Name: "算数", Score: 70, Completed: true},
+				{Name: "算数", Score: 90, Completed: true}, // スコア増加
+				{Name: "国語", Score: 80, Completed: true},
+				{Name: "国語", Score: 60, Completed: true}, // スコア減少
+			},
+		},
+	}
+
+	msg := FormatDetailedMessage(userData, nil)
+	// 増加: 70→90点 + 📈
+	if !strings.Contains(msg, "70→90点") {
+		t.Error("should show grouped score increase: 70→90点")
+	}
+	if !strings.Contains(msg, "📈") {
+		t.Error("should show 📈 for score increase in grouped missions")
+	}
+	// 減少: 80→60点 + 📉
+	if !strings.Contains(msg, "80→60点") {
+		t.Error("should show grouped score decrease: 80→60点")
+	}
+	if !strings.Contains(msg, "📉") {
+		t.Error("should show 📉 for score decrease in grouped missions")
+	}
+}
+
+func TestFormatDetailedMessage_GroupedMissions_SameScore(t *testing.T) {
+	// 同名ミッションが複数あり、first.Score == last.Score の場合
+	userData := []data.UserData{
+		{
+			UserName:  "太郎",
+			StudyTime: data.StudyTime{Hours: 0, Minutes: 20},
+			Missions: []data.Mission{
+				{Name: "算数", Score: 85, Completed: true},
+				{Name: "算数", Score: 85, Completed: true}, // 同スコア
+			},
+		},
+	}
+
+	msg := FormatDetailedMessage(userData, nil)
+	// スコアが同じなら "85点" と表示（"→" なし）
+	if !strings.Contains(msg, "85点") {
+		t.Error("should show single score when grouped scores are equal: 85点")
+	}
+	if strings.Contains(msg, "85→85") {
+		t.Error("should not show arrow when scores are equal")
+	}
+}
+
+func TestFormatDetailedMessage_GroupedMissions_NotCompleted(t *testing.T) {
+	// 同名ミッションのグループで last.Completed が false の場合 → ✨ が付く
+	userData := []data.UserData{
+		{
+			UserName:  "太郎",
+			StudyTime: data.StudyTime{Hours: 0, Minutes: 15},
+			Missions: []data.Mission{
+				{Name: "算数", Score: 50, Completed: true},
+				{Name: "算数", Score: 50, Completed: false}, // 未完了
+			},
+		},
+	}
+
+	msg := FormatDetailedMessage(userData, nil)
+	if !strings.Contains(msg, "✨") {
+		t.Error("should show ✨ when last mission in group is not completed")
+	}
+}
+
+func TestFormatDetailedMessage_MissionNotInChangesMap_Completed(t *testing.T) {
+	// userChangesMap が存在するが、そのミッションが changesMap に含まれず、
+	// かつ mission.Completed == true の場合 → ✨ は付かない
+	userData := []data.UserData{
+		{
+			UserName:  "太郎",
+			StudyTime: data.StudyTime{Hours: 0, Minutes: 10},
+			Missions: []data.Mission{
+				{Name: "算数", Score: 90, Completed: true},
+			},
+		},
+	}
+
+	// missionChanges は存在するが "算数" は含まない（別のミッションのみ）
+	missionChanges := &data.MissionDetailChanges{
+		UserChanges: []data.UserMissionChanges{
+			{
+				UserName: "太郎",
+				MissionChanges: []data.MissionChange{
+					{MissionName: "理科", Type: "new_mission", CurrentScore: 80},
+				},
+			},
+		},
+	}
+
+	msg := FormatDetailedMessage(userData, missionChanges)
+	if !strings.Contains(msg, "算数") {
+		t.Error("should contain mission name 算数")
+	}
+	if !strings.Contains(msg, "90点") {
+		t.Error("should show score 90点")
+	}
+	// Completed==true かつ changesMap に存在しないので ✨ は付かない
+	if strings.Contains(msg, "✨") {
+		t.Error("should not show ✨ when mission is completed and not in changes map")
+	}
+}

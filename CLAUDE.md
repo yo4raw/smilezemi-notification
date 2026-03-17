@@ -8,74 +8,70 @@ GitHub Actionsで定期実行し、子供の学習状況をLINEに自動通知�
 ### System Flow
 
 ```text
-GitHub Actions (cron) → Docker → Playwright (headless Chromium)
+GitHub Actions (cron) → Docker → chromedp (headless Chromium)
   → みまもるネット ログイン → データクローリング → 前回差分比較 → LINE Push通知
 ```
 
 ### Two Entry Points
 
-1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。勉強時間・ミッション詳細・点数を取得しLINE通知
-2. **週間レポート** (`src/weekly-report-index.js`): 毎週月曜 JST 17:00 に実行。週間学習ガイダンスレポートを取得しLINE通知
+1. **日次通知** (`cmd/crawler/main.go`): 毎日 JST 20:00 に実行。勉強時間・ミッション詳細・点数を取得しLINE通知
+2. **週間レポート** (`cmd/weekly/main.go`): 毎週月曜 JST 17:00 に実行。週間学習ガイダンスレポートを取得しLINE通知
 
 ### Workflows
 
-- `.github/workflows/crawler.yml` → `docker compose up` → `node src/index.js`
-- `.github/workflows/weekly-report.yml` → `docker compose run --rm crawler node src/weekly-report-index.js`
+- `.github/workflows/crawler.yml` → `docker compose up` → `/app/crawler`
+- `.github/workflows/weekly-report.yml` → `docker compose run --rm crawler /app/weekly`
 
 ## Project Structure
 
 ```text
-src/
-├── index.js                  # メインエントリ（日次通知）
-├── weekly-report-index.js    # 週間レポートエントリ
-├── config.js                 # 環境変数管理 (loadConfig, maskSensitiveData, validateSecrets)
+cmd/
+├── crawler/main.go            # メインエントリ（日次通知）
+└── weekly/main.go             # 週間レポートエントリ
+
+internal/
+├── auth/auth.go               # 認証モジュール (Login, attemptLogin)
+├── browser/browser.go         # chromedpブラウザ初期化 (NewContext)
 ├── config/
-│   └── selectors.js          # DOMセレクタ定義（login, dashboard, missionDetails, weeklyReport等）
-├── auth.js                   # 認証モジュール (login, attemptLogin)
-├── crawler.js                # クローリング (getUserList, getAllUsersDetailedData, getMissionDetails, getStudyTime等)
-├── data.js                   # データ永続化 (loadPreviousData, compareData, saveData, migrateDataV1toV2)
-├── notifier.js               # LINE通知 (sendNotification, formatDetailedMessage, truncateToLimit)
-├── weekly-report-crawler.js  # 週間レポートクローリング (getAllUsersWeeklyReport, getGuidanceReport)
-└── weekly-report-notifier.js # 週間レポート通知フォーマット (formatWeeklyReport)
-
-tests/                        # Node.js built-in test runner (node --test)
-├── config.test.js
-├── auth.test.js
-├── crawler.test.js
-├── data.test.js
-├── notifier.test.js
-└── index.test.js
-
-scripts/                      # ユーティリティスクリプト
-├── validate-env.js           # 環境変数検証 (npm run validate:env)
-├── validate-security.sh      # セキュリティ検証 (npm run validate:security)
-└── test-docker.sh            # Docker環境テスト (npm run test:docker)
+│   ├── config.go              # 環境変数管理 (LoadConfig, ValidateSecrets, MaskSensitiveString)
+│   └── config_test.go
+├── crawler/
+│   ├── crawler.go             # クローリング (GetUserList, GetAllUsersDetailedData, GetMissionDetails等)
+│   ├── weekly.go              # 週間レポートクローリング (GetAllUsersWeeklyReport, GetGuidanceReport)
+│   └── selectors.go           # DOMセレクタ・定数定義
+├── data/
+│   ├── data.go                # データ永続化 (LoadPreviousData, CompareData, SaveData)
+│   └── data_test.go
+└── notifier/
+    ├── notifier.go            # LINE通知 (LineClient.Send, FormatDetailedMessage, TruncateToLimit)
+    ├── notifier_test.go
+    ├── weekly.go              # 週間レポート通知フォーマット (FormatWeeklyReport)
+    └── weekly_test.go
 
 .github/workflows/
-├── crawler.yml               # 日次クローリングワークフロー (cron: 毎日 UTC 11:00)
-└── weekly-report.yml         # 週間レポートワークフロー (cron: 毎週月曜 UTC 08:00)
+├── ci.yml                     # CI: テスト・ビルド
+├── crawler.yml                # 日次クローリングワークフロー (cron: 毎日 UTC 11:00)
+└── weekly-report.yml          # 週間レポートワークフロー (cron: 毎週月曜 UTC 08:00)
 ```
 
 ## Tech Stack
 
-- **Runtime**: Node.js >= 24.0.0
-- **Browser Automation**: Playwright (Chromium headless)
+- **Language**: Go 1.25
+- **Browser Automation**: chromedp (headless Chromium)
 - **Notification**: LINE Messaging API (Push Message, REST直接呼出)
-- **CI/CD**: GitHub Actions + Docker (mcr.microsoft.com/playwright)
-- **Module System**: CommonJS (`require`/`module.exports`)
-- **Test**: Node.js built-in test runner (`node --test`)
-- **Dependencies**: playwright (prod), dotenv (dev)
+- **CI/CD**: GitHub Actions + Docker (multi-stage build)
+- **Test**: Go標準テスト (`go test ./...`)
+- **Dependencies**: chromedp (prod)
 
 ## Common Commands
 
 ```bash
-npm test                  # テスト実行
-npm start                 # 日次通知実行 (node src/index.js)
-npm run validate:env      # 環境変数検証
-npm run validate:all      # 全検証（env + security）
-npm run docker:build      # Dockerイメージビルド
-npm run docker:run        # Docker実行
-npm run test:docker       # Docker環境テスト
+go test ./...                 # テスト実行
+go build ./cmd/crawler        # 日次通知バイナリビルド
+go build ./cmd/weekly         # 週間レポートバイナリビルド
+docker compose build          # Dockerイメージビルド
+docker compose up             # Docker実行（日次通知）
+docker compose run --rm crawler /app/weekly  # Docker実行（週間レポート）
 ```
 
 ## Environment Variables
@@ -85,15 +81,17 @@ npm run test:docker       # Docker環境テスト
 
 ## Key Design Decisions
 
-- **Playwright over Puppeteer**: GitHub Actions環境との互換性、安定したセレクタAPI
+- **chromedp over Playwright**: GoネイティブのChrome DevTools Protocol実装、外部バイナリ不要
 - **LINE Messaging API**: LINE Notify API終了(2025/3/31)に伴う移行先。Push Message API使用
 - **GitHub Actions + Docker**: インフラ管理不要、Secrets統合、無料枠で十分
 - **毎回ログイン**: セッション永続化なし、ワークフロー終了時にクリーンアップ
 - **グレースフルデグラデーション**: 詳細取得失敗時は基本モードにフォールバック
+- **cmd/ パターン**: 複数エントリポイントを標準的なGoプロジェクト構造で管理
+- **internal/browser**: chromedp初期化コードを共通化し、エントリポイント間の重複を排除
 
 ## DOM操作パターン
 
-- DOMセレクタは `src/config/selectors.js` に集約管理
+- DOMセレクタは `internal/crawler/selectors.go` に集約管理
 - 日付フォーマット: MM/DD形式、ゼロパディング必須
 - 座標ベースフィルタリング: X座標 < 250 で左側UI要素識別
 - 位置ベース範囲計算: boundingBox()でY座標範囲を計算しセクション分離

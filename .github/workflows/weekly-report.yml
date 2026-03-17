@@ -20,7 +20,6 @@ jobs:
 
       # 2. .envファイルを作成
       - name: .envファイルを作成
-        working-directory: go
         run: |
           echo "SMILEZEMI_USERNAME=${{ secrets.SMILEZEMI_USERNAME }}" >> .env
           echo "SMILEZEMI_PASSWORD=${{ secrets.SMILEZEMI_PASSWORD }}" >> .env
@@ -51,12 +50,10 @@ jobs:
 
       # 4. Dockerイメージをビルド
       - name: Dockerイメージをビルド
-        working-directory: go
         run: docker compose build
 
       # 5. 週間レポート通知を実行
       - name: 週間レポート通知を実行
-        working-directory: go
         run: docker compose run --rm crawler /app/weekly
 
       # 6. スクリーンショットをアーティファクトとして保存（常に実行）
@@ -65,11 +62,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: weekly-report-screenshots-${{ github.run_number }}
-          path: go/screenshots/
+          path: screenshots/
           retention-days: 90
           if-no-files-found: ignore
 
       # 7. .envファイルを削除（セキュリティ対策）
       - name: .envファイルを削除
         if: always()
-        run: rm -f go/.env
+        run: rm -f .env

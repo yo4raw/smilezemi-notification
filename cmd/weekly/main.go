@@ -2,14 +2,12 @@
 package main
 
 import (
-	"context"
 	"log"
 	"os"
 	"time"
 
-	"github.com/chromedp/chromedp"
-
 	"github.com/yaoko/smilezemi-notification/internal/auth"
+	"github.com/yaoko/smilezemi-notification/internal/browser"
 	"github.com/yaoko/smilezemi-notification/internal/config"
 	"github.com/yaoko/smilezemi-notification/internal/crawler"
 	"github.com/yaoko/smilezemi-notification/internal/notifier"
@@ -34,24 +32,8 @@ func run() int {
 
 	// 2. chromedpブラウザの起動
 	log.Println("🌐 ブラウザを起動しています...")
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("no-sandbox", true),
-		chromedp.Flag("disable-setuid-sandbox", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("headless", true),
-		chromedp.Flag("ignore-certificate-errors", true),
-	)
-
-	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer allocCancel()
-
-	ctx, cancel := chromedp.NewContext(allocCtx)
+	ctx, cancel := browser.NewContext(5 * time.Minute)
 	defer cancel()
-
-	ctx, cancel = context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
 	log.Println("✅ ブラウザの起動が完了しました")
 
 	// 3. ログイン

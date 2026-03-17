@@ -7,7 +7,7 @@ WORKDIR /build
 COPY . .
 
 # vendorモードでビルド（ネットワーク不要）
-RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /crawler .
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /crawler ./cmd/crawler
 RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /weekly ./cmd/weekly
 
 # ステージ2: 実行環境（chromium + バイナリ）
