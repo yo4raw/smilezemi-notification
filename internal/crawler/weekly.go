@@ -9,7 +9,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 
-	"github.com/yaoko/smilezemi-notification/internal/notifier"
+	"github.com/yo4raw/smilezemi-notification/internal/notifier"
 )
 
 // NavigateToGuidanceReport は指導レポートページに遷移する。

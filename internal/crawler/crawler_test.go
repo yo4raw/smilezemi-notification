@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yaoko/smilezemi-notification/internal/data"
+	"github.com/yo4raw/smilezemi-notification/internal/data"
 )
 
 // ---- maskName ----

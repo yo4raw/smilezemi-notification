@@ -11,7 +11,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 
-	"github.com/yaoko/smilezemi-notification/internal/data"
+	"github.com/yo4raw/smilezemi-notification/internal/data"
 )
 
 // User はサイドバーから取得したユーザー情報。

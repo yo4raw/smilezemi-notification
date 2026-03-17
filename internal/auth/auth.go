@@ -11,8 +11,8 @@ import (
 
 	"github.com/chromedp/chromedp"
 
-	"github.com/yaoko/smilezemi-notification/internal/config"
-	"github.com/yaoko/smilezemi-notification/internal/crawler"
+	"github.com/yo4raw/smilezemi-notification/internal/config"
+	"github.com/yo4raw/smilezemi-notification/internal/crawler"
 )
 
 // LoginOptions はログインオプション。

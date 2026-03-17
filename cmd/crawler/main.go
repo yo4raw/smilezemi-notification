@@ -7,12 +7,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/yaoko/smilezemi-notification/internal/auth"
-	"github.com/yaoko/smilezemi-notification/internal/browser"
-	"github.com/yaoko/smilezemi-notification/internal/config"
-	"github.com/yaoko/smilezemi-notification/internal/crawler"
-	"github.com/yaoko/smilezemi-notification/internal/data"
-	"github.com/yaoko/smilezemi-notification/internal/notifier"
+	"github.com/yo4raw/smilezemi-notification/internal/auth"
+	"github.com/yo4raw/smilezemi-notification/internal/browser"
+	"github.com/yo4raw/smilezemi-notification/internal/config"
+	"github.com/yo4raw/smilezemi-notification/internal/crawler"
+	"github.com/yo4raw/smilezemi-notification/internal/data"
+	"github.com/yo4raw/smilezemi-notification/internal/notifier"
 )
 
 func main() {

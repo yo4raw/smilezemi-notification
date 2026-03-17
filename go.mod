@@ -1,4 +1,4 @@
-module github.com/yaoko/smilezemi-notification
+module github.com/yo4raw/smilezemi-notification
 
 go 1.25.0
 

@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/yaoko/smilezemi-notification/internal/config"
-	"github.com/yaoko/smilezemi-notification/internal/data"
+	"github.com/yo4raw/smilezemi-notification/internal/config"
+	"github.com/yo4raw/smilezemi-notification/internal/data"
 )
 
 const (
