@@ -279,10 +279,15 @@ function formatDetailedMessage(userData, missionChanges = null) {
     const minutes = user.studyTime?.minutes ?? 0;
     message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
 
+    // 中学生コースのスコア単位は "%" 、小学生コースは "点"
+    const isJuniorHigh = user.userName.includes('中学生コース');
+    const scoreUnit = isJuniorHigh ? '%' : '点';
+    const detailLabel = isJuniorHigh ? '学習詳細' : 'ミッション詳細';
+
     // ミッション詳細
     const missions = user.missions ?? [];
     if (missions.length > 0) {
-      message += '\n📋 ミッション詳細:\n';
+      message += `\n📋 ${detailLabel}:\n`;
 
       // ユーザーの変化情報を取得
       const userChangesMap = changesMap.get(user.userName);
@@ -310,29 +315,22 @@ function formatDetailedMessage(userData, missionChanges = null) {
 
             if (change) {
               if (change.type === 'score_change') {
-                // 点数変化: 95→100点 📈 または 100→95点 📉
-                scoreDisplay = `${change.previousScore}→${change.currentScore}点`;
+                scoreDisplay = `${change.previousScore}→${change.currentScore}${scoreUnit}`;
                 changeIcon = change.scoreChange > 0 ? ' 📈' : ' 📉';
               } else if (change.type === 'new_mission') {
-                // 新規ミッション: 100点（NEW）✨
-                scoreDisplay = `${change.currentScore}点（NEW）`;
+                scoreDisplay = `${change.currentScore}${scoreUnit}（NEW）`;
                 changeIcon = ' ✨';
               } else {
-                // 変化なし: 100点
-                scoreDisplay = `${change.currentScore}点`;
+                scoreDisplay = `${change.currentScore}${scoreUnit}`;
               }
             } else {
-              // 変化情報がない場合
-              scoreDisplay = `${mission.score}点`;
-              // NEWマーク判定（completed: false）
+              scoreDisplay = `${mission.score}${scoreUnit}`;
               if (!mission.completed) {
                 changeIcon = ' ✨';
               }
             }
           } else {
-            // missionChanges が提供されていない場合（後方互換性）
-            scoreDisplay = `${mission.score}点`;
-            // NEWマーク判定（completed: false）
+            scoreDisplay = `${mission.score}${scoreUnit}`;
             if (!mission.completed) {
               changeIcon = ' ✨';
             }
@@ -343,12 +341,10 @@ function formatDetailedMessage(userData, missionChanges = null) {
           const lastMission = group[group.length - 1];
 
           if (firstMission.score !== lastMission.score) {
-            // 点数が変化した場合: 80→100点
-            scoreDisplay = `${firstMission.score}→${lastMission.score}点`;
+            scoreDisplay = `${firstMission.score}→${lastMission.score}${scoreUnit}`;
             changeIcon = lastMission.score > firstMission.score ? ' 📈' : ' 📉';
           } else {
-            // 点数が同じ場合: 100点（複数回）
-            scoreDisplay = `${lastMission.score}点`;
+            scoreDisplay = `${lastMission.score}${scoreUnit}`;
           }
 
           // NEWマーク判定（最後の実施が未完了）
@@ -360,7 +356,7 @@ function formatDetailedMessage(userData, missionChanges = null) {
         message += `  ・${missionName}: ${scoreDisplay}${changeIcon}\n`;
       });
     } else {
-      message += '\n📋 ミッション詳細なし\n';
+      message += `\n📋 ${detailLabel}なし\n`;
     }
 
     // ユーザー間のセパレータ（最後のユーザー以外）

@@ -127,6 +127,31 @@ module.exports = {
     newLabel: 'text="NEW"'
   },
 
+  // 中学生コース タイムラインのセレクタ
+  // DOM調査日: 2026-04-02 (Playwrightで実サイト調査)
+  // 中学生コースのURL: /study/c/timeline（小学生コースの /study/s/timeline とは別UI）
+  juniorHighTimeline: {
+    root: '.timeline_root__He2PS',
+    dailyRoot: '.dailyRoot__a754V',
+    studyDate: '.studyDate__GL9tf',
+    studyDateInner: '.studyDateInner__s0Jtj',
+    dateLabel: '.date__FKSSm',
+    subjectsContainer: '.subjects__eHK8S',
+    subjectGroup: '.subject__bWHro',
+    subjectName: '.name__TRpmJ',
+    subjectTime: '.time__Pn3gb',
+    courseName: '.name__nAtRj',
+    courseResult: '.current__PxOK0',
+    // フォールバック（ハッシュ変更対策）
+    alternativeSelectors: {
+      dailyRoot: '[class*="dailyRoot"]',
+      dateLabel: '[class*="date__F"]',
+      subjectGroup: '[class*="subject__b"]',
+      courseName: '[class*="name__"][class*="limit3Line"]',
+      courseResult: '[class*="current__"]'
+    }
+  },
+
   // 週間レポート（指導レポート）のセレクタ
   // DOM調査日: 2026-03-16 (scripts/explore-guidance-report.js で確認)
   weeklyReport: {

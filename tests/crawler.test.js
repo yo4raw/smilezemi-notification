@@ -144,6 +144,7 @@ describe('クローラーモジュール (src/crawler.js)', () => {
         // その他（日付パターン等）
         return createChainableLocator({ elements: [], visible: false });
       }),
+      url: mock.fn(() => config.pageUrl || 'https://smile-zemi.jp/mimamoru-net/ui/study/s/timeline'),
       waitForTimeout: mock.fn(async () => {}),
       waitForLoadState: mock.fn(async () => {}),
       keyboard: { press: mock.fn(async () => {}) },

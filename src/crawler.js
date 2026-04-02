@@ -508,6 +508,22 @@ async function returnToCourseSelection(page, userName) {
 }
 
 /**
+ * 中学生コースかどうかを判定
+ * @private
+ * @param {string|null} courseName - コース名（getCourseDataから渡される）
+ * @param {import('playwright').Page} page - フォールバック用
+ * @returns {boolean}
+ */
+function isJuniorHighSchool(courseName, page) {
+  // コース名が明示的に渡された場合はそれで判定
+  if (courseName) {
+    return courseName === '中学生コース';
+  }
+  // フォールバック: URLで判定
+  return page.url().includes('/study/c/');
+}
+
+/**
  * 今日の日付を取得（MM/DD形式）
  * @private
  * @returns {Object} - { withPadding: "01/16", withoutPadding: "1/16" }
@@ -524,10 +540,176 @@ function getTodayDate() {
 }
 
 /**
+ * 中学生コース: 今日の日付セクション（dailyRoot）を取得
+ * @private
+ * @param {import('playwright').Page} page
+ * @returns {Promise<{element: import('playwright').Locator|null, dateText: string|null}>}
+ */
+async function findTodayDailyRootForJuniorHigh(page) {
+  const todayDates = getTodayDate();
+  const { juniorHighTimeline } = selectors;
+
+  const dailyRoots = await page.locator(juniorHighTimeline.dailyRoot).all();
+
+  for (const root of dailyRoots) {
+    const dateLabel = root.locator(juniorHighTimeline.dateLabel).first();
+    const dateText = await dateLabel.textContent().catch(() => '');
+
+    for (const pattern of [todayDates.withPadding, todayDates.withoutPadding]) {
+      if (dateText.includes(pattern)) {
+        return { element: root, dateText: pattern };
+      }
+    }
+  }
+
+  return { element: null, dateText: null };
+}
+
+/**
+ * 中学生コース: 勉強時間を取得
+ * @private
+ */
+async function getStudyTimeForJuniorHigh(page) {
+  try {
+    const todayDates = getTodayDate();
+    const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page);
+
+    if (!todayRoot) {
+      console.log(`  ℹ️ [中学生] 今日(${todayDates.withPadding})のデータが見つかりません（勉強時間: 0時間0分）`);
+      return { success: true, hours: 0, minutes: 0 };
+    }
+
+    // studyDateInner内の時間テキスト（例: "6分"）を取得
+    const studyDateInner = todayRoot.locator(selectors.juniorHighTimeline.studyDateInner).first();
+    const innerText = await studyDateInner.textContent().catch(() => '');
+
+    // "6分" や "1時間30分" をパース
+    let hours = 0;
+    let minutes = 0;
+    const fullMatch = innerText.match(/(\d+)時間(\d+)分/);
+    if (fullMatch) {
+      hours = parseInt(fullMatch[1], 10);
+      minutes = parseInt(fullMatch[2], 10);
+    } else {
+      const minutesMatch = innerText.match(/(\d+)分/);
+      if (minutesMatch) {
+        minutes = parseInt(minutesMatch[1], 10);
+      }
+      const hoursMatch = innerText.match(/(\d+)時間/);
+      if (hoursMatch) {
+        hours = parseInt(hoursMatch[1], 10);
+      }
+    }
+
+    if (minutes >= 60) {
+      hours += Math.floor(minutes / 60);
+      minutes = minutes % 60;
+    }
+
+    console.log(`📚 [中学生] 勉強時間: ${hours}時間${minutes}分`);
+    return { success: true, hours, minutes };
+  } catch (error) {
+    return { success: false, error: `[中学生] 勉強時間取得エラー: ${error.message}`, hours: 0, minutes: 0 };
+  }
+}
+
+/**
+ * 中学生コース: 今日の講座数を取得
+ * @private
+ */
+async function getTodayMissionCountForJuniorHigh(page) {
+  try {
+    const todayDates = getTodayDate();
+    const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page);
+
+    if (!todayRoot) {
+      console.log(`  ℹ️ [中学生] 今日(${todayDates.withPadding})のデータはまだありません（0件として扱います）`);
+      return { success: true, count: 0 };
+    }
+
+    // subject__bWHro 内の course__KrAEA をカウント
+    const courses = await todayRoot.locator('.course__KrAEA').all();
+    const count = courses.length;
+
+    console.log(`📊 [中学生] 今日(${todayDates.withPadding})の講座数: ${count}件`);
+    return { success: true, count };
+  } catch (error) {
+    return { success: false, error: `[中学生] 講座数取得エラー: ${error.message}`, count: 0 };
+  }
+}
+
+/**
+ * 中学生コース: 今日の講座詳細を取得
+ * @private
+ */
+async function getMissionDetailsForJuniorHigh(page) {
+  try {
+    const todayDates = getTodayDate();
+    const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page);
+
+    if (!todayRoot) {
+      console.log(`  ℹ️ [中学生] 今日(${todayDates.withPadding})のデータが見つかりません（空配列として扱います）`);
+      return { success: true, missions: [] };
+    }
+
+    const { juniorHighTimeline } = selectors;
+    const missions = [];
+
+    // 各教科グループを取得
+    const subjectGroups = await todayRoot.locator(juniorHighTimeline.subjectGroup).all();
+
+    for (const subjectGroup of subjectGroups) {
+      // 教科名を取得（例: "数学"）
+      const subjectNameEl = subjectGroup.locator(juniorHighTimeline.subjectName).first();
+      const subjectName = await subjectNameEl.textContent().catch(() => '');
+
+      // 各講座を取得
+      const courseElements = await subjectGroup.locator('.course__KrAEA').all();
+
+      for (const courseEl of courseElements) {
+        // 講座名を取得（例: "いろいろな図形"）
+        const courseNameEl = courseEl.locator(juniorHighTimeline.courseName).first();
+        const courseName = await courseNameEl.textContent().catch(() => '');
+
+        // スコアを取得（例: "66%"）
+        const scoreEl = courseEl.locator(juniorHighTimeline.courseResult).first();
+        const scoreText = await scoreEl.textContent().catch(() => '');
+        const scoreMatch = scoreText.match(/(\d+)/);
+        const score = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
+
+        const name = subjectName && courseName
+          ? `${subjectName.trim()}: ${courseName.trim()}`
+          : courseName.trim() || subjectName.trim() || 'ミッション';
+
+        missions.push({
+          name,
+          score,
+          completed: true
+        });
+
+        if (missions.length >= 10) break;
+      }
+
+      if (missions.length >= 10) break;
+    }
+
+    console.log(`📋 [中学生] 今日(${todayDates.withPadding})の講座詳細: ${missions.length}件`);
+    return { success: true, missions };
+  } catch (error) {
+    return { success: false, error: `[中学生] 講座詳細取得エラー: ${error.message}`, missions: [] };
+  }
+}
+
+/**
  * 今日の完了したミッション数を取得
  * @private
  */
-async function getTodayMissionCount(page) {
+async function getTodayMissionCount(page, courseName = null) {
+  // 中学生コースの場合は専用ロジックを使用
+  if (isJuniorHighSchool(courseName, page)) {
+    return getTodayMissionCountForJuniorHigh(page);
+  }
+
   try {
     const todayDates = getTodayDate();
 
@@ -643,7 +825,12 @@ async function getTodayMissionCount(page) {
  * @param {import('playwright').Page} page - Playwrightページインスタンス
  * @returns {Promise<{success: boolean, hours?: number, minutes?: number, error?: string}>}
  */
-async function getStudyTime(page) {
+async function getStudyTime(page, courseName = null) {
+  // 中学生コースの場合は専用ロジックを使用
+  if (isJuniorHighSchool(courseName, page)) {
+    return getStudyTimeForJuniorHigh(page);
+  }
+
   try {
     const todayDates = getTodayDate();
     const { studyTime } = selectors.missionDetails;
@@ -779,7 +966,12 @@ async function getStudyTime(page) {
  * @param {import('playwright').Page} page - Playwrightページインスタンス
  * @returns {Promise<{success: boolean, missions?: Array<{name: string, score: number, completed: boolean}>, error?: string}>}
  */
-async function getMissionDetails(page) {
+async function getMissionDetails(page, courseName = null) {
+  // 中学生コースの場合は専用ロジックを使用
+  if (isJuniorHighSchool(courseName, page)) {
+    return getMissionDetailsForJuniorHigh(page);
+  }
+
   try {
     const todayDates = getTodayDate();
 
@@ -1042,7 +1234,7 @@ async function getCourseData(page, userName, courseName, dateString) {
     let detailsAvailable = true;
 
     // 勉強時間を取得
-    const studyTimeResult = await getStudyTime(page);
+    const studyTimeResult = await getStudyTime(page, courseName);
     const studyTime = studyTimeResult.success
       ? { hours: studyTimeResult.hours, minutes: studyTimeResult.minutes }
       : { hours: 0, minutes: 0 };
@@ -1052,7 +1244,7 @@ async function getCourseData(page, userName, courseName, dateString) {
     }
 
     // ミッション数を取得
-    const missionCountResult = await getTodayMissionCount(page);
+    const missionCountResult = await getTodayMissionCount(page, courseName);
     const missionCount = missionCountResult.success ? missionCountResult.count : 0;
 
     if (!missionCountResult.success) {
@@ -1060,7 +1252,7 @@ async function getCourseData(page, userName, courseName, dateString) {
     }
 
     // ミッション詳細を取得
-    const missionsResult = await getMissionDetails(page);
+    const missionsResult = await getMissionDetails(page, courseName);
     const missions = missionsResult.success ? missionsResult.missions : [];
 
     if (!missionsResult.success) {
