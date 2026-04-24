@@ -136,15 +136,28 @@ async function getCurrentUserName(page) {
 async function checkCourseSelection(page) {
   try {
     const { courseSelection } = selectors;
+    const viewport = page.viewportSize();
 
-    // 中学生コースまたは小学生コースの要素が表示されているか確認
-    const juniorHighSchoolVisible = await page.locator(courseSelection.juniorHighSchool)
-      .isVisible({ timeout: courseSelection.courseSelectionWaitTime })
-      .catch(() => false);
+    // サイドバー内のコース切替ボタンは画面外(x >= viewport.width)に transform で押し出されているが
+    // display:block / visibility:visible のまま残っているため isVisible() は true を返す。
+    // 本物のコース選択画面のボタンのみを検出するため、boundingBox の中心が viewport 内に
+    // 収まっているかで絞り込む。
+    const isActuallyVisible = async (selector) => {
+      const locator = page.locator(selector).first();
+      const visible = await locator
+        .isVisible({ timeout: courseSelection.courseSelectionWaitTime })
+        .catch(() => false);
+      if (!visible) return false;
+      if (!viewport) return true;
+      const box = await locator.boundingBox().catch(() => null);
+      if (!box) return false;
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      return cx >= 0 && cy >= 0 && cx < viewport.width && cy < viewport.height;
+    };
 
-    const elementarySchoolVisible = await page.locator(courseSelection.elementarySchool)
-      .isVisible({ timeout: courseSelection.courseSelectionWaitTime })
-      .catch(() => false);
+    const juniorHighSchoolVisible = await isActuallyVisible(courseSelection.juniorHighSchool);
+    const elementarySchoolVisible = await isActuallyVisible(courseSelection.elementarySchool);
 
     return {
       hasCourseSelection: juniorHighSchoolVisible || elementarySchoolVisible,
@@ -1340,12 +1353,11 @@ async function getAllUsersDetailedData(page) {
         console.log(`    中学生コース: ${courseSelectionResult.hasJuniorHighSchool ? 'あり' : 'なし'}`);
         console.log(`    小学生コース: ${courseSelectionResult.hasElementarySchool ? 'あり' : 'なし'}`);
 
-        // 中学生コース → 小学生コースの順に処理
+        // 両方のコースを持つユーザーは中学生コースのみを対象とする
         const courses = [];
         if (courseSelectionResult.hasJuniorHighSchool) {
           courses.push('中学生コース');
-        }
-        if (courseSelectionResult.hasElementarySchool) {
+        } else if (courseSelectionResult.hasElementarySchool) {
           courses.push('小学生コース');
         }
 
