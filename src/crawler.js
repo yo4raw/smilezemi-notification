@@ -1409,6 +1409,22 @@ async function getAllUsersDetailedData(page) {
           console.error(`  ❌ データ取得失敗: ${courseData.error}`);
         }
       }
+
+      // 次ユーザーへの切替前に小学生コースのタイムラインへ戻す。
+      // 中学生コース (/study/c/...) のページに居る状態のままサイドバーから
+      // 小学生コース単独ユーザーを選んでも切り替わらない事象があるため、
+      // 各ユーザー処理の最後に明示的にホーム位置へ戻しておく。
+      if (i < users.length - 1) {
+        try {
+          await page.goto('https://smile-zemi.jp/mimamoru-net/ui/study/s/timeline', {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000
+          });
+          await page.waitForTimeout(2000);
+        } catch (gotoError) {
+          console.warn(`  ⚠️ タイムラインへの復帰に失敗しました: ${gotoError.message}`);
+        }
+      }
     }
 
     // 少なくとも1件成功していれば、部分的な成功として扱う
