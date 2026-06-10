@@ -54,7 +54,29 @@ module.exports = {
     userSwitchDelay: 3000,  // 3秒
 
     // 追加の安定化待機
-    stabilizationDelay: 1000  // 1秒
+    stabilizationDelay: 1000,  // 1秒
+
+    // スクロール後の安定化待機の上限（旧固定待機 1000ms 以上）
+    scrollStabilizeTimeout: 2000,
+
+    // タイムライン日付要素の表示待ち上限
+    timelineDateTimeout: 3000,
+
+    // コース選択画面の再表示待ち上限（旧固定待機 2000ms 以上）
+    courseSelectionAppearTimeout: 5000
+  },
+
+  // サイドバー / ユーザー切り替えUIのセレクタと待機設定
+  // 追加日: 2026-06-10 (固定待機の条件ベース化対応)
+  sidebar: {
+    // サイドバー表示の判定に使うヘッダー
+    childrenHeader: 'text="お子さま"',
+    // ユーザーエリアクリックで誤ってプロフィールページへ遷移した場合の検出
+    profileSettings: 'text="プロフィール設定"',
+    // サイドバー表示待ちの上限（旧固定待機 2000-3000ms 以上）
+    openTimeout: 10000,
+    // メニュー展開後にユーザー名が現れるまでの上限（旧固定待機 2000ms 以上）
+    menuItemTimeout: 5000
   },
 
   // エラー検出用セレクタ

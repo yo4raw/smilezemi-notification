@@ -1,9 +1,12 @@
 name: スマイルゼミ クローラー
 
 on:
-  # 毎日 UTC 11:00 (JST 20:00) に自動実行
+  # 毎日 UTC 06:17 (JST 15:17) に起動し、ワークフロー内で JST 20:00 まで待機してから実行する。
+  # GitHub Actions の schedule は数時間遅延することがあるため(実測 1〜5.5時間)、
+  # 前倒しで起動して目標時刻まで sleep する方式を採用。
+  # 毎時0分は混雑のため遅延が最大化しやすく、意図的に避けている。
   schedule:
-    - cron: '0 11 * * *'
+    - cron: '17 6 * * *'
 
   # 手動実行をサポート
   workflow_dispatch:
@@ -11,7 +14,8 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # JST 20:00 までの最大待機 約283分 + ビルド/実行時間の余裕
+    timeout-minutes: 320
 
     steps:
       # 1. リポジトリのチェックアウト
@@ -52,11 +56,26 @@ jobs:
       - name: Dockerイメージをビルド
         run: docker compose build
 
-      # 5. クローラーを実行
+      # 5. JST 20:00 まで待機（スケジュール実行時のみ）
+      #    cron 起動が遅延して既に 20:00 を過ぎている場合は即実行する
+      - name: JST 20:00まで待機
+        if: github.event_name == 'schedule'
+        run: |
+          target=$(TZ=Asia/Tokyo date -d "today 20:00" +%s)
+          now=$(date +%s)
+          wait_sec=$(( target - now ))
+          if [ "$wait_sec" -gt 0 ]; then
+            echo "JST 20:00まで ${wait_sec} 秒待機します"
+            sleep "$wait_sec"
+          else
+            echo "既にJST 20:00を過ぎているため即実行します"
+          fi
+
+      # 6. クローラーを実行
       - name: クローラーを実行
         run: docker compose up --abort-on-container-exit
 
-      # 6. スクリーンショットをアーティファクトとして保存（常に実行）
+      # 7. スクリーンショットをアーティファクトとして保存（常に実行）
       - name: スクリーンショットを保存
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,7 +85,7 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
-      # 7. ミッションデータをアーティファクトとして保存（成功時のみ）
+      # 8. ミッションデータをアーティファクトとして保存（成功時のみ）
       - name: ミッションデータを保存
         if: success()
         uses: actions/upload-artifact@v4
@@ -76,7 +95,7 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
-      # 8. .envファイルを削除（セキュリティ対策）
+      # 9. .envファイルを削除（セキュリティ対策）
       - name: .envファイルを削除
         if: always()
         run: rm -f .env

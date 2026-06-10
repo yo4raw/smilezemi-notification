@@ -26,7 +26,11 @@ async function getUserList(page) {
     // 画面右上のユーザー名エリアをクリックしてサイドバーを開く
     const userArea = page.locator('div').filter({ hasText: 'さん' }).first();
     await userArea.click();
-    await page.waitForTimeout(2000);
+    // サイドバー（「お子さま」セクション）の表示を待つ
+    await page.waitForSelector(selectors.sidebar.childrenHeader, {
+      state: 'visible',
+      timeout: selectors.sidebar.openTimeout
+    }).catch(() => {});
 
     // 「お子さま」セクションの後に続くユーザー名を探す
     const childrenHeader = page.locator('text="お子さま"');
@@ -258,7 +262,11 @@ async function switchToUser(page, userName) {
 
     if (menuVisible) {
       await menuButton.click();
-      await page.waitForTimeout(2000);
+      // メニュー内に対象ユーザー名が表示されるのを待つ
+      await page.waitForSelector(`text="${userName}"`, {
+        state: 'visible',
+        timeout: selectors.sidebar.menuItemTimeout
+      }).catch(() => {});
 
       // メニュー/サイドバー内でユーザー名を探す
       const userInMenu = await page.locator(`text="${userName}"`).first().isVisible({ timeout: 3000 }).catch(() => false);
@@ -327,14 +335,24 @@ async function switchToUser(page, userName) {
 
     // クリックしてサイドバーまたはメニューを開く
     await userArea.click({ timeout: 5000 });
-    await page.waitForTimeout(3000);
+    // サイドバー表示 or プロフィールページ遷移のどちらかを待つ
+    await Promise.race([
+      page.waitForSelector(selectors.sidebar.childrenHeader, {
+        state: 'visible',
+        timeout: selectors.sidebar.openTimeout
+      }).catch(() => {}),
+      page.waitForSelector(selectors.sidebar.profileSettings, {
+        state: 'visible',
+        timeout: selectors.sidebar.openTimeout
+      }).catch(() => {})
+    ]);
 
     // プロフィールページに遷移した場合は戻る（ここではユーザー切り替えできない）
     const isProfilePage = await page.locator('text="プロフィール設定"').isVisible().catch(() => false);
     if (isProfilePage) {
       console.log(`  ⚠️ プロフィール設定ページに遷移しました（ユーザー切り替えには使えません）`);
       await page.goBack();
-      await page.waitForTimeout(2000);
+      await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
       throw new Error('プロフィールページではユーザー切り替えができません。別の方法を探す必要があります。');
     }
 
@@ -455,7 +473,11 @@ async function returnToCourseSelection(page, userName) {
 
     // ユーザー名エリアをクリックしてサイドバーを開く
     await userArea.click({ timeout: 5000 });
-    await page.waitForTimeout(3000);
+    // サイドバー（「お子さま」セクション）の表示を待つ
+    await page.waitForSelector(selectors.sidebar.childrenHeader, {
+      state: 'visible',
+      timeout: selectors.sidebar.openTimeout
+    }).catch(() => {});
 
     // サイドバーが開いたか確認
     const sidebarOpened = await page.locator('text="お子さま"').isVisible().catch(() => false);
@@ -498,7 +520,17 @@ async function returnToCourseSelection(page, userName) {
 
     // ページ遷移を待機
     await page.waitForLoadState('networkidle').catch(() => {});
-    await page.waitForTimeout(2000);
+    // コース選択ボタンの表示を待つ（checkCourseSelection は即時判定のため事前に待機）
+    await Promise.race([
+      page.waitForSelector(selectors.courseSelection.juniorHighSchool, {
+        state: 'visible',
+        timeout: selectors.waitStrategies.courseSelectionAppearTimeout
+      }).catch(() => {}),
+      page.waitForSelector(selectors.courseSelection.elementarySchool, {
+        state: 'visible',
+        timeout: selectors.waitStrategies.courseSelectionAppearTimeout
+      }).catch(() => {})
+    ]);
 
     // コース選択画面が表示されているか確認
     const courseSelectionResult = await checkCourseSelection(page);
@@ -990,7 +1022,14 @@ async function getMissionDetails(page, courseName = null) {
 
     // ページを上部にスクロールして最新のデータを表示
     await page.evaluate(() => window.scrollTo(0, 0));
-    await page.waitForTimeout(1000); // スクロール後の安定を待つ
+    // スクロール完了と日付要素の描画を待つ
+    await page.waitForFunction(() => window.scrollY === 0, {
+      timeout: selectors.waitStrategies.scrollStabilizeTimeout
+    }).catch(() => {});
+    await page.waitForSelector('text=/\\d+\\/\\d+/', {
+      state: 'visible',
+      timeout: selectors.waitStrategies.timelineDateTimeout
+    }).catch(() => {});
 
     // デバッグ用スクリーンショット
     await page.screenshot({ path: 'screenshots/mission-details-debug.png', fullPage: true });
