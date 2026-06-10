@@ -147,6 +147,8 @@ describe('クローラーモジュール (src/crawler.js)', () => {
       url: mock.fn(() => config.pageUrl || 'https://smile-zemi.jp/mimamoru-net/ui/study/s/timeline'),
       waitForTimeout: mock.fn(async () => {}),
       waitForLoadState: mock.fn(async () => {}),
+      waitForSelector: mock.fn(async () => null),
+      waitForFunction: mock.fn(async () => {}),
       keyboard: { press: mock.fn(async () => {}) },
       viewportSize: mock.fn(() => ({ width: vpWidth, height: vpHeight })),
       evaluate: mock.fn(async () => {}),
@@ -208,6 +210,42 @@ describe('クローラーモジュール (src/crawler.js)', () => {
 
       assert.strictEqual(result.success, false);
       assert.match(result.error, /タイムアウト|Timeout/);
+    });
+
+    // 固定待機→条件ベース待機への置き換え（waitForSelector）の回帰テスト
+    it('正常系: サイドバー表示を waitForSelector で待機する', async () => {
+      const mockPage = createMockPage({ userNames: ['太郎さん', '花子さん'] });
+      const result = await crawler.getUserList(mockPage);
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(
+        mockPage.waitForSelector.mock.callCount() >= 1,
+        true,
+        'waitForSelectorで条件ベース待機が行われること'
+      );
+    });
+
+    it('正常系: waitForSelectorがタイムアウトしても後続のisVisibleチェックで成功する', async () => {
+      const mockPage = createMockPage({ userNames: ['太郎さん'], showChildrenHeader: true });
+      mockPage.waitForSelector = mock.fn(async () => {
+        throw new Error('Timeout 10000ms exceeded');
+      });
+
+      const result = await crawler.getUserList(mockPage);
+
+      assert.strictEqual(result.success, true, 'waitForSelector失敗はcatchで握りつぶされ成功すること');
+    });
+
+    it('異常系: waitForSelectorタイムアウト後、要素が無ければ従来どおりエラーを返す', async () => {
+      const mockPage = createMockPage({ userNames: [], showChildrenHeader: false });
+      mockPage.waitForSelector = mock.fn(async () => {
+        throw new Error('Timeout 10000ms exceeded');
+      });
+
+      const result = await crawler.getUserList(mockPage);
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /お子さま/, '従来のエラーメッセージが維持されること');
     });
   });
 
