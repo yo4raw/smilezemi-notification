@@ -1,0 +1,92 @@
+name: スマイルゼミ 朝通知(中学生コース・前日分)
+
+on:
+  # 毎日 UTC 17:47 (JST 2:47) に起動し、ワークフロー内で JST 7:00 まで待機してから実行する。
+  # GitHub Actions の schedule は数時間遅延することがあるため(実測 1〜5.5時間)、
+  # 前倒しで起動して目標時刻まで sleep する方式を採用(crawler.yml と同方式)。
+  # 毎時0分は混雑のため遅延が最大化しやすく、意図的に避けている。
+  schedule:
+    - cron: '47 17 * * *'
+
+  # 手動実行をサポート
+  workflow_dispatch:
+
+jobs:
+  morning-notify:
+    runs-on: ubuntu-latest
+    # JST 7:00 までの最大待機 約253分 + ビルド/実行時間の余裕
+    timeout-minutes: 300
+
+    steps:
+      # 1. リポジトリのチェックアウト
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      # 2. .envファイルを作成
+      - name: .envファイルを作成
+        run: |
+          echo "SMILEZEMI_USERNAME=${{ secrets.SMILEZEMI_USERNAME }}" >> .env
+          echo "SMILEZEMI_PASSWORD=${{ secrets.SMILEZEMI_PASSWORD }}" >> .env
+          echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" >> .env
+          echo "LINE_USER_ID=${{ secrets.LINE_USER_ID }}" >> .env
+
+      # 3. 環境変数の検証
+      - name: 環境変数を検証
+        run: |
+          echo "環境変数の検証中..."
+          if [ -z "${{ secrets.SMILEZEMI_USERNAME }}" ]; then
+            echo "❌ SMILEZEMI_USERNAME が設定されていません"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SMILEZEMI_PASSWORD }}" ]; then
+            echo "❌ SMILEZEMI_PASSWORD が設定されていません"
+            exit 1
+          fi
+          if [ -z "${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" ]; then
+            echo "❌ LINE_CHANNEL_ACCESS_TOKEN が設定されていません"
+            exit 1
+          fi
+          if [ -z "${{ secrets.LINE_USER_ID }}" ]; then
+            echo "❌ LINE_USER_ID が設定されていません"
+            exit 1
+          fi
+          echo "✅ 全ての環境変数が設定されています"
+
+      # 4. Dockerイメージをビルド
+      - name: Dockerイメージをビルド
+        run: docker compose build
+
+      # 5. JST 7:00 まで待機(スケジュール実行時のみ)
+      #    cron 起動が遅延して既に 7:00 を過ぎている場合は即実行する
+      #    (前日分を取得するため、多少遅れても通知内容は正しい)
+      - name: JST 7:00まで待機
+        if: github.event_name == 'schedule'
+        run: |
+          target=$(TZ=Asia/Tokyo date -d "today 07:00" +%s)
+          now=$(date +%s)
+          wait_sec=$(( target - now ))
+          if [ "$wait_sec" -gt 0 ]; then
+            echo "JST 7:00まで ${wait_sec} 秒待機します"
+            sleep "$wait_sec"
+          else
+            echo "既にJST 7:00を過ぎているため即実行します"
+          fi
+
+      # 6. 朝通知を実行
+      - name: 朝通知を実行
+        run: docker compose run --rm crawler node src/morning-index.js
+
+      # 7. スクリーンショットをアーティファクトとして保存(常に実行)
+      - name: スクリーンショットを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: morning-screenshots-${{ github.run_number }}
+          path: screenshots/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      # 8. .envファイルを削除(セキュリティ対策)
+      - name: .envファイルを削除
+        if: always()
+        run: rm -f .env
