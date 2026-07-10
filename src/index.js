@@ -117,8 +117,9 @@ async function main() {
 
     // 6. クローリング（詳細データ取得 - v2.0）
     // Requirements: 1.1, 2.1, 3.1, 4.1, 5.1
+    // 中学生コースは朝通知(src/morning-index.js)で前日分を通知するため、ここでは小学生コースのみ対象
     console.log('🔍 詳細データを取得しています...');
-    const crawlResult = await getAllUsersDetailedData(page);
+    const crawlResult = await getAllUsersDetailedData(page, { courseFilter: 'elementary' });
 
     if (!crawlResult.success) {
       console.error('❌ クローリングに失敗しました:', crawlResult.error);
@@ -190,6 +191,12 @@ async function main() {
 
     const currentData = crawlResult.data;
     console.log(`✅ 詳細データの取得が完了しました（${currentData.length}件）`);
+
+    // 対象ユーザーが0件(全員中学生コース等)の場合は通知せず正常終了
+    if (currentData.length === 0) {
+      console.log('ℹ️ 小学生コースの対象ユーザーがいないため、通知をスキップして終了します');
+      return { success: true, exitCode: 0 };
+    }
 
     if (crawlResult.partialFailure) {
       console.warn('⚠️ 一部のデータ取得に失敗しました');
