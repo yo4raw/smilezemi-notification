@@ -569,18 +569,57 @@ function isJuniorHighSchool(courseName, page) {
 }
 
 /**
- * 今日の日付を取得（MM/DD形式）
- * @private
- * @returns {Object} - { withPadding: "01/16", withoutPadding: "1/16" }
+ * コース選択画面での取得対象コースを決定する
+ * @param {{hasJuniorHighSchool: boolean, hasElementarySchool: boolean}} courseSelection
+ * @param {'elementary'|'juniorHigh'|null} courseFilter - null は現行互換(中学生優先)
+ * @returns {string[]} 取得対象コース名の配列(対象なしは空配列 = スキップ)
  */
-function getTodayDate() {
-  const today = new Date();
-  const month = today.getMonth() + 1;
-  const day = today.getDate();
+function resolveTargetCourses(courseSelection, courseFilter) {
+  if (courseFilter === 'elementary') {
+    // 中学生コースを持つユーザー(両コース持ち含む)は朝通知側の対象のためスキップ
+    return !courseSelection.hasJuniorHighSchool && courseSelection.hasElementarySchool
+      ? ['小学生コース']
+      : [];
+  }
+  if (courseFilter === 'juniorHigh') {
+    return courseSelection.hasJuniorHighSchool ? ['中学生コース'] : [];
+  }
+  // 現行互換: 両コース持ちは中学生コースのみ
+  if (courseSelection.hasJuniorHighSchool) return ['中学生コース'];
+  if (courseSelection.hasElementarySchool) return ['小学生コース'];
+  return [];
+}
+
+/**
+ * コース選択画面が出ない単一コースユーザーが取得対象かを判定する
+ * @param {string} pageUrl - 現在のページURL(/study/c/ = 中学生コース)
+ * @param {'elementary'|'juniorHigh'|null} courseFilter
+ * @returns {boolean}
+ */
+function shouldProcessSingleCourseUser(pageUrl, courseFilter) {
+  const isJuniorHigh = pageUrl.includes('/study/c/');
+  if (courseFilter === 'elementary') return !isJuniorHigh;
+  if (courseFilter === 'juniorHigh') return isJuniorHigh;
+  return true;
+}
+
+/**
+ * 対象日の日付を取得（JST基準、MM/DD形式）
+ * GitHub Actions コンテナは UTC のため、ローカル時刻ではなく JST を明示して計算する。
+ * @param {number} dateOffset - 0=今日、-1=昨日
+ * @returns {{withPadding: string, withoutPadding: string, dateString: string}}
+ */
+function getTargetDates(dateOffset = 0) {
+  const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+  const target = new Date(Date.now() + JST_OFFSET_MS + dateOffset * 24 * 60 * 60 * 1000);
+  const year = target.getUTCFullYear();
+  const month = target.getUTCMonth() + 1;
+  const day = target.getUTCDate();
 
   return {
     withPadding: `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`,
-    withoutPadding: `${month}/${day}`
+    withoutPadding: `${month}/${day}`,
+    dateString: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   };
 }
 
@@ -591,7 +630,7 @@ function getTodayDate() {
  * @returns {Promise<{element: import('playwright').Locator|null, dateText: string|null}>}
  */
 async function findTodayDailyRootForJuniorHigh(page) {
-  const todayDates = getTodayDate();
+  const todayDates = getTargetDates(0);
   const { juniorHighTimeline } = selectors;
 
   const dailyRoots = await page.locator(juniorHighTimeline.dailyRoot).all();
@@ -616,7 +655,7 @@ async function findTodayDailyRootForJuniorHigh(page) {
  */
 async function getStudyTimeForJuniorHigh(page) {
   try {
-    const todayDates = getTodayDate();
+    const todayDates = getTargetDates(0);
     const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page);
 
     if (!todayRoot) {
@@ -664,7 +703,7 @@ async function getStudyTimeForJuniorHigh(page) {
  */
 async function getTodayMissionCountForJuniorHigh(page) {
   try {
-    const todayDates = getTodayDate();
+    const todayDates = getTargetDates(0);
     const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page);
 
     if (!todayRoot) {
@@ -689,7 +728,7 @@ async function getTodayMissionCountForJuniorHigh(page) {
  */
 async function getMissionDetailsForJuniorHigh(page) {
   try {
-    const todayDates = getTodayDate();
+    const todayDates = getTargetDates(0);
     const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page);
 
     if (!todayRoot) {
@@ -756,7 +795,7 @@ async function getTodayMissionCount(page, courseName = null) {
   }
 
   try {
-    const todayDates = getTodayDate();
+    const todayDates = getTargetDates(0);
 
     // 両方のパターンで検索（ゼロパディングあり・なし）
     const patterns = [todayDates.withPadding, todayDates.withoutPadding];
@@ -877,7 +916,7 @@ async function getStudyTime(page, courseName = null) {
   }
 
   try {
-    const todayDates = getTodayDate();
+    const todayDates = getTargetDates(0);
     const { studyTime } = selectors.missionDetails;
 
     // まず今日の日付があるかチェック
@@ -1018,7 +1057,7 @@ async function getMissionDetails(page, courseName = null) {
   }
 
   try {
-    const todayDates = getTodayDate();
+    const todayDates = getTargetDates(0);
 
     // ページを上部にスクロールして最新のデータを表示
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -1567,6 +1606,9 @@ module.exports = {
   getStudyTime,
   getMissionDetails,
   getTotalScore,
+  getTargetDates,
+  resolveTargetCourses,
+  shouldProcessSingleCourseUser,
   switchToUser,
   checkCourseSelection,
   selectCourse,
