@@ -247,13 +247,17 @@ function formatMessage(changes) {
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} [previousData] - 前回のユーザーデータ配列（v2.0形式、オプション）
  * @returns {string} - フォーマットされたメッセージ
  */
-function formatDetailedMessage(userData, missionChanges = null) {
-  // ヘッダー
-  let message = '📊 スマイルゼミ 学習状況\n\n';
+function formatDetailedMessage(userData, missionChanges = null, options = {}) {
+  const { dateLabel = null, showNoStudyWarning = false } = options;
+
+  // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
+  let message = dateLabel
+    ? `📊 スマイルゼミ ${dateLabel}の学習状況\n\n`
+    : '📊 スマイルゼミ 学習状況\n\n';
 
   // データがない場合
   if (!userData || userData.length === 0) {
-    message += '本日のデータはありません。';
+    message += dateLabel ? `${dateLabel}のデータはありません。` : '本日のデータはありません。';
     return message.trim();
   }
 
@@ -284,9 +288,13 @@ function formatDetailedMessage(userData, missionChanges = null) {
     const scoreUnit = isJuniorHigh ? '%' : '点';
     const detailLabel = isJuniorHigh ? '学習詳細' : 'ミッション詳細';
 
-    // ミッション詳細
+    // ミッション詳細（朝通知では未学習の場合に警告文言のみ表示）
     const missions = user.missions ?? [];
-    if (missions.length > 0) {
+    const isNoStudy = hours === 0 && minutes === 0 && missions.length === 0;
+
+    if (showNoStudyWarning && isNoStudy) {
+      message += '⚠️ 昨日は学習していません\n';
+    } else if (missions.length > 0) {
       message += `\n📋 ${detailLabel}:\n`;
 
       // ユーザーの変化情報を取得
