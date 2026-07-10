@@ -320,4 +320,64 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.strictEqual(exports.includes('formatUserListMessage'), false, 'formatUserListMessageが含まれないこと');
     });
   });
+
+  describe('formatDetailedMessage - 朝通知オプション', () => {
+    const { formatDetailedMessage } = require('../src/notifier');
+
+    it('dateLabel 指定でヘッダに日付ラベルが入る', () => {
+      const userData = [{
+        userName: '光志郎 (中学生コース)',
+        missionCount: 1,
+        date: '2026-07-09',
+        studyTime: { hours: 1, minutes: 5 },
+        totalScore: 80,
+        missions: [{ name: '数学: 一次関数', score: 80, completed: true }]
+      }];
+      const message = formatDetailedMessage(userData, null, { dateLabel: '昨日(07/09)' });
+      assert.ok(message.startsWith('📊 スマイルゼミ 昨日(07/09)の学習状況'));
+      assert.ok(message.includes('⏱️ 勉強時間: 01:05'));
+    });
+
+    it('showNoStudyWarning: 未学習ユーザーに警告文言を表示し詳細セクションを出さない', () => {
+      const userData = [{
+        userName: '光志郎 (中学生コース)',
+        missionCount: 0,
+        date: '2026-07-09',
+        studyTime: { hours: 0, minutes: 0 },
+        totalScore: 0,
+        missions: []
+      }];
+      const message = formatDetailedMessage(userData, null, {
+        dateLabel: '昨日(07/09)',
+        showNoStudyWarning: true
+      });
+      assert.ok(message.includes('⚠️ 昨日は学習していません'));
+      assert.ok(!message.includes('学習詳細'));
+    });
+
+    it('showNoStudyWarning でも学習ありのユーザーには警告を出さない', () => {
+      const userData = [{
+        userName: '光志郎 (中学生コース)',
+        missionCount: 1,
+        date: '2026-07-09',
+        studyTime: { hours: 0, minutes: 30 },
+        totalScore: 90,
+        missions: [{ name: '英語: 不定詞', score: 90, completed: true }]
+      }];
+      const message = formatDetailedMessage(userData, null, { showNoStudyWarning: true });
+      assert.ok(!message.includes('⚠️ 昨日は学習していません'));
+      assert.ok(message.includes('英語: 不定詞'));
+    });
+
+    it('データ0件のとき dateLabel 付きの文言を返す', () => {
+      const message = formatDetailedMessage([], null, { dateLabel: '昨日(07/09)' });
+      assert.ok(message.includes('昨日(07/09)のデータはありません。'));
+    });
+
+    it('オプション省略時は従来フォーマットのまま', () => {
+      const message = formatDetailedMessage([], null);
+      assert.ok(message.startsWith('📊 スマイルゼミ 学習状況'));
+      assert.ok(message.includes('本日のデータはありません。'));
+    });
+  });
 });

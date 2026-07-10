@@ -12,21 +12,24 @@ GitHub Actions (cron) → Docker → Playwright (headless Chromium)
   → みまもるネット ログイン → データクローリング → 前回差分比較 → LINE Push通知
 ```
 
-### Two Entry Points
+### Three Entry Points
 
-1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。勉強時間・ミッション詳細・点数を取得しLINE通知
-2. **週間レポート** (`src/weekly-report-index.js`): 毎週月曜 JST 17:00 に実行。週間学習ガイダンスレポートを取得しLINE通知
+1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。小学生コースの勉強時間・ミッション詳細・点数を取得しLINE通知
+2. **朝通知** (`src/morning-index.js`): 毎日 JST 7:00 に実行。中学生コースの前日分学習実績を取得しLINE通知（0件でも必ず通知）
+3. **週間レポート** (`src/weekly-report-index.js`): 毎週月曜 JST 17:00 に実行。週間学習ガイダンスレポートを取得しLINE通知
 
 ### Workflows
 
 - `.github/workflows/crawler.yml` → `docker compose up` → `node src/index.js`
+- `.github/workflows/morning-crawler.yml` → `docker compose run --rm crawler node src/morning-index.js`
 - `.github/workflows/weekly-report.yml` → `docker compose run --rm crawler node src/weekly-report-index.js`
 
 ## Project Structure
 
 ```text
 src/
-├── index.js                  # メインエントリ（日次通知）
+├── index.js                  # メインエントリ（日次通知・小学生コース）
+├── morning-index.js          # 朝通知エントリ（中学生コース・前日分）
 ├── weekly-report-index.js    # 週間レポートエントリ
 ├── config.js                 # 環境変数管理 (loadConfig, maskSensitiveData, validateSecrets)
 ├── config/
@@ -44,7 +47,8 @@ tests/                        # Node.js built-in test runner (node --test)
 ├── crawler.test.js
 ├── data.test.js
 ├── notifier.test.js
-└── index.test.js
+├── index.test.js
+└── morning-index.test.js
 
 scripts/                      # ユーティリティスクリプト
 ├── validate-env.js           # 環境変数検証 (npm run validate:env)
@@ -52,7 +56,8 @@ scripts/                      # ユーティリティスクリプト
 └── test-docker.sh            # Docker環境テスト (npm run test:docker)
 
 .github/workflows/
-├── crawler.yml               # 日次クローリングワークフロー (cron: 毎日 UTC 11:00)
+├── crawler.yml               # 日次クローリングワークフロー (UTC 06:17起動→JST 20:00まで待機)
+├── morning-crawler.yml       # 朝通知ワークフロー (UTC 17:47起動→JST 7:00まで待機)
 └── weekly-report.yml         # 週間レポートワークフロー (cron: 毎週月曜 UTC 08:00)
 ```
 

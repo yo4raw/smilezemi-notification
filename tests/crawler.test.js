@@ -403,4 +403,105 @@ describe('クローラーモジュール (src/crawler.js)', () => {
       assert.strictEqual(crawler.getTotalScore(missions), 100);
     });
   });
+
+  describe('getTargetDates', () => {
+    it('UTC 22:00 (JST 翌日7:00) のとき dateOffset=0 で JST の今日を返す', () => {
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-07-09T22:00:00Z').getTime() });
+      try {
+        const dates = crawler.getTargetDates(0);
+        assert.strictEqual(dates.withPadding, '07/10');
+        assert.strictEqual(dates.withoutPadding, '7/10');
+        assert.strictEqual(dates.dateString, '2026-07-10');
+      } finally {
+        mock.timers.reset();
+      }
+    });
+
+    it('dateOffset=-1 で JST の昨日を返す', () => {
+      mock.timers.enable({ apis: ['Date'], now: new Date('2026-07-09T22:00:00Z').getTime() });
+      try {
+        const dates = crawler.getTargetDates(-1);
+        assert.strictEqual(dates.withPadding, '07/09');
+        assert.strictEqual(dates.dateString, '2026-07-09');
+      } finally {
+        mock.timers.reset();
+      }
+    });
+
+    it('年跨ぎ: JST 1/1 に dateOffset=-1 で前年 12/31 を返す', () => {
+      // UTC 2025-12-31T15:00:00Z = JST 2026-01-01T00:00:00
+      mock.timers.enable({ apis: ['Date'], now: new Date('2025-12-31T15:00:00Z').getTime() });
+      try {
+        const dates = crawler.getTargetDates(-1);
+        assert.strictEqual(dates.withPadding, '12/31');
+        assert.strictEqual(dates.dateString, '2025-12-31');
+      } finally {
+        mock.timers.reset();
+      }
+    });
+  });
+
+  describe('resolveTargetCourses', () => {
+    it('filterなし: 両コース持ちは中学生コースのみ(現行互換)', () => {
+      assert.deepStrictEqual(
+        crawler.resolveTargetCourses({ hasJuniorHighSchool: true, hasElementarySchool: true }, null),
+        ['中学生コース']
+      );
+    });
+
+    it('elementary: 小学生のみのユーザーは小学生コース', () => {
+      assert.deepStrictEqual(
+        crawler.resolveTargetCourses({ hasJuniorHighSchool: false, hasElementarySchool: true }, 'elementary'),
+        ['小学生コース']
+      );
+    });
+
+    it('elementary: 両コース持ちはスキップ(空配列)', () => {
+      assert.deepStrictEqual(
+        crawler.resolveTargetCourses({ hasJuniorHighSchool: true, hasElementarySchool: true }, 'elementary'),
+        []
+      );
+    });
+
+    it('elementary: 中学生のみはスキップ(空配列)', () => {
+      assert.deepStrictEqual(
+        crawler.resolveTargetCourses({ hasJuniorHighSchool: true, hasElementarySchool: false }, 'elementary'),
+        []
+      );
+    });
+
+    it('juniorHigh: 両コース持ちは中学生コース', () => {
+      assert.deepStrictEqual(
+        crawler.resolveTargetCourses({ hasJuniorHighSchool: true, hasElementarySchool: true }, 'juniorHigh'),
+        ['中学生コース']
+      );
+    });
+
+    it('juniorHigh: 小学生のみはスキップ(空配列)', () => {
+      assert.deepStrictEqual(
+        crawler.resolveTargetCourses({ hasJuniorHighSchool: false, hasElementarySchool: true }, 'juniorHigh'),
+        []
+      );
+    });
+  });
+
+  describe('shouldProcessSingleCourseUser', () => {
+    const juniorUrl = 'https://smile-zemi.jp/mimamoru-net/ui/study/c/timeline';
+    const elementaryUrl = 'https://smile-zemi.jp/mimamoru-net/ui/study/s/timeline';
+
+    it('elementary filter: 中学生タイムラインのユーザーは対象外', () => {
+      assert.strictEqual(crawler.shouldProcessSingleCourseUser(juniorUrl, 'elementary'), false);
+      assert.strictEqual(crawler.shouldProcessSingleCourseUser(elementaryUrl, 'elementary'), true);
+    });
+
+    it('juniorHigh filter: 小学生タイムラインのユーザーは対象外', () => {
+      assert.strictEqual(crawler.shouldProcessSingleCourseUser(juniorUrl, 'juniorHigh'), true);
+      assert.strictEqual(crawler.shouldProcessSingleCourseUser(elementaryUrl, 'juniorHigh'), false);
+    });
+
+    it('filterなし: 常に対象', () => {
+      assert.strictEqual(crawler.shouldProcessSingleCourseUser(juniorUrl, null), true);
+      assert.strictEqual(crawler.shouldProcessSingleCourseUser(elementaryUrl, null), true);
+    });
+  });
 });
