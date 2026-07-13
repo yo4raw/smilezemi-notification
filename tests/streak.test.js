@@ -2,14 +2,21 @@
  * ストリーク管理モジュールのテスト
  */
 
-const { describe, it } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs').promises;
+const path = require('path');
 
 const {
   createInitialState,
   isStudied,
-  confirmDay
+  confirmDay,
+  loadStreakData,
+  saveStreakData
 } = require('../src/streak');
+
+const DATA_DIR = path.join(__dirname, '../data');
+const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
 
 describe('isStudied', () => {
   it('勉強時間もミッションもない場合は未学習', () => {
@@ -109,5 +116,68 @@ describe('confirmDay', () => {
       { streak: 5, grace: 1, lastConfirmedDate: '2026-07-08' }, '2026-07-12', true
     );
     assert.deepStrictEqual(state, { streak: 6, grace: 1, lastConfirmedDate: '2026-07-12' });
+  });
+});
+
+describe('loadStreakData / saveStreakData', () => {
+  beforeEach(async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    try {
+      await fs.unlink(STREAK_FILE);
+    } catch (e) {
+      // ファイルなしは無視
+    }
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.unlink(STREAK_FILE);
+    } catch (e) {
+      // ファイルなしは無視
+    }
+  });
+
+  it('ファイルが存在しない場合は空のマップを返す(初回実行)', async () => {
+    const result = await loadStreakData();
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(result.data, {});
+  });
+
+  it('保存したデータを読み込める(ラウンドトリップ)', async () => {
+    const users = {
+      '光志郎 (中学生コース)': { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' }
+    };
+    const saveResult = await saveStreakData(users);
+    assert.strictEqual(saveResult.success, true);
+
+    const loadResult = await loadStreakData();
+    assert.strictEqual(loadResult.success, true);
+    assert.deepStrictEqual(loadResult.data, users);
+  });
+
+  it('保存ファイルに version と ISO 8601 timestamp が含まれる', async () => {
+    await saveStreakData({});
+    const content = JSON.parse(await fs.readFile(STREAK_FILE, 'utf-8'));
+    assert.strictEqual(content.version, '1.0');
+    assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(content.timestamp));
+  });
+
+  it('不正なJSONの場合はエラーを返す', async () => {
+    await fs.writeFile(STREAK_FILE, '{invalid json', 'utf-8');
+    const result = await loadStreakData();
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error.includes('JSONパースエラー'));
+  });
+
+  it('未知のバージョンはエラーを返す', async () => {
+    await fs.writeFile(STREAK_FILE, JSON.stringify({ version: '9.9', users: {} }), 'utf-8');
+    const result = await loadStreakData();
+    assert.strictEqual(result.success, false);
+    assert.ok(result.error.includes('未知のストリークデータバージョン'));
+  });
+
+  it('配列を渡すと保存エラーになる', async () => {
+    const result = await saveStreakData([]);
+    assert.strictEqual(result.success, false);
   });
 });

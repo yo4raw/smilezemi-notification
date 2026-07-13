@@ -15,6 +15,12 @@
  * }
  */
 
+const fs = require('fs').promises;
+const path = require('path');
+
+const DATA_DIR = path.join(__dirname, '../data');
+const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
+
 const GRACE_MAX = 3;
 const MILESTONE_INTERVAL = 10;
 
@@ -84,8 +90,74 @@ function confirmDay(state, dateString, studied) {
   };
 }
 
+/**
+ * ストリークデータを読み込む
+ *
+ * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ */
+async function loadStreakData() {
+  try {
+    try {
+      await fs.access(STREAK_FILE);
+    } catch (error) {
+      // ファイルが存在しない場合(初回実行時)は空のマップを返す
+      return { success: true, data: {} };
+    }
+
+    const fileContent = await fs.readFile(STREAK_FILE, 'utf-8');
+    const jsonData = JSON.parse(fileContent);
+
+    const version = jsonData.version || '1.0';
+    if (version !== '1.0') {
+      return {
+        success: false,
+        error: `未知のストリークデータバージョン: ${version}`
+      };
+    }
+
+    return { success: true, data: jsonData.users || {} };
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return { success: false, error: `JSONパースエラー: ${error.message}` };
+    }
+    return { success: false, error: `ストリークデータ読み込みエラー: ${error.message}` };
+  }
+}
+
+/**
+ * ストリークデータを保存する
+ *
+ * @param {object} streakUsers - userName → state のマップ
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function saveStreakData(streakUsers) {
+  try {
+    if (typeof streakUsers !== 'object' || streakUsers === null || Array.isArray(streakUsers)) {
+      return {
+        success: false,
+        error: '不正なデータ形式: オブジェクトである必要があります'
+      };
+    }
+
+    await fs.mkdir(DATA_DIR, { recursive: true });
+
+    const saveObject = {
+      version: '1.0',
+      timestamp: new Date().toISOString(),
+      users: streakUsers
+    };
+
+    await fs.writeFile(STREAK_FILE, JSON.stringify(saveObject, null, 2), 'utf-8');
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: `ストリークデータ保存エラー: ${error.message}` };
+  }
+}
+
 module.exports = {
   createInitialState,
   isStudied,
-  confirmDay
+  confirmDay,
+  loadStreakData,
+  saveStreakData
 };
