@@ -138,15 +138,24 @@ async function main() {
         console.error('❌ 基本機能でもクローリングに失敗しました:', basicCrawlResult.error);
         errors.push(basicCrawlResult.error);
 
-        // エラー通知を送信
-        try {
-          await sendNotification(
-            [],
+        // 障害を明示するエラー通知を送信（「変更なし」と偽装しない）
+        if (process.env.DRY_RUN === 'true') {
+          console.log('ℹ️ ドライランモード: エラー通知はスキップしました');
+        } else {
+          const errorMessage = [
+            '⚠️ スマイルゼミ通知でエラーが発生しました',
+            '',
+            '夜通知のデータ取得に失敗したため、本日の通知をお届けできません。',
+            'GitHub Actions のログを確認してください。'
+          ].join('\n');
+          const errorNotifyResult = await sendPushMessage(
+            errorMessage,
             config.LINE_CHANNEL_ACCESS_TOKEN,
             config.LINE_USER_ID
           );
-        } catch (notifyError) {
-          console.error('❌ エラー通知の送信にも失敗しました:', notifyError.message);
+          if (!errorNotifyResult.success) {
+            console.error('❌ エラー通知の送信にも失敗しました:', errorNotifyResult.error);
+          }
         }
 
         return {

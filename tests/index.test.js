@@ -261,6 +261,25 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.exitCode, 1);
     });
 
+    it('異常系: 詳細・基本の両方が失敗した場合、「変更なし」ではなく障害通知を送る', async () => {
+      setupMocks({
+        getAllUsersDetailedData: async () => ({ success: false, error: '詳細失敗' }),
+        getAllUsersMissionCounts: async () => ({ success: false, error: '基本も失敗' })
+      });
+
+      await mainModule.main();
+
+      const notifyCalls = callLog.filter(c => c.type === 'sendNotification');
+      assert.strictEqual(notifyCalls.length, 0, '空changesのsendNotification(=変更なし偽装)が呼ばれないこと');
+
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 1, '障害通知がsendPushMessageで送られること');
+      const [message] = pushCalls[0].args;
+      assert.match(message, /⚠️/, '警告アイコンが含まれること');
+      assert.match(message, /エラー|失敗/, '障害であることが明示されること');
+      assert.doesNotMatch(message, /変更ありませんでした/, '正常を装うメッセージでないこと');
+    });
+
     it('異常系: LINE API失敗時、errorsに記録される', async () => {
       setupMocks({
         sendPushMessage: async () => ({ success: false, error: 'LINE API エラー: 500 Internal Server Error' })

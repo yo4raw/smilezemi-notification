@@ -83,6 +83,27 @@ async function main() {
     if (!crawlResult.success) {
       console.error('❌ クローリングに失敗しました:', crawlResult.error);
       await saveErrorScreenshot(page, 'morning-crawling-failed');
+
+      // 障害を無音にしない: 「0件でも必ず通知」の仕様を障害時にも守るため、エラー通知を送ってから異常終了する
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: エラー通知はスキップしました');
+      } else {
+        const errorMessage = [
+          '⚠️ スマイルゼミ通知でエラーが発生しました',
+          '',
+          '朝通知のデータ取得に失敗したため、昨日分の通知をお届けできません。',
+          'GitHub Actions のログを確認してください。'
+        ].join('\n');
+        const errorNotifyResult = await sendPushMessage(
+          errorMessage,
+          config.LINE_CHANNEL_ACCESS_TOKEN,
+          config.LINE_USER_ID
+        );
+        if (!errorNotifyResult.success) {
+          console.error('❌ エラー通知の送信にも失敗しました:', errorNotifyResult.error);
+        }
+      }
+
       return { success: false, exitCode: 1, error: crawlResult.error };
     }
 
