@@ -310,6 +310,94 @@ describe('オーケストレーション (src/index.js)', () => {
     });
   });
 
+  describe('ストリーク統合', () => {
+    it('正常系: 前日分クロールが courseFilter:elementary, dateOffset:-1 で呼ばれる', async () => {
+      const detailedCalls = [];
+      setupMocks({
+        getAllUsersDetailedData: async (page, options) => {
+          detailedCalls.push(options);
+          if (detailedCalls.length === 1) {
+            return {
+              success: true,
+              data: [{ userName: '太郎', missionCount: 5, date: '2025-12-25', studyTime: '1時間30分', missions: [], totalScore: 100 }],
+              detailsAvailable: true,
+              partialFailure: false
+            };
+          }
+          return { success: true, data: [] };
+        }
+      });
+
+      await mainModule.main();
+
+      assert.strictEqual(detailedCalls.length, 2, 'getAllUsersDetailedDataが2回呼ばれること（当日分・前日分）');
+      assert.deepStrictEqual(detailedCalls[0], { courseFilter: 'elementary' }, '1回目は当日分の呼び出しであること');
+      assert.deepStrictEqual(detailedCalls[1], { courseFilter: 'elementary', dateOffset: -1 }, '2回目は前日分の呼び出しであること');
+    });
+
+    it('異常系: 前日分クロール失敗時、saveStreakDataが呼ばれず通知処理は継続する', async () => {
+      let callCount = 0;
+      let saveStreakCalls = 0;
+      setupMocks({
+        getAllUsersDetailedData: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              success: true,
+              data: [{ userName: '太郎', missionCount: 5, date: '2025-12-25', studyTime: '1時間30分', missions: [], totalScore: 100 }],
+              detailsAvailable: true,
+              partialFailure: false
+            };
+          }
+          return { success: false, error: '前日分取得失敗' };
+        },
+        saveStreakData: async () => {
+          saveStreakCalls++;
+          return { success: true };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(saveStreakCalls, 0, '前日分クロール失敗時はsaveStreakDataが呼ばれないこと');
+      assert.strictEqual(result.exitCode, 0, '前日分クロール失敗のみでは通知処理が異常終了しないこと');
+
+      const fetchCalls = callLog.filter(c => c.type === 'fetch');
+      assert.strictEqual(fetchCalls.length, 1, '前日分クロール失敗時も通知(fetch)が実行されること');
+    });
+
+    it('異常系: loadStreakData失敗時、errorsに記録されるが通知は送信される', async () => {
+      setupMocks({
+        loadStreakData: async () => ({ success: false, error: 'ストリークデータ読み込み失敗' })
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.exitCode, 1, 'loadStreakData失敗時は終了コード1になること');
+      assert.strictEqual(Array.isArray(result.errors), true);
+      assert.strictEqual(result.errors.includes('ストリークデータ読み込み失敗'), true, 'errorsにloadStreakDataのエラーが含まれること');
+
+      const fetchCalls = callLog.filter(c => c.type === 'fetch');
+      assert.strictEqual(fetchCalls.length, 1, 'loadStreakData失敗時も通知(fetch)は送信されること');
+    });
+
+    it('正常系: formatDetailedMessageに渡すoptions.streaksに対象ユーザーのキーが含まれる', async () => {
+      let capturedOptions;
+      setupMocks({
+        formatDetailedMessage: (currentData, missionChangesResult, options) => {
+          capturedOptions = options;
+          return 'テスト詳細メッセージ';
+        }
+      });
+
+      await mainModule.main();
+
+      assert.ok(capturedOptions, 'formatDetailedMessageが呼ばれること');
+      assert.ok(capturedOptions.streaks, 'streaksオプションが渡されること');
+      assert.strictEqual(typeof capturedOptions.streaks['太郎'], 'string', '対象ユーザー(太郎)のキーが含まれること');
+    });
+  });
+
   describe('終了コード管理', () => {
     it('正常系: 成功時は終了コード0を返す', async () => {
       const result = await mainModule.main();
