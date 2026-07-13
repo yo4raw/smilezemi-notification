@@ -11,6 +11,8 @@ const {
   createInitialState,
   isStudied,
   confirmDay,
+  updateStreaks,
+  formatStreakInfo,
   loadStreakData,
   saveStreakData
 } = require('../src/streak');
@@ -179,5 +181,103 @@ describe('loadStreakData / saveStreakData', () => {
   it('配列を渡すと保存エラーになる', async () => {
     const result = await saveStreakData([]);
     assert.strictEqual(result.success, false);
+  });
+});
+
+describe('updateStreaks', () => {
+  const studiedUser = {
+    userName: '光志郎 (中学生コース)',
+    studyTime: { hours: 0, minutes: 45 },
+    missions: [{ name: '数学', score: 80, completed: true }]
+  };
+  const notStudiedUser = {
+    userName: '祥吾 (小学生コース)',
+    studyTime: { hours: 0, minutes: 0 },
+    missions: []
+  };
+
+  it('複数ユーザーをそれぞれ独立に判定する', () => {
+    const { streakUsers, results } = updateStreaks({}, [studiedUser, notStudiedUser], '2026-07-12');
+    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].streak, 1);
+    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 0);
+    assert.strictEqual(results.length, 2);
+  });
+
+  it('既存の状態から更新される', () => {
+    const initial = {
+      '光志郎 (中学生コース)': { streak: 9, grace: 0, lastConfirmedDate: '2026-07-11' }
+    };
+    const { streakUsers, results } = updateStreaks(initial, [studiedUser], '2026-07-12');
+    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].streak, 10);
+    assert.strictEqual(results[0].event, 'milestone');
+  });
+
+  it('入力のマップを変更しない(純粋関数)', () => {
+    const initial = {
+      '光志郎 (中学生コース)': { streak: 5, grace: 0, lastConfirmedDate: '2026-07-11' }
+    };
+    updateStreaks(initial, [studiedUser], '2026-07-12');
+    assert.strictEqual(initial['光志郎 (中学生コース)'].streak, 5);
+  });
+
+  it('クロール対象にいないユーザーの状態は変更されない', () => {
+    const initial = {
+      '別の子 (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-11' }
+    };
+    const { streakUsers } = updateStreaks(initial, [studiedUser], '2026-07-12');
+    assert.deepStrictEqual(
+      streakUsers['別の子 (小学生コース)'],
+      { streak: 3, grace: 0, lastConfirmedDate: '2026-07-11' }
+    );
+  });
+});
+
+describe('formatStreakInfo', () => {
+  it('基本表示(ストリークとおたすけ)', () => {
+    const text = formatStreakInfo({
+      state: { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' },
+      event: 'none'
+    });
+    assert.strictEqual(text, '🔥 連続学習: 12日目  🛟 おたすけ: 1/3');
+  });
+
+  it('todayStudied で暫定+1表示(夜通知用)', () => {
+    const text = formatStreakInfo(
+      { state: { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' }, event: 'none' },
+      { todayStudied: true }
+    );
+    assert.ok(text.includes('13日目'));
+  });
+
+  it('ストリーク0のときは「0日」表示', () => {
+    const text = formatStreakInfo({
+      state: { streak: 0, grace: 0, lastConfirmedDate: null },
+      event: 'none'
+    });
+    assert.ok(text.includes('🔥 連続学習: 0日'));
+  });
+
+  it('milestoneイベントでお祝い行が追加される', () => {
+    const text = formatStreakInfo({
+      state: { streak: 10, grace: 1, lastConfirmedDate: '2026-07-12' },
+      event: 'milestone'
+    });
+    assert.ok(text.includes('🎉 10日連続達成!おたすけ+1(残り1)'));
+  });
+
+  it('grace_usedイベントでおたすけ使用行が追加される', () => {
+    const text = formatStreakInfo({
+      state: { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' },
+      event: 'grace_used'
+    });
+    assert.ok(text.includes('💤 昨日はおたすけを使って連続記録を守りました(残り1)'));
+  });
+
+  it('resetイベントでリセット行が追加される', () => {
+    const text = formatStreakInfo({
+      state: { streak: 0, grace: 0, lastConfirmedDate: '2026-07-12' },
+      event: 'reset'
+    });
+    assert.ok(text.includes('😢 連続記録がリセットされました'));
   });
 });

@@ -91,6 +91,54 @@ function confirmDay(state, dateString, studied) {
 }
 
 /**
+ * 全ユーザー分の確定判定を適用(純粋関数、入力は変更しない)
+ *
+ * @param {object} streakUsers - userName → state のマップ
+ * @param {Array} users - 判定対象日のクロール済みユーザーデータ(v2.0形式)
+ * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
+ * @returns {{streakUsers: object, results: Array<{userName: string, state: object, event: string}>}}
+ */
+function updateStreaks(streakUsers, users, dateString) {
+  const updated = { ...streakUsers };
+  const results = [];
+
+  users.forEach(user => {
+    const current = updated[user.userName] || createInitialState();
+    const { state, event } = confirmDay(current, dateString, isStudied(user));
+    updated[user.userName] = state;
+    results.push({ userName: user.userName, state, event });
+  });
+
+  return { streakUsers: updated, results };
+}
+
+/**
+ * 通知メッセージ用のストリーク表示行を生成
+ *
+ * @param {{state: object, event: string}} result - updateStreaks の results 要素
+ * @param {object} [options]
+ * @param {boolean} [options.todayStudied] - 当日すでに学習済みなら暫定で+1表示(夜通知用)
+ * @returns {string} 改行区切りの表示行
+ */
+function formatStreakInfo(result, options = {}) {
+  const { state, event } = result;
+  const displayStreak = state.streak + (options.todayStudied ? 1 : 0);
+  const streakLabel = displayStreak > 0 ? `${displayStreak}日目` : '0日';
+
+  const lines = [`🔥 連続学習: ${streakLabel}  🛟 おたすけ: ${state.grace}/${GRACE_MAX}`];
+
+  if (event === 'milestone') {
+    lines.push(`🎉 ${state.streak}日連続達成!おたすけ+1(残り${state.grace})`);
+  } else if (event === 'grace_used') {
+    lines.push(`💤 昨日はおたすけを使って連続記録を守りました(残り${state.grace})`);
+  } else if (event === 'reset') {
+    lines.push('😢 連続記録がリセットされました。今日からまた頑張ろう!');
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * ストリークデータを読み込む
  *
  * @returns {Promise<{success: boolean, data?: object, error?: string}>}
@@ -158,6 +206,8 @@ module.exports = {
   createInitialState,
   isStudied,
   confirmDay,
+  updateStreaks,
+  formatStreakInfo,
   loadStreakData,
   saveStreakData
 };
