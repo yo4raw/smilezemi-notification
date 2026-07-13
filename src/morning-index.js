@@ -9,6 +9,7 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getTargetDates } = require('./crawler');
 const { formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -97,10 +98,46 @@ async function main() {
 
     console.log(`✅ データの取得が完了しました（${crawlResult.data.length}件）`);
 
+    // 4.5 ストリーク(連続学習日数)の確定判定
+    // 前日分は確定データのため、そのままストリークを確定する
+    let streaks = null;
+    console.log('🔥 ストリークを更新しています...');
+    const streakLoadResult = await loadStreakData();
+
+    if (streakLoadResult.success) {
+      const { streakUsers, results } = updateStreaks(
+        streakLoadResult.data,
+        crawlResult.data,
+        targetDates.dateString
+      );
+
+      streaks = {};
+      results.forEach(result => {
+        streaks[result.userName] = formatStreakInfo(result);
+      });
+
+      // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
+      } else {
+        const streakSaveResult = await saveStreakData(streakUsers);
+        if (streakSaveResult.success) {
+          console.log('✅ ストリークデータの保存が完了しました');
+        } else {
+          console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
+          errors.push(streakSaveResult.error);
+        }
+      }
+    } else {
+      console.warn('⚠️ ストリークデータの読み込みに失敗したため、ストリーク表示をスキップします:', streakLoadResult.error);
+      errors.push(streakLoadResult.error);
+    }
+
     // 5. メッセージフォーマット（前日は確定データのため差分比較なし。未学習でも必ず通知）
     let message = formatDetailedMessage(crawlResult.data, null, {
       dateLabel: `昨日(${targetDates.withPadding})`,
-      showNoStudyWarning: true
+      showNoStudyWarning: true,
+      streaks
     });
     message = truncateToLimit(message);
 
