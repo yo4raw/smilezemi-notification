@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     # JST 7:00 までの最大待機 約253分 + ビルド/実行時間の余裕
     timeout-minutes: 300
+    permissions:
+      contents: read
+      actions: read # キャッシュ整合性チェック(gh api)に必要
 
     steps:
       # 1. リポジトリのチェックアウト
@@ -24,12 +27,28 @@ jobs:
 
       # 前回データ(ミッション・ストリーク)をキャッシュから復元
       - name: 前回データを復元
+        id: restore-data
         uses: actions/cache/restore@v4
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}
           restore-keys: |
             smilezemi-data-
+
+      # キャッシュ整合性チェック: 既存エントリがあるのに復元できなかった場合は
+      # キャッシュサービス異常の可能性が高い。空データのままsaveすると
+      # 「空が最新キャッシュ」になりストリーク履歴が実質消失するため、ここで中断する
+      - name: キャッシュ復元の整合性を検証
+        if: steps.restore-data.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=smilezemi-data-" --jq '.total_count')
+          if [ "$count" -gt 0 ]; then
+            echo "::error::既存のキャッシュエントリ(${count}件)があるのに復元できませんでした。データ保護のためジョブを中断します。キャッシュサービス回復後に手動で再実行してください。"
+            exit 1
+          fi
+          echo "キャッシュエントリなし(初回実行またはエビクション後)のため、初期状態で続行します"
 
       # 2. .envファイルを作成
       - name: .envファイルを作成
@@ -108,3 +127,19 @@ jobs:
       - name: .envファイルを削除
         if: always()
         run: rm -f .env
+
+      # 9. ワークフロー失敗をLINEに通知（最後の砦。この通知自体の失敗はジョブを落とさない）
+      - name: 失敗をLINEに通知
+        if: failure()
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER: ${{ secrets.LINE_USER_ID }}
+        run: |
+          message=$(printf '⚠️ GitHub Actions ワークフローが失敗しました\n\nワークフロー: %s\n実行ログ: %s' "$WORKFLOW_NAME" "$RUN_URL")
+          payload=$(jq -n --arg to "$LINE_USER" --arg text "$message" '{to: $to, messages: [{type: "text", text: $text}]}')
+          curl -sS --fail-with-body -X POST https://api.line.me/v2/bot/message/push \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LINE_TOKEN" \
+            -d "$payload" || echo "::warning::失敗通知の送信に失敗しました"
