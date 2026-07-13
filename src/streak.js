@@ -32,12 +32,37 @@ function createInitialState() {
 }
 
 /**
+ * 完了ミッション数を数える
+ * missionCount(クローラーが数えた完了数)を優先し、なければ missions の completed 件数を使う
+ *
+ * @param {{missionCount?: number, missions?: Array<{completed: boolean}>}} user - v2.0形式のユーザーデータ
+ * @returns {number}
+ */
+function countCompletedMissions(user) {
+  if (typeof user.missionCount === 'number') {
+    return user.missionCount;
+  }
+  return (user.missions ?? []).filter(mission => mission.completed).length;
+}
+
+/**
  * その日に学習したかを判定(notifier.js の未学習判定と同一基準)
  *
- * @param {{studyTime?: {hours: number, minutes: number}, missions?: Array}} user - v2.0形式のユーザーデータ
+ * minCompletedMissions を1以上指定した場合(小学生コースの5個ルール)は
+ * 「完了ミッション数 >= 指定値」のみで判定し、勉強時間は見ない。
+ *
+ * @param {{studyTime?: {hours: number, minutes: number}, missionCount?: number, missions?: Array}} user - v2.0形式のユーザーデータ
+ * @param {object} [options]
+ * @param {number} [options.minCompletedMissions=0] - ストリークに必要な完了ミッション数
  * @returns {boolean}
  */
-function isStudied(user) {
+function isStudied(user, options = {}) {
+  const { minCompletedMissions = 0 } = options;
+
+  if (minCompletedMissions > 0) {
+    return countCompletedMissions(user) >= minCompletedMissions;
+  }
+
   const hours = user.studyTime?.hours ?? 0;
   const minutes = user.studyTime?.minutes ?? 0;
   const missions = user.missions ?? [];
@@ -96,15 +121,16 @@ function confirmDay(state, dateString, studied) {
  * @param {object} streakUsers - userName → state のマップ
  * @param {Array} users - 判定対象日のクロール済みユーザーデータ(v2.0形式、dataReliable省略時はtrue扱い)
  * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
+ * @param {object} [options] - isStudied に伝搬する判定オプション(minCompletedMissions等)
  * @returns {{streakUsers: object, results: Array<{userName: string, state: object, event: string}>}}
  */
-function updateStreaks(streakUsers, users, dateString) {
+function updateStreaks(streakUsers, users, dateString, options = {}) {
   const updated = { ...streakUsers };
   const results = [];
 
   users.forEach(user => {
     const current = updated[user.userName] || createInitialState();
-    const studied = isStudied(user);
+    const studied = isStudied(user, options);
 
     // dataReliable: false かつ未学習判定の場合、クロール部分失敗によるデフォルト値(0/[])
     // が原因の偽陰性である可能性があるため確定をスキップする(空白日の中立処理に委ねる)。
@@ -215,6 +241,7 @@ async function saveStreakData(streakUsers) {
 module.exports = {
   createInitialState,
   isStudied,
+  countCompletedMissions,
   confirmDay,
   updateStreaks,
   formatStreakInfo,

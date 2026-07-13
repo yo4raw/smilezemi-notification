@@ -303,6 +303,44 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(Array.isArray(result.errors), true);
     });
 
+    it('正常系: 夜通知はストリーク判定・暫定表示・警告表示に5ミッション閾値を適用する', async () => {
+      let capturedUpdateOptions;
+      let capturedIsStudiedOptions;
+      let capturedFormatOptions;
+      setupMocks({
+        updateStreaks: (streakUsers, users, dateString, options) => {
+          capturedUpdateOptions = options;
+          return { streakUsers: {}, results: [] };
+        },
+        isStudied: (user, options) => {
+          capturedIsStudiedOptions = options;
+          return false;
+        },
+        formatDetailedMessage: (currentData, missionChangesResult, options) => {
+          capturedFormatOptions = options;
+          return 'テスト詳細メッセージ';
+        }
+      });
+
+      await mainModule.main();
+
+      assert.deepStrictEqual(
+        capturedUpdateOptions,
+        { minCompletedMissions: 5 },
+        '前日確定判定に5ミッション閾値が渡ること'
+      );
+      assert.deepStrictEqual(
+        capturedIsStudiedOptions,
+        { minCompletedMissions: 5 },
+        '当日の暫定+1判定に5ミッション閾値が渡ること'
+      );
+      assert.strictEqual(
+        capturedFormatOptions.missionWarningThreshold,
+        5,
+        '警告表示に5ミッション閾値が渡ること'
+      );
+    });
+
     it('正常系: ドライランモードでは送信・保存を行わない', async () => {
       const originalDryRun = process.env.DRY_RUN;
       process.env.DRY_RUN = 'true';

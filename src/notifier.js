@@ -4,6 +4,7 @@
  */
 
 const { maskSensitiveData } = require('./config');
+const { countCompletedMissions } = require('./streak');
 
 // LINE Push Message APIエンドポイント
 const LINE_API_ENDPOINT = 'https://api.line.me/v2/bot/message/push';
@@ -276,7 +277,7 @@ function formatMessage(changes) {
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
-  const { dateLabel = null, showNoStudyWarning = false, streaks = null } = options;
+  const { dateLabel = null, showNoStudyWarning = false, streaks = null, missionWarningThreshold = null } = options;
 
   // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
   let message = dateLabel
@@ -315,6 +316,14 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     const hours = user.studyTime?.hours ?? 0;
     const minutes = user.studyTime?.minutes ?? 0;
     message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
+
+    // ミッション未達警告(夜通知の5個ルール)。取得失敗時(dataReliable:false)は誤警告を防ぐため出さない
+    if (missionWarningThreshold && user.dataReliable !== false) {
+      const completedCount = countCompletedMissions(user);
+      if (completedCount < missionWarningThreshold) {
+        message += `⚠️ ミッション完了 ${completedCount}/${missionWarningThreshold}個 — ${missionWarningThreshold}個完了しないと連続学習にカウントされないよ!\n`;
+      }
+    }
 
     // 中学生コースのスコア単位は "%" 、小学生コースは "点"
     const isJuniorHigh = user.userName.includes('中学生コース');

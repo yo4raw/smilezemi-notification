@@ -10,6 +10,7 @@ const path = require('path');
 const {
   createInitialState,
   isStudied,
+  countCompletedMissions,
   confirmDay,
   updateStreaks,
   formatStreakInfo,
@@ -38,6 +39,62 @@ describe('isStudied', () => {
 
   it('studyTime / missions が欠けていても未学習として扱える', () => {
     assert.strictEqual(isStudied({}), false);
+  });
+
+  describe('minCompletedMissions オプション(小学生コースの5個ルール)', () => {
+    it('完了ミッションが閾値以上なら学習済み', () => {
+      const user = { studyTime: { hours: 0, minutes: 0 }, missionCount: 5, missions: [] };
+      assert.strictEqual(isStudied(user, { minCompletedMissions: 5 }), true);
+    });
+
+    it('完了ミッションが閾値未満なら未学習(境界: 4個)', () => {
+      const user = { studyTime: { hours: 0, minutes: 0 }, missionCount: 4, missions: [] };
+      assert.strictEqual(isStudied(user, { minCompletedMissions: 5 }), false);
+    });
+
+    it('勉強時間があっても完了ミッションが閾値未満なら未学習', () => {
+      const user = { studyTime: { hours: 2, minutes: 30 }, missionCount: 3, missions: [] };
+      assert.strictEqual(isStudied(user, { minCompletedMissions: 5 }), false);
+    });
+
+    it('オプション未指定(または0)は現行判定のまま', () => {
+      const user = { studyTime: { hours: 0, minutes: 5 }, missionCount: 0, missions: [] };
+      assert.strictEqual(isStudied(user), true);
+      assert.strictEqual(isStudied(user, { minCompletedMissions: 0 }), true);
+    });
+
+    it('missionCountがない場合はmissionsのcompleted件数で判定する', () => {
+      const missions = [
+        { name: 'a', score: 80, completed: true },
+        { name: 'b', score: 0, completed: false },
+        { name: 'c', score: 90, completed: true },
+        { name: 'd', score: 70, completed: true },
+        { name: 'e', score: 60, completed: true },
+        { name: 'f', score: 50, completed: true }
+      ];
+      const user = { studyTime: { hours: 0, minutes: 0 }, missions };
+      assert.strictEqual(isStudied(user, { minCompletedMissions: 5 }), true, '完了5件(未完了1件は数えない)');
+      assert.strictEqual(isStudied(user, { minCompletedMissions: 6 }), false);
+    });
+  });
+});
+
+describe('countCompletedMissions', () => {
+  it('missionCount(数値)を優先して返す', () => {
+    assert.strictEqual(countCompletedMissions({ missionCount: 3, missions: [] }), 3);
+  });
+
+  it('missionCountがない場合はmissionsのcompleted件数を返す', () => {
+    const missions = [
+      { name: 'a', completed: true },
+      { name: 'b', completed: false },
+      { name: 'c', completed: true }
+    ];
+    assert.strictEqual(countCompletedMissions({ missions }), 2);
+  });
+
+  it('どちらもない場合は0を返す', () => {
+    assert.strictEqual(countCompletedMissions({}), 0);
   });
 });
 
@@ -269,6 +326,40 @@ describe('updateStreaks', () => {
       streakUsers['祥吾 (小学生コース)'],
       { streak: 0, grace: 0, lastConfirmedDate: '2026-07-12' }
     );
+  });
+
+  it('minCompletedMissions オプションが判定に伝搬する(完了4個は未学習扱いでおたすけ消費)', () => {
+    const initial = {
+      '祥吾 (小学生コース)': { streak: 7, grace: 1, lastConfirmedDate: '2026-07-11' }
+    };
+    const fourMissionsUser = {
+      userName: '祥吾 (小学生コース)',
+      studyTime: { hours: 1, minutes: 0 },
+      missionCount: 4,
+      missions: []
+    };
+    const { streakUsers, results } = updateStreaks(
+      initial,
+      [fourMissionsUser],
+      '2026-07-12',
+      { minCompletedMissions: 5 }
+    );
+
+    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 7, '+1されないこと');
+    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].grace, 0, 'おたすけが消費されること');
+    assert.strictEqual(results[0].event, 'grace_used');
+  });
+
+  it('minCompletedMissions オプションで完了5個の日は+1される', () => {
+    const fiveMissionsUser = {
+      userName: '祥吾 (小学生コース)',
+      studyTime: { hours: 0, minutes: 0 },
+      missionCount: 5,
+      missions: []
+    };
+    const { streakUsers } = updateStreaks({}, [fiveMissionsUser], '2026-07-12', { minCompletedMissions: 5 });
+
+    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 1);
   });
 });
 
