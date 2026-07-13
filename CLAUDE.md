@@ -98,7 +98,7 @@ npm run test:docker       # Docker環境テスト
 
 # ローカル実行（.envは自動読込されないため -r dotenv/config が必須）
 DRY_RUN=true node -r dotenv/config src/morning-index.js   # 朝通知ドライラン（LINE送信・streak保存なし）
-node -r dotenv/config src/index.js                        # 夜通知（注意: DRY_RUNガードなし=実送信される）
+DRY_RUN=true node -r dotenv/config src/index.js           # 夜通知ドライラン（LINE送信・データ/streak保存なし）
 ```
 
 ## Environment Variables

@@ -99,8 +99,8 @@ npm test
 # 朝通知をドライラン（LINE送信・ストリーク保存なしで安全に確認）🧪
 DRY_RUN=true node -r dotenv/config src/morning-index.js
 
-# 夜通知クローラーを実行（⚠️こっちはDRY_RUNなし＝ガチでLINE飛ぶから注意）
-node -r dotenv/config src/index.js
+# 夜通知をドライラン（LINE送信・データ保存なしで安全に確認）🧪
+DRY_RUN=true node -r dotenv/config src/index.js
 ```
 
 `.env` は自動で読み込まれないから `-r dotenv/config` を忘れないでね⚠️（忘れると「環境変数が未設定」って怒られるやつ）

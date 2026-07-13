@@ -303,6 +303,40 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(Array.isArray(result.errors), true);
     });
 
+    it('正常系: ドライランモードでは送信・保存を行わない', async () => {
+      const originalDryRun = process.env.DRY_RUN;
+      process.env.DRY_RUN = 'true';
+
+      let saveStreakCalls = 0;
+      setupMocks({
+        saveStreakData: async () => {
+          saveStreakCalls++;
+          return { success: true };
+        }
+      });
+
+      try {
+        const result = await mainModule.main();
+
+        assert.strictEqual(result.success, true, 'ドライランが成功すること');
+        assert.strictEqual(result.exitCode, 0);
+
+        const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+        assert.strictEqual(pushCalls.length, 0, 'sendPushMessageが呼ばれないこと');
+
+        const saveCalls = callLog.filter(c => c.type === 'saveData');
+        assert.strictEqual(saveCalls.length, 0, 'saveDataが呼ばれないこと');
+
+        assert.strictEqual(saveStreakCalls, 0, 'saveStreakDataが呼ばれないこと');
+      } finally {
+        if (originalDryRun === undefined) {
+          delete process.env.DRY_RUN;
+        } else {
+          process.env.DRY_RUN = originalDryRun;
+        }
+      }
+    });
+
     it('異常系: ブラウザは必ず終了する（finally句）', async () => {
       await mainModule.main();
 

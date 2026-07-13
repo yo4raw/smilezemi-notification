@@ -172,6 +172,17 @@ async function main() {
 
       // データ比較と通知（基本モード）
       const compareResult = compareData(previousData, currentData);
+
+      // ドライラン: DRY_RUN=true の場合は送信・保存しない
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: 基本モードのLINE通知とデータ保存はスキップしました');
+        return {
+          success: errors.length === 0,
+          exitCode: errors.length === 0 ? 0 : 1,
+          errors: errors.length > 0 ? errors : undefined
+        };
+      }
+
       const notifyResult = await sendNotification(
         compareResult.changes,
         config.LINE_CHANNEL_ACCESS_TOKEN,
@@ -253,12 +264,17 @@ async function main() {
       streakUsers = updateResult.streakUsers;
       updateResult.results.forEach(result => resultMap.set(result.userName, result));
 
-      const streakSaveResult = await saveStreakData(streakUsers);
-      if (streakSaveResult.success) {
-        console.log('✅ ストリークデータの保存が完了しました');
+      // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
       } else {
-        console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
-        errors.push(streakSaveResult.error);
+        const streakSaveResult = await saveStreakData(streakUsers);
+        if (streakSaveResult.success) {
+          console.log('✅ ストリークデータの保存が完了しました');
+        } else {
+          console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
+          errors.push(streakSaveResult.error);
+        }
       }
     } else {
       // 前日分が取れない場合は確定判定をスキップし、前回の確定値をそのまま表示する
@@ -301,6 +317,20 @@ async function main() {
 
     // 文字数制限を適用
     message = truncateToLimit(message);
+
+    // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない
+    if (process.env.DRY_RUN === 'true') {
+      console.log('\n📋 === 通知メッセージプレビュー ===');
+      console.log(message);
+      console.log('=== プレビュー終了 ===\n');
+      console.log('ℹ️ ドライランモード: LINE通知とデータ保存はスキップしました');
+      console.log('🎉 処理が正常に完了しました');
+      return {
+        success: errors.length === 0,
+        exitCode: errors.length === 0 ? 0 : 1,
+        errors: errors.length > 0 ? errors : undefined
+      };
+    }
 
     // 通知送信（リトライ・タイムアウト・マスキングはsendPushMessageに委譲）
     const notifyResult = await sendPushMessage(
