@@ -13,8 +13,17 @@
   - 📈 **点数比較**: 前回との点数差を「80→95点」で可視化（成長見える）
   - ✅ **完了ミッション数**: 当日クリアした数をカウント
 - **変更検出**: 前回との差分を自動で検出👀⚡（変化だけ拾う）
+- **連続学習ストリーク**: Duolingo風の連続学習日数を通知に表示🔥✨（`🔥 連続学習: 13日目  🛟 おたすけ: 1/3`）
+  - 連続10日ごとに「おたすけ」+1ゲット🎁（最大3個までストック）
+  - サボった日はおたすけが自動で身代わりになってストリーク死守🛟💦
+  - おたすけ切れでサボったらリセット😢（また今日から頑張ろ）
+  - 前日分を翌日に確定判定するから、20時以降の勉強もちゃんとカウントされるよ🌙✨
 - **LINE通知**: 詳細情報をLINEにプッシュ通知📱🔔（一目で学習状況わかる）
+  - 🌙 **夜通知（毎日20:00）**: 小学生コースの今日の学習状況
+  - ☀️ **朝通知（毎日7:00）**: 中学生コースの昨日の学習実績（0件でも必ず届く）
+  - 📅 **週間レポート（毎週月曜17:00）**: 週間学習ガイダンスレポート
 - **データ保存**: v2.0形式で詳細データを保存🗃️☁️（履歴追跡も完璧）
+  - GitHub Actions間は actions/cache で `data/` を引き継ぎ🔄（ストリークも差分比較もちゃんと繋がる）
 - **グレースフルデグラデーション**: 詳細取得失敗時は基本モード（ミッション数のみ）にフォールバック🛡️✨
 - **エラーハンドリング**: エラー時はスクショ残す📸😵‍💫（原因追跡ラク）
 
@@ -87,22 +96,43 @@ npm run docker:run
 # テストを実行
 npm test
 
-# クローラーを実行
-node src/index.js
+# 朝通知をドライラン（LINE送信・ストリーク保存なしで安全に確認）🧪
+DRY_RUN=true node -r dotenv/config src/morning-index.js
+
+# 夜通知クローラーを実行（⚠️こっちはDRY_RUNなし＝ガチでLINE飛ぶから注意）
+node -r dotenv/config src/index.js
 ```
+
+`.env` は自動で読み込まれないから `-r dotenv/config` を忘れないでね⚠️（忘れると「環境変数が未設定」って怒られるやつ）
 
 ## GitHub Actionsで自動実行しちゃう🤖⏰✨（完全放置プレイ）
 
 ### スケジュール🗓️（毎日ちゃんと回る）
 
-- **自動実行**: 毎日 18:00 JST（UTC 9:00）🌙
+| ワークフロー | 通知時刻(JST) | 内容 |
+|-------------|--------------|------|
+| `crawler.yml` 🌙 | 毎日 20:00 | 小学生コースの今日の学習状況 |
+| `morning-crawler.yml` ☀️ | 毎日 7:00 | 中学生コースの昨日の学習実績 |
+| `weekly-report.yml` 📅 | 毎週月曜 17:00 | 週間学習ガイダンスレポート |
+
 - **手動実行**: GitHubのActionsタブから "Run workflow" で手動でも回せるよ🖱️✨
 
-### タイムゾーンについて🌍🕒（ここ沼りがち）
+### タイムゾーンと遅延対策🌍🕒（ここ沼りがち）
 
-GitHub ActionsのcronはUTCで設定されるから注意ね⚠️（JSTで考えるとズレるやつ）
+GitHub ActionsのcronはUTC設定な上に、実測1〜5.5時間も遅延するの😱
+だから**前倒しで起動してワークフロー内で目標時刻までsleepする方式**を採用してるよ⏰✨
 
-- `0 9 * * *` = UTC 9:00 = JST 18:00
+- 夜通知: `17 6 * * *`（UTC 6:17起動）→ JST 20:00まで待機
+- 朝通知: `47 17 * * *`（UTC 17:47起動）→ JST 7:00まで待機
+
+### データの引き継ぎ🔄☁️（ストリークの命綱）
+
+`data/`（`mission_data.json` + `streak_data.json`）は **actions/cache** で実行間を引き継いでるよ🧵✨
+
+- 実行前: `smilezemi-data-` プレフィックスで最新キャッシュを復元
+- 実行後: `smilezemi-data-<run_id>` で毎回新規保存（通知失敗でも保存される`if: always()`仕様）
+- 夜→翌朝→翌夜…と両ワークフローが同じキャッシュ系列をリレーする駅伝方式🏃‍♀️🎽
+- キャッシュ消えたらストリークは0から再スタート（毎日実行されるから7日失効は実質ノーダメ）
 
 ### アーティファクト📦☁️（証拠保全も完璧）
 
@@ -153,23 +183,32 @@ npm run docker:run
 smilezemi-notification/
 ├── .github/
 │   └── workflows/
-│       └── crawler.yml         # GitHub Actionsワークフロー定義
+│       ├── crawler.yml         # 夜通知ワークフロー（小学生・20:00）
+│       ├── morning-crawler.yml # 朝通知ワークフロー（中学生・7:00）
+│       └── weekly-report.yml   # 週間レポートワークフロー（月曜17:00）
 ├── src/
 │   ├── config.js               # 環境変数管理
 │   ├── config/
 │   │   └── selectors.js        # DOMセレクタ定義
 │   ├── auth.js                 # 認証モジュール
 │   ├── crawler.js              # クローリングモジュール
-│   ├── data.js                 # データ管理モジュール
+│   ├── data.js                 # ミッションデータ管理モジュール
+│   ├── streak.js               # ストリーク（連続学習日数）管理モジュール🔥
 │   ├── notifier.js             # 通知モジュール
-│   └── index.js                # メインオーケストレーション
+│   ├── index.js                # メインオーケストレーション（夜通知）
+│   ├── morning-index.js        # 朝通知エントリポイント
+│   ├── weekly-report-index.js  # 週間レポートエントリポイント
+│   ├── weekly-report-crawler.js  # 週間レポートクローリング
+│   └── weekly-report-notifier.js # 週間レポート通知フォーマット
 ├── tests/
 │   ├── config.test.js          # 環境変数テスト
 │   ├── auth.test.js            # 認証テスト
 │   ├── crawler.test.js         # クローリングテスト
 │   ├── data.test.js            # データ管理テスト
+│   ├── streak.test.js          # ストリークテスト
 │   ├── notifier.test.js        # 通知テスト
-│   └── index.test.js           # オーケストレーションテスト
+│   ├── index.test.js           # オーケストレーションテスト
+│   └── morning-index.test.js   # 朝通知テスト
 ├── scripts/
 │   ├── validate-env.js              # 環境変数検証スクリプト
 │   ├── validate-security.sh         # セキュリティ検証スクリプト
@@ -182,8 +221,9 @@ smilezemi-notification/
 │   ├── API_NOTIFIER.md         # Notifier APIリファレンス
 │   ├── VALIDATION_CHECKLIST.md # 統合テスト・本番検証チェックリスト
 │   └── DOCKER_TESTING.md       # Docker環境テスト詳細手順
-├── data/                       # データ保存ディレクトリ
-│   └── mission_data.json       # 学習データ v2.0形式（勉強時間・ミッション詳細・点数を含む）
+├── data/                       # データ保存ディレクトリ（actions/cacheで実行間引き継ぎ）
+│   ├── mission_data.json       # 学習データ v2.0形式（勉強時間・ミッション詳細・点数を含む）
+│   └── streak_data.json        # ストリークデータ（連続日数・おたすけ残数・最終確定日）🔥
 ├── screenshots/                # スクリーンショット保存ディレクトリ
 ├── .env.example                # 環境変数テンプレート
 ├── .gitignore                  # Gitignore設定
