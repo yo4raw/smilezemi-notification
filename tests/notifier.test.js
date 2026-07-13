@@ -265,6 +265,43 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.strictEqual(typeof message, 'string');
       assert.match(message, /変更なし|変更ありませ/, '変更なしのメッセージが含まれること');
     });
+
+    it('正常系: 通常の件数では省略メッセージが付かない', () => {
+      const changes = [
+        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' },
+        { userName: '花子', previousCount: 10, currentCount: 7, diff: -3, type: 'decrease' }
+      ];
+
+      const message = notifier.formatMessage(changes);
+
+      assert.doesNotMatch(message, /他\d+件の変更があります/, '省略メッセージが含まれないこと');
+      assert.match(message, /花子/, '全ての変更が含まれること');
+    });
+
+    it('境界値: 5000文字を超える変更一覧は省略メッセージ1回で打ち切られる', () => {
+      // 1件あたり約210文字 × 40件 = 約8400文字分の変更を作る
+      const longName = 'あ'.repeat(200);
+      const changes = Array.from({ length: 40 }, (_, i) => ({
+        userName: `${longName}${i}`,
+        previousCount: 5,
+        currentCount: 8,
+        diff: 3,
+        type: 'increase'
+      }));
+
+      const message = notifier.formatMessage(changes);
+
+      assert.ok(message.length <= 5000, `メッセージが5000文字以内であること (実際: ${message.length})`);
+
+      const omissionMatches = message.match(/他\d+件の変更があります/g) || [];
+      assert.strictEqual(omissionMatches.length, 1, '省略メッセージがちょうど1回含まれること');
+
+      assert.doesNotMatch(
+        message,
+        /メッセージが長すぎたため省略されました/,
+        '最終防衛の切り詰めではなく件数省略で収まること'
+      );
+    });
   });
 
   describe('センシティブデータのマスキング', () => {

@@ -196,7 +196,7 @@ function formatMessage(changes) {
   message += `🔔 ${changes.length}件の変更がありました\n\n`;
 
   // 各変更を追加
-  changes.forEach((change, index) => {
+  for (const [index, change] of changes.entries()) {
     let changeIcon = '';
     let changeText = '';
 
@@ -218,22 +218,22 @@ function formatMessage(changes) {
         changeText = `${change.previousCount} → ${change.currentCount}`;
     }
 
-    message += `${changeIcon} ${change.userName}\n${changeText}\n\n`;
+    const entry = `${changeIcon} ${change.userName}\n${changeText}\n\n`;
 
-    // メッセージ長を確認（5000文字制限）
-    if (message.length > MAX_MESSAGE_LENGTH - 100) {
-      // 残りの件数を表示して終了
-      const remaining = changes.length - index - 1;
-      if (remaining > 0) {
-        message += `... 他${remaining}件の変更があります`;
-      }
-      return message;
+    // メッセージ長を確認（5000文字制限）: 追加すると省略行の余地がなくなる場合は打ち切り
+    if (message.length + entry.length > MAX_MESSAGE_LENGTH - 100) {
+      const remaining = changes.length - index;
+      message += `... 他${remaining}件の変更があります`;
+      break;
     }
-  });
+
+    message += entry;
+  }
 
   // メッセージが5000文字を超えていた場合は切り詰め
   if (message.length > MAX_MESSAGE_LENGTH) {
-    message = message.substring(0, MAX_MESSAGE_LENGTH - 20) + '\n\n（メッセージが長すぎたため省略されました）';
+    const suffix = '\n\n（メッセージが長すぎたため省略されました）';
+    message = message.substring(0, MAX_MESSAGE_LENGTH - suffix.length) + suffix;
   }
 
   return message.trim();
