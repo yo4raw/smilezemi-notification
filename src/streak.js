@@ -27,8 +27,8 @@ const MILESTONE_INTERVAL = 10;
 
 // ストリーク更新(カウント+1)に必要な完了数。変更時はここだけ書き換える
 const STREAK_REQUIREMENTS = {
-  elementaryMissions: 5, // 小学生コース: 完了ミッション数(夜通知が使用)
-  juniorHighCourses: 5   // 中学生コース: 完了講座数(朝通知が使用)
+  elementaryMissions: 4, // 小学生コース: 完了ミッション数(夜通知が使用)
+  juniorHighCourses: 4   // 中学生コース: 完了講座数(朝通知が使用)
 };
 
 /**
