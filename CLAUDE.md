@@ -132,7 +132,8 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 
 - DOMセレクタは `src/config/selectors.js` に集約管理
 - 日付は JST 基準の `getTargetDates(dateOffset)` を使う（GitHub ActionsはUTCのため明示補正済み）。MM/DD形式はゼロパディング必須、`dateString`(YYYY-MM-DD)がストリーク等のキー
-- 座標ベースフィルタリング: X座標 < 250 で左側UI要素識別
+- 座標ベースフィルタリング: X座標 < 250 で左側UI要素識別。タイムラインの日付見出しは左側(x≈171)、スコア表示(「4/5」等)は右側(x≈1015)にあり、日付検索は必ずこのフィルタを通すこと
+- タイムラインに掲載されているミッション = 実施済み(完了)。NEWラベルは未読バッジであり完了/未完了とは無関係
 - 位置ベース範囲計算: boundingBox()でY座標範囲を計算しセクション分離
 - クローラーのサブ取得は「データなし」を success:true + ゼロ値で返し、例外時のみ success:false。`getCourseData` は後者を `dataReliable: false` としてユーザーデータに伝搬する
 - セレクタ変更時は実サイトで確認後に更新すること
