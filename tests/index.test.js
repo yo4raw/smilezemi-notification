@@ -16,7 +16,7 @@ function resolveModule(p) {
 
 const MODULE_PATHS = [
   '../src/index', '../src/config', '../src/auth',
-  '../src/crawler', '../src/data', '../src/notifier', 'playwright'
+  '../src/crawler', '../src/data', '../src/notifier', '../src/streak', 'playwright'
 ];
 
 function clearModuleCache() {
@@ -113,7 +113,8 @@ describe('オーケストレーション (src/index.js)', () => {
       exports: {
         getAllUsersDetailedData: overrides.getAllUsersDetailedData || (async () => crawlDetailedResult),
         getAllUsersMissionCounts: overrides.getAllUsersMissionCounts || (async () => crawlBasicResult),
-        getUserList: overrides.getUserList || (async () => ({ success: true, users: [{ name: '太郎', index: 0 }] }))
+        getUserList: overrides.getUserList || (async () => ({ success: true, users: [{ name: '太郎', index: 0 }] })),
+        getTargetDates: overrides.getTargetDates || (() => ({ dateString: '2025-12-24', withPadding: '2025-12-24' }))
       }
     };
 
@@ -139,6 +140,18 @@ describe('オーケストレーション (src/index.js)', () => {
         }),
         formatDetailedMessage: overrides.formatDetailedMessage || (() => 'テスト詳細メッセージ'),
         truncateToLimit: overrides.truncateToLimit || ((msg) => msg)
+      }
+    };
+
+    require.cache[resolveModule('../src/streak')] = {
+      id: resolveModule('../src/streak'), filename: resolveModule('../src/streak'), loaded: true,
+      exports: {
+        loadStreakData: overrides.loadStreakData || (async () => ({ success: true, data: {} })),
+        saveStreakData: overrides.saveStreakData || (async () => ({ success: true })),
+        updateStreaks: overrides.updateStreaks || (() => ({ streakUsers: {}, results: [] })),
+        formatStreakInfo: overrides.formatStreakInfo || (() => 'テストストリーク情報'),
+        isStudied: overrides.isStudied || (() => false),
+        createInitialState: overrides.createInitialState || (() => ({}))
       }
     };
 

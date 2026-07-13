@@ -6,9 +6,10 @@
 const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
-const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList } = require('./crawler');
+const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
 const { sendNotification, formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, isStudied, createInitialState } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -206,6 +207,60 @@ async function main() {
       console.warn('⚠️ 詳細情報の一部が取得できませんでした');
     }
 
+    // 6.5 ストリーク(連続学習日数)の更新
+    // 20時時点の当日データでは確定できないため、前日分を追加クロールして確定判定する。
+    // 当日分は「確定ストリーク+当日学習済みなら暫定+1」として表示に使う。
+    let streaks = null;
+    console.log('🔥 ストリークを更新しています...');
+    const streakLoadResult = await loadStreakData();
+
+    if (streakLoadResult.success) {
+      let streakUsers = streakLoadResult.data;
+      const resultMap = new Map();
+
+      const yesterdayDates = getTargetDates(-1);
+      console.log(`🔍 ストリーク確定のため前日(${yesterdayDates.withPadding})のデータを取得しています...`);
+      const yesterdayCrawlResult = await getAllUsersDetailedData(page, {
+        courseFilter: 'elementary',
+        dateOffset: -1
+      });
+
+      if (yesterdayCrawlResult.success) {
+        const updateResult = updateStreaks(
+          streakUsers,
+          yesterdayCrawlResult.data,
+          yesterdayDates.dateString
+        );
+        streakUsers = updateResult.streakUsers;
+        updateResult.results.forEach(result => resultMap.set(result.userName, result));
+
+        const streakSaveResult = await saveStreakData(streakUsers);
+        if (streakSaveResult.success) {
+          console.log('✅ ストリークデータの保存が完了しました');
+        } else {
+          console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
+          errors.push(streakSaveResult.error);
+        }
+      } else {
+        // 前日分が取れない場合は確定判定をスキップし、前回の確定値をそのまま表示する
+        // (未判定日は翌日以降に空白日として中立処理される)
+        console.warn('⚠️ 前日分の取得に失敗したため、ストリークの確定判定をスキップします:', yesterdayCrawlResult.error);
+      }
+
+      // 通知用の表示情報を構築(当日すでに学習していれば暫定で+1表示)
+      streaks = {};
+      currentData.forEach(user => {
+        const result = resultMap.get(user.userName) || {
+          state: streakUsers[user.userName] || createInitialState(),
+          event: 'none'
+        };
+        streaks[user.userName] = formatStreakInfo(result, { todayStudied: isStudied(user) });
+      });
+    } else {
+      console.warn('⚠️ ストリークデータの読み込みに失敗したため、ストリーク表示をスキップします:', streakLoadResult.error);
+      errors.push(streakLoadResult.error);
+    }
+
     // 7. データ比較（変更検出）
     console.log('🔄 データを比較しています...');
 
@@ -227,7 +282,7 @@ async function main() {
     console.log('📤 LINE通知を送信しています...');
 
     // 詳細メッセージをフォーマット（ミッション変化情報を含む）
-    let message = formatDetailedMessage(currentData, missionChangesResult);
+    let message = formatDetailedMessage(currentData, missionChangesResult, { streaks });
 
     // 文字数制限を適用
     message = truncateToLimit(message);
