@@ -25,6 +25,12 @@ const GRACE_MAX = 3;
 const GRACE_INITIAL = 1; // 初回特典。リセット後は0から再スタート(10日連続で再獲得)
 const MILESTONE_INTERVAL = 10;
 
+// ストリーク更新(カウント+1)に必要な完了数。変更時はここだけ書き換える
+const STREAK_REQUIREMENTS = {
+  elementaryMissions: 5, // 小学生コース: 完了ミッション数(夜通知が使用)
+  juniorHighCourses: 4   // 中学生コース: 完了講座数(朝通知が使用)
+};
+
 /**
  * ストリーク状態の初期値を生成
  */
@@ -266,6 +272,7 @@ module.exports = {
   isStudied,
   countCompletedMissions,
   confirmDay,
+  STREAK_REQUIREMENTS,
   updateStreaks,
   formatStreakInfo,
   loadStreakData,

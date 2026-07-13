@@ -15,11 +15,19 @@ const {
   updateStreaks,
   formatStreakInfo,
   loadStreakData,
-  saveStreakData
+  saveStreakData,
+  STREAK_REQUIREMENTS
 } = require('../src/streak');
 
 const DATA_DIR = path.join(__dirname, '../data');
 const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
+
+describe('STREAK_REQUIREMENTS', () => {
+  it('コースごとの必要完了数が正の整数として集約定義されている', () => {
+    assert.ok(Number.isInteger(STREAK_REQUIREMENTS.elementaryMissions) && STREAK_REQUIREMENTS.elementaryMissions > 0);
+    assert.ok(Number.isInteger(STREAK_REQUIREMENTS.juniorHighCourses) && STREAK_REQUIREMENTS.juniorHighCourses > 0);
+  });
+});
 
 describe('createInitialState', () => {
   it('初期おたすけは1(初回特典)', () => {
