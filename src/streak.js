@@ -3,7 +3,7 @@
  *
  * データ構造 (data/streak_data.json):
  * {
- *   version: "1.0",
+ *   version: "1.1",  // 1.0からの読み込み時はおたすけの最低値を1に揃える移行を適用
  *   timestamp: "ISO 8601",
  *   users: {
  *     "ユーザー名 (コース名)": {
@@ -22,13 +22,14 @@ const DATA_DIR = path.join(__dirname, '../data');
 const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
 
 const GRACE_MAX = 3;
+const GRACE_INITIAL = 1; // 初回特典。リセット後は0から再スタート(10日連続で再獲得)
 const MILESTONE_INTERVAL = 10;
 
 /**
  * ストリーク状態の初期値を生成
  */
 function createInitialState() {
-  return { streak: 0, grace: 0, lastConfirmedDate: null };
+  return { streak: 0, grace: GRACE_INITIAL, lastConfirmedDate: null };
 }
 
 /**
@@ -98,6 +99,18 @@ function confirmDay(state, dateString, studied) {
     };
   }
 
+  // 守るべき記録がないうちはおたすけを消費せず、日付だけ確定する(初回特典の無駄消費防止)
+  if (state.streak === 0) {
+    return {
+      state: {
+        streak: 0,
+        grace: state.grace,
+        lastConfirmedDate: dateString
+      },
+      event: 'none'
+    };
+  }
+
   if (state.grace > 0) {
     return {
       state: {
@@ -111,7 +124,7 @@ function confirmDay(state, dateString, studied) {
 
   return {
     state: { streak: 0, grace: 0, lastConfirmedDate: dateString },
-    event: state.streak > 0 ? 'reset' : 'none'
+    event: 'reset'
   };
 }
 
@@ -192,14 +205,24 @@ async function loadStreakData() {
     const jsonData = JSON.parse(fileContent);
 
     const version = jsonData.version || '1.0';
-    if (version !== '1.0') {
+    if (version !== '1.0' && version !== '1.1') {
       return {
         success: false,
         error: `未知のストリークデータバージョン: ${version}`
       };
     }
 
-    return { success: true, data: jsonData.users || {} };
+    const users = jsonData.users || {};
+
+    // 1.0 → 1.1 移行: 初回特典としておたすけの最低値を1に揃える。
+    // 次回保存で1.1になるため一度きりの適用(以降消費して0になった分は再付与しない)
+    if (version === '1.0') {
+      Object.values(users).forEach(state => {
+        state.grace = Math.max(state.grace ?? 0, GRACE_INITIAL);
+      });
+    }
+
+    return { success: true, data: users };
   } catch (error) {
     if (error instanceof SyntaxError) {
       return { success: false, error: `JSONパースエラー: ${error.message}` };
@@ -226,7 +249,7 @@ async function saveStreakData(streakUsers) {
     await fs.mkdir(DATA_DIR, { recursive: true });
 
     const saveObject = {
-      version: '1.0',
+      version: '1.1',
       timestamp: new Date().toISOString(),
       users: streakUsers
     };

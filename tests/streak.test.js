@@ -21,6 +21,12 @@ const {
 const DATA_DIR = path.join(__dirname, '../data');
 const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
 
+describe('createInitialState', () => {
+  it('初期おたすけは1(初回特典)', () => {
+    assert.deepStrictEqual(createInitialState(), { streak: 0, grace: 1, lastConfirmedDate: null });
+  });
+});
+
 describe('isStudied', () => {
   it('勉強時間もミッションもない場合は未学習', () => {
     assert.strictEqual(isStudied({ studyTime: { hours: 0, minutes: 0 }, missions: [] }), false);
@@ -99,9 +105,9 @@ describe('countCompletedMissions', () => {
 });
 
 describe('confirmDay', () => {
-  it('学習した日はストリークが+1される', () => {
+  it('学習した日はストリークが+1される(初期おたすけ1は維持)', () => {
     const { state, event } = confirmDay(createInitialState(), '2026-07-12', true);
-    assert.deepStrictEqual(state, { streak: 1, grace: 0, lastConfirmedDate: '2026-07-12' });
+    assert.deepStrictEqual(state, { streak: 1, grace: 1, lastConfirmedDate: '2026-07-12' });
     assert.strictEqual(event, 'none');
   });
 
@@ -145,6 +151,16 @@ describe('confirmDay', () => {
     );
     assert.deepStrictEqual(state, { streak: 0, grace: 0, lastConfirmedDate: '2026-07-12' });
     assert.strictEqual(event, 'reset');
+  });
+
+  it('ストリーク0のときはおたすけを消費しない(守る記録がないため)', () => {
+    const { state, event } = confirmDay(
+      { streak: 0, grace: 1, lastConfirmedDate: null },
+      '2026-07-12',
+      false
+    );
+    assert.deepStrictEqual(state, { streak: 0, grace: 1, lastConfirmedDate: '2026-07-12' });
+    assert.strictEqual(event, 'none');
   });
 
   it('ストリーク0で未学習の場合はresetイベントを出さない', () => {
@@ -214,11 +230,44 @@ describe('loadStreakData / saveStreakData', () => {
     assert.deepStrictEqual(loadResult.data, users);
   });
 
-  it('保存ファイルに version と ISO 8601 timestamp が含まれる', async () => {
+  it('保存ファイルに version(1.1) と ISO 8601 timestamp が含まれる', async () => {
     await saveStreakData({});
     const content = JSON.parse(await fs.readFile(STREAK_FILE, 'utf-8'));
-    assert.strictEqual(content.version, '1.0');
+    assert.strictEqual(content.version, '1.1');
     assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(content.timestamp));
+  });
+
+  it('1.0データの読み込み時におたすけ0を1に引き上げる(一度きりの移行)', async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(STREAK_FILE, JSON.stringify({
+      version: '1.0',
+      users: {
+        '祥吾 (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-12' },
+        '光志郎 (中学生コース)': { streak: 15, grace: 2, lastConfirmedDate: '2026-07-12' }
+      }
+    }), 'utf-8');
+
+    const result = await loadStreakData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 1, 'おたすけ0は1に引き上げられること');
+    assert.strictEqual(result.data['祥吾 (小学生コース)'].streak, 3, 'ストリークは変わらないこと');
+    assert.strictEqual(result.data['光志郎 (中学生コース)'].grace, 2, 'おたすけ2はそのままなこと');
+  });
+
+  it('1.1データの読み込みではおたすけ0でも引き上げない(消費済みは再付与しない)', async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(STREAK_FILE, JSON.stringify({
+      version: '1.1',
+      users: {
+        '祥吾 (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-12' }
+      }
+    }), 'utf-8');
+
+    const result = await loadStreakData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 0, '1.1データは移行対象外なこと');
   });
 
   it('不正なJSONの場合はエラーを返す', async () => {
@@ -324,7 +373,17 @@ describe('updateStreaks', () => {
 
     assert.deepStrictEqual(
       streakUsers['祥吾 (小学生コース)'],
-      { streak: 0, grace: 0, lastConfirmedDate: '2026-07-12' }
+      { streak: 0, grace: 1, lastConfirmedDate: '2026-07-12' },
+      '新規ユーザーはおたすけ1のまま(streak 0では消費しない)日付だけ確定されること'
+    );
+  });
+
+  it('新規ユーザーが初日に学習するとstreak 1・おたすけ1になる', () => {
+    const { streakUsers } = updateStreaks({}, [studiedUser], '2026-07-12');
+
+    assert.deepStrictEqual(
+      streakUsers['光志郎 (中学生コース)'],
+      { streak: 1, grace: 1, lastConfirmedDate: '2026-07-12' }
     );
   });
 
