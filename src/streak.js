@@ -3,7 +3,7 @@
  *
  * データ構造 (data/streak_data.json):
  * {
- *   version: "1.1",  // 1.0からの読み込み時はおたすけの最低値を1に揃える移行を適用
+ *   version: "1.2",  // 1.2未満の読み込み時は全ユーザーのおたすけを3にする移行を適用(一度きり)
  *   timestamp: "ISO 8601",
  *   users: {
  *     "ユーザー名 (コース名)": {
@@ -211,7 +211,7 @@ async function loadStreakData() {
     const jsonData = JSON.parse(fileContent);
 
     const version = jsonData.version || '1.0';
-    if (version !== '1.0' && version !== '1.1') {
+    if (version !== '1.0' && version !== '1.1' && version !== '1.2') {
       return {
         success: false,
         error: `未知のストリークデータバージョン: ${version}`
@@ -220,11 +220,12 @@ async function loadStreakData() {
 
     const users = jsonData.users || {};
 
-    // 1.0 → 1.1 移行: 初回特典としておたすけの最低値を1に揃える。
-    // 次回保存で1.1になるため一度きりの適用(以降消費して0になった分は再付与しない)
-    if (version === '1.0') {
+    // 〜1.1 → 1.2 移行: 全ユーザーのおたすけを満タン(3)にする一度きりのチャージ。
+    // 旧1.0→1.1移行(最低1付与)もこの移行に包含される。
+    // 次回保存で1.2になるため一度きりの適用(以降消費した分は再付与しない)
+    if (version !== '1.2') {
       Object.values(users).forEach(state => {
-        state.grace = Math.max(state.grace ?? 0, GRACE_INITIAL);
+        state.grace = GRACE_MAX;
       });
     }
 
@@ -255,7 +256,7 @@ async function saveStreakData(streakUsers) {
     await fs.mkdir(DATA_DIR, { recursive: true });
 
     const saveObject = {
-      version: '1.1',
+      version: '1.2',
       timestamp: new Date().toISOString(),
       users: streakUsers
     };
