@@ -147,13 +147,23 @@ describe('confirmDay', () => {
     assert.strictEqual(event, 'none');
   });
 
-  it('10日到達でおたすけが満タン(3)ならボーナス+1(bonusイベント)', () => {
+  it('おたすけ満タン(3)の学習日は毎日ボーナス+1(bonusイベント、節目以外の日)', () => {
     const { state, event } = confirmDay(
-      { streak: 9, grace: 3, bonus: 0, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
+      { streak: 4, grace: 3, bonus: 0, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
+    );
+    assert.strictEqual(state.streak, 5);
+    assert.strictEqual(state.grace, 3, 'おたすけは満タンのまま');
+    assert.strictEqual(state.bonus, 1, 'ボーナスが+1されること');
+    assert.strictEqual(event, 'bonus');
+  });
+
+  it('おたすけ満タン中は10日節目でもボーナス+1のみ(重ね掛けなし・マイルストーン判定なし)', () => {
+    const { state, event } = confirmDay(
+      { streak: 9, grace: 3, bonus: 2, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
     );
     assert.strictEqual(state.streak, 10);
     assert.strictEqual(state.grace, 3, 'おたすけは満タンのまま');
-    assert.strictEqual(state.bonus, 1, 'ボーナスが+1されること');
+    assert.strictEqual(state.bonus, 3, '節目でも+1のみであること');
     assert.strictEqual(event, 'bonus');
   });
 
@@ -182,12 +192,14 @@ describe('confirmDay', () => {
     assert.strictEqual(state.bonus, 2, 'リセットでもボーナスは消えないこと');
   });
 
-  it('ボーナスは非マイルストーンの学習日でも保持される', () => {
-    const { state } = confirmDay(
-      { streak: 11, grace: 3, bonus: 1, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
+  it('おたすけ3未満の節目以外の学習日はボーナス不変・報酬なし', () => {
+    const { state, event } = confirmDay(
+      { streak: 11, grace: 2, bonus: 1, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
     );
     assert.strictEqual(state.streak, 12);
+    assert.strictEqual(state.grace, 2);
     assert.strictEqual(state.bonus, 1);
+    assert.strictEqual(event, 'none');
   });
 
   it('10日到達でおたすけ+1(milestone)', () => {
@@ -199,11 +211,12 @@ describe('confirmDay', () => {
     assert.strictEqual(event, 'milestone');
   });
 
-  it('20日到達でもおたすけ+1', () => {
+  it('20日到達でもおたすけ+1(ボーナスは不変)', () => {
     const { state, event } = confirmDay(
-      { streak: 19, grace: 1, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
+      { streak: 19, grace: 1, bonus: 1, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
     );
     assert.strictEqual(state.grace, 2);
+    assert.strictEqual(state.bonus, 1, 'おたすけ3未満のマイルストーンではボーナスは増えないこと');
     assert.strictEqual(event, 'milestone');
   });
 
@@ -579,12 +592,13 @@ describe('formatStreakInfo', () => {
     assert.doesNotMatch(text, /ボーナス/);
   });
 
-  it('bonusイベントでお祝い行が追加される', () => {
+  it('bonusイベントで毎日ボーナス行が追加される(🎉の連続達成文面は出さない)', () => {
     const text = formatStreakInfo({
       state: { streak: 20, grace: 3, bonus: 2, lastConfirmedDate: '2026-07-12' },
       event: 'bonus'
     });
-    assert.match(text, /🎉 20日連続達成!おたすけ満タンのためボーナス\+1\(合計2P\)/);
+    assert.match(text, /💰 おたすけ満タンのためボーナス\+1\(合計2P\)/);
+    assert.doesNotMatch(text, /🎉/);
   });
 
   it('基本表示(ストリークとおたすけ)', () => {
