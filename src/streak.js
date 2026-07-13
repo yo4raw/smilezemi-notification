@@ -113,10 +113,9 @@ function confirmDay(state, dateString, studied) {
 
   if (studied) {
     const streak = state.streak + 1;
-    const isMilestoneDay = streak % MILESTONE_INTERVAL === 0;
 
-    // おたすけ満タン時のマイルストーンはボーナスとして貯める
-    if (isMilestoneDay && state.grace >= GRACE_MAX) {
+    // おたすけ満タン中は学習した日ごとに毎日ボーナス+1(マイルストーン判定はしない)
+    if (state.grace >= GRACE_MAX) {
       return {
         state: {
           streak,
@@ -128,6 +127,7 @@ function confirmDay(state, dateString, studied) {
       };
     }
 
+    const isMilestoneDay = streak % MILESTONE_INTERVAL === 0;
     return {
       state: {
         streak,
@@ -245,7 +245,7 @@ function formatStreakInfo(result, options = {}) {
   if (event === 'milestone') {
     lines.push(`🎉 ${state.streak}日連続達成!おたすけ+1(残り${state.grace})`);
   } else if (event === 'bonus') {
-    lines.push(`🎉 ${state.streak}日連続達成!おたすけ満タンのためボーナス+1(合計${bonus}P)`);
+    lines.push(`💰 おたすけ満タンのためボーナス+1(合計${bonus}P)`);
   } else if (event === 'grace_used') {
     lines.push(`💤 昨日はおたすけを使って連続記録を守りました(残り${state.grace})`);
   } else if (event === 'reset') {
