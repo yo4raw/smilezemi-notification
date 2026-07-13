@@ -1,0 +1,130 @@
+name: スマイルゼミ 月次ボーナス清算
+
+on:
+  # 「毎月1日 JST 8:00」はUTCでは前月末日23:00のため、cronで「1日」を直接指定できない。
+  # 月末候補日(28〜31日)の UTC 22:47 (= JST翌日 7:47) に起動し、
+  # JSTの日付が「1日」の場合のみ実行する(それ以外は数秒で正常終了)。
+  schedule:
+    - cron: '47 22 28-31 * *'
+
+  # 手動実行をサポート(日付ガードをスキップして常に実行)
+  workflow_dispatch:
+
+jobs:
+  monthly-bonus:
+    runs-on: ubuntu-latest
+    # JST 8:00 までの最大待機 約13分 + ビルド/実行時間の余裕
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read # キャッシュ整合性チェック(gh api)に必要
+
+    steps:
+      # 1. リポジトリのチェックアウト
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      # 2. JSTで「1日」かどうかを判定(月末でない候補日の空振りを排除)
+      - name: JST日付ガード
+        id: date-guard
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "手動実行のため日付ガードをスキップします"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          today=$(TZ=Asia/Tokyo date +%d)
+          if [ "$today" = "01" ]; then
+            echo "JSTで1日のため実行します"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "JSTで1日ではないため何もせず終了します (JST day: ${today})"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 3. .envファイルを作成
+      - name: .envファイルを作成
+        if: steps.date-guard.outputs.run == 'true'
+        run: |
+          echo "SMILEZEMI_USERNAME=${{ secrets.SMILEZEMI_USERNAME }}" >> .env
+          echo "SMILEZEMI_PASSWORD=${{ secrets.SMILEZEMI_PASSWORD }}" >> .env
+          echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" >> .env
+          echo "LINE_USER_ID=${{ secrets.LINE_USER_ID }}" >> .env
+
+      # 4. Dockerイメージをビルド
+      - name: Dockerイメージをビルド
+        if: steps.date-guard.outputs.run == 'true'
+        run: docker compose build
+
+      # 5. JST 8:00 まで待機(スケジュール実行時のみ。遅延起動時は即実行)
+      - name: JST 8:00まで待機
+        if: steps.date-guard.outputs.run == 'true' && github.event_name == 'schedule'
+        run: |
+          target=$(TZ=Asia/Tokyo date -d "today 08:00" +%s)
+          now=$(date +%s)
+          wait_sec=$(( target - now ))
+          if [ "$wait_sec" -gt 0 ]; then
+            echo "JST 8:00まで ${wait_sec} 秒待機します"
+            sleep "$wait_sec"
+          else
+            echo "既にJST 8:00を過ぎているため即実行します"
+          fi
+
+      # 6. 前回データを復元(朝通知の保存(〜7:05頃)との競合を避けるため待機の後に行う)
+      - name: 前回データを復元
+        if: steps.date-guard.outputs.run == 'true'
+        id: restore-data
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: smilezemi-data-${{ github.run_id }}
+          restore-keys: |
+            smilezemi-data-
+
+      # キャッシュ整合性チェック: 既存エントリがあるのに復元できなかった場合は
+      # 誤清算(ボーナス0で上書き)を防ぐためジョブを中断する
+      - name: キャッシュ復元の整合性を検証
+        if: steps.date-guard.outputs.run == 'true' && steps.restore-data.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=smilezemi-data-" --jq '.total_count')
+          if [ "$count" -gt 0 ]; then
+            echo "::error::既存のキャッシュエントリ(${count}件)があるのに復元できませんでした。データ保護のためジョブを中断します。キャッシュサービス回復後に手動で再実行してください。"
+            exit 1
+          fi
+          echo "キャッシュエントリなし(初回実行またはエビクション後)のため、初期状態で続行します"
+
+      # 7. 月次ボーナス清算を実行
+      - name: 月次ボーナス清算を実行
+        if: steps.date-guard.outputs.run == 'true'
+        run: docker compose run --rm crawler node src/monthly-bonus-index.js
+
+      # 8. データをキャッシュに保存(清算後のリセット状態を次回実行に引き継ぐ)
+      - name: データをキャッシュに保存
+        if: always() && steps.date-guard.outputs.run == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: smilezemi-data-${{ github.run_id }}
+
+      # 9. .envファイルを削除(セキュリティ対策)
+      - name: .envファイルを削除
+        if: always()
+        run: rm -f .env
+
+      # 10. ワークフロー失敗をLINEに通知(最後の砦。この通知自体の失敗はジョブを落とさない)
+      - name: 失敗をLINEに通知
+        if: failure()
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER: ${{ secrets.LINE_USER_ID }}
+        run: |
+          message=$(printf '⚠️ GitHub Actions ワークフローが失敗しました\n\nワークフロー: %s\n実行ログ: %s' "$WORKFLOW_NAME" "$RUN_URL")
+          payload=$(jq -n --arg to "$LINE_USER" --arg text "$message" '{to: $to, messages: [{type: "text", text: $text}]}')
+          curl -sS --fail-with-body -X POST https://api.line.me/v2/bot/message/push \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LINE_TOKEN" \
+            -d "$payload" || echo "::warning::失敗通知の送信に失敗しました"

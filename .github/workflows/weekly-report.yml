@@ -84,7 +84,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for wf in crawler.yml morning-crawler.yml weekly-report.yml; do
+          for wf in crawler.yml morning-crawler.yml weekly-report.yml monthly-bonus.yml; do
             if gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/enable" >/dev/null; then
               echo "✅ ${wf} の無効化タイマーをリセットしました"
             else
