@@ -13,6 +13,9 @@ const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, isStudi
 const fs = require('fs').promises;
 const path = require('path');
 
+// 小学生コースのストリークに必要な完了ミッション数(5個未満の日はカウントしない)
+const REQUIRED_MISSIONS_FOR_STREAK = 5;
+
 /**
  * メイン実行関数
  *
@@ -259,7 +262,8 @@ async function main() {
       const updateResult = updateStreaks(
         streakUsers,
         yesterdayCrawlResult.data,
-        yesterdayDates.dateString
+        yesterdayDates.dateString,
+        { minCompletedMissions: REQUIRED_MISSIONS_FOR_STREAK }
       );
       streakUsers = updateResult.streakUsers;
       updateResult.results.forEach(result => resultMap.set(result.userName, result));
@@ -282,14 +286,16 @@ async function main() {
       console.warn('⚠️ 前日分の取得に失敗したため、ストリークの確定判定をスキップします:', yesterdayCrawlResult.error);
     }
 
-    // 通知用の表示情報を構築(当日すでに学習していれば暫定で+1表示)
+    // 通知用の表示情報を構築(当日すでに5個完了していれば暫定で+1表示)
     streaks = {};
     currentData.forEach(user => {
       const result = resultMap.get(user.userName) || {
         state: streakUsers[user.userName] || createInitialState(),
         event: 'none'
       };
-      streaks[user.userName] = formatStreakInfo(result, { todayStudied: isStudied(user) });
+      streaks[user.userName] = formatStreakInfo(result, {
+        todayStudied: isStudied(user, { minCompletedMissions: REQUIRED_MISSIONS_FOR_STREAK })
+      });
     });
 
     // 7. データ比較（変更検出）
@@ -312,8 +318,11 @@ async function main() {
     // Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     console.log('📤 LINE通知を送信しています...');
 
-    // 詳細メッセージをフォーマット（ミッション変化情報を含む）
-    let message = formatDetailedMessage(currentData, missionChangesResult, { streaks });
+    // 詳細メッセージをフォーマット（ミッション変化情報・5個未満警告を含む）
+    let message = formatDetailedMessage(currentData, missionChangesResult, {
+      streaks,
+      missionWarningThreshold: REQUIRED_MISSIONS_FOR_STREAK
+    });
 
     // 文字数制限を適用
     message = truncateToLimit(message);
