@@ -17,17 +17,19 @@ GitHub Actions (cron) → actions/cacheでdata/復元 → Docker → Playwright 
   → data/をactions/cacheに保存(次回実行に引き継ぎ)
 ```
 
-### Three Entry Points
+### Four Entry Points
 
 1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。小学生コースの勉強時間・ミッション詳細・点数を取得しLINE通知。ストリーク確定のため前日分も追加クロールする
 2. **朝通知** (`src/morning-index.js`): 毎日 JST 7:00 に実行。中学生コースの前日分学習実績を取得しLINE通知（0件でも必ず通知）。前日分は確定データのためそのままストリークを確定する
 3. **週間レポート** (`src/weekly-report-index.js`): 毎週月曜 JST 17:00 に実行。週間学習ガイダンスレポートを取得しLINE通知
+4. **月次ボーナス清算** (`src/monthly-bonus-index.js`): 毎月1日 JST 8:00 に実行。前月分のボーナスポイントを子供ごとに通知して0にリセット。クロール不要のためブラウザを起動しない
 
 ### Workflows
 
 - `.github/workflows/crawler.yml` → `docker compose up` → `node src/index.js`
 - `.github/workflows/morning-crawler.yml` → `docker compose run --rm crawler node src/morning-index.js`
 - `.github/workflows/weekly-report.yml` → `docker compose run --rm crawler node src/weekly-report-index.js`
+- `.github/workflows/monthly-bonus.yml` → `docker compose run --rm crawler node src/monthly-bonus-index.js`（月末候補日28-31のUTC 22:47起動 + JST日付ガードで「1日」のみ実行）
 
 ### データ永続化 (actions/cache)
 
@@ -42,7 +44,7 @@ GitHub Actions はクリーンな checkout から始まるため、`data/` デ�
 
 `src/streak.js` + `data/streak_data.json`。仕様詳細は `docs/superpowers/specs/2026-07-13-streak-notification-design.md`。
 
-- 学習判定は完了数のみで行う（勉強時間は見ない）: **小学生コースは完了ミッション4個以上、中学生コースは完了講座4個以上**が必須。閾値は `STREAK_REQUIREMENTS`（`src/streak.js`）に集約されており、変更時はここだけ書き換える。学習した日は `streak += 1`、連続10日ごとに「おたすけ」+1（上限3）。**初期おたすけは1**（初回特典。`streak_data.json` v1.0→v1.1移行で既存ユーザーも最低1に引き上げ）。streak 0 のときは消費せず、リセット後は0から再スタート
+- 学習判定は完了数のみで行う（勉強時間は見ない）: **小学生コースは完了ミッション4個以上、中学生コースは完了講座4個以上**が必須。閾値は `STREAK_REQUIREMENTS`（`src/streak.js`）に集約されており、変更時はここだけ書き換える。学習した日は `streak += 1`、連続10日ごとに「おたすけ」+1（上限3）。**おたすけ満タン時のマイルストーンは「ボーナスポイント」+1**（`bonus`フィールド。リセットでも消えず、毎月1日の月次清算通知で0にリセットしてお小遣いとして支給）。**初期おたすけは1**（初回特典。`streak_data.json` v1.0→v1.1移行で既存ユーザーも最低1に引き上げ）。streak 0 のときは消費せず、リセット後は0から再スタート
 - 夜・朝通知とも完了数未達のユーザーに警告行（`missionWarningThreshold`、小学生=ミッション表記/中学生=講座表記）を表示する。`dataReliable: false` のユーザーと、朝通知で完全未学習（「昨日は学習していません」表示）の日には出さない
 - 未学習日はおたすけを自動消費してストリーク維持（+1しない）。尽きたらストリーク・おたすけとも0にリセット
 - **前日分を翌日に確定判定**（20時以降の学習も翌日に正しく反映）。夜通知は「確定+当日学習済なら暫定+1」を表示
@@ -57,6 +59,7 @@ src/
 ├── index.js                  # メインエントリ（日次通知・小学生コース）
 ├── morning-index.js          # 朝通知エントリ（中学生コース・前日分）
 ├── weekly-report-index.js    # 週間レポートエントリ
+├── monthly-bonus-index.js    # 月次ボーナス清算エントリ（ブラウザ非依存）
 ├── config.js                 # 環境変数管理 (loadConfig, maskSensitiveData, validateSecrets)
 ├── config/
 │   └── selectors.js          # DOMセレクタ定義（login, dashboard, missionDetails, weeklyReport等）
@@ -74,7 +77,8 @@ scripts/                      # validate-env.js, validate-security.sh, test-dock
 .github/workflows/
 ├── crawler.yml               # 日次クローリング (UTC 06:17起動→JST 20:00まで待機) + data/キャッシュ
 ├── morning-crawler.yml       # 朝通知 (UTC 17:47起動→JST 7:00まで待機) + data/キャッシュ
-└── weekly-report.yml         # 週間レポート (cron: 毎週月曜 UTC 08:00)
+├── weekly-report.yml         # 週間レポート (cron: 毎週月曜 UTC 08:00)
+└── monthly-bonus.yml         # 月次ボーナス清算 (月末候補日起動 + JST1日ガード → JST 8:00)
 ```
 
 ## Tech Stack
@@ -100,6 +104,7 @@ npm run test:docker       # Docker環境テスト
 # ローカル実行（.envは自動読込されないため -r dotenv/config が必須）
 DRY_RUN=true node -r dotenv/config src/morning-index.js   # 朝通知ドライラン（LINE送信・streak保存なし）
 DRY_RUN=true node -r dotenv/config src/index.js           # 夜通知ドライラン（LINE送信・データ/streak保存なし）
+DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ドライラン（送信・リセットなし）
 ```
 
 ## Environment Variables

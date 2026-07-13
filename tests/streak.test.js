@@ -14,6 +14,7 @@ const {
   confirmDay,
   updateStreaks,
   formatStreakInfo,
+  settleBonuses,
   loadStreakData,
   saveStreakData,
   STREAK_REQUIREMENTS
@@ -30,8 +31,8 @@ describe('STREAK_REQUIREMENTS', () => {
 });
 
 describe('createInitialState', () => {
-  it('初期おたすけは1(初回特典)', () => {
-    assert.deepStrictEqual(createInitialState(), { streak: 0, grace: 1, lastConfirmedDate: null });
+  it('初期おたすけは1(初回特典)、ボーナスは0', () => {
+    assert.deepStrictEqual(createInitialState(), { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: null });
   });
 });
 
@@ -115,8 +116,51 @@ describe('countCompletedMissions', () => {
 describe('confirmDay', () => {
   it('学習した日はストリークが+1される(初期おたすけ1は維持)', () => {
     const { state, event } = confirmDay(createInitialState(), '2026-07-12', true);
-    assert.deepStrictEqual(state, { streak: 1, grace: 1, lastConfirmedDate: '2026-07-12' });
+    assert.deepStrictEqual(state, { streak: 1, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' });
     assert.strictEqual(event, 'none');
+  });
+
+  it('10日到達でおたすけが満タン(3)ならボーナス+1(bonusイベント)', () => {
+    const { state, event } = confirmDay(
+      { streak: 9, grace: 3, bonus: 0, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
+    );
+    assert.strictEqual(state.streak, 10);
+    assert.strictEqual(state.grace, 3, 'おたすけは満タンのまま');
+    assert.strictEqual(state.bonus, 1, 'ボーナスが+1されること');
+    assert.strictEqual(event, 'bonus');
+  });
+
+  it('bonusフィールドがない旧データでもボーナス獲得できる(0扱い)', () => {
+    const { state, event } = confirmDay(
+      { streak: 19, grace: 3, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
+    );
+    assert.strictEqual(state.bonus, 1);
+    assert.strictEqual(event, 'bonus');
+  });
+
+  it('ボーナスはおたすけ消費でも保持される', () => {
+    const { state } = confirmDay(
+      { streak: 12, grace: 1, bonus: 2, lastConfirmedDate: '2026-07-11' }, '2026-07-12', false
+    );
+    assert.strictEqual(state.bonus, 2);
+    assert.strictEqual(state.grace, 0);
+  });
+
+  it('ボーナスはリセットでも保持される(支給予定のため)', () => {
+    const { state, event } = confirmDay(
+      { streak: 12, grace: 0, bonus: 2, lastConfirmedDate: '2026-07-11' }, '2026-07-12', false
+    );
+    assert.strictEqual(event, 'reset');
+    assert.strictEqual(state.streak, 0);
+    assert.strictEqual(state.bonus, 2, 'リセットでもボーナスは消えないこと');
+  });
+
+  it('ボーナスは非マイルストーンの学習日でも保持される', () => {
+    const { state } = confirmDay(
+      { streak: 11, grace: 3, bonus: 1, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
+    );
+    assert.strictEqual(state.streak, 12);
+    assert.strictEqual(state.bonus, 1);
   });
 
   it('10日到達でおたすけ+1(milestone)', () => {
@@ -136,20 +180,20 @@ describe('confirmDay', () => {
     assert.strictEqual(event, 'milestone');
   });
 
-  it('おたすけは上限3を超えない(milestoneイベントも発生しない)', () => {
+  it('おたすけは上限3を超えない(超過分はボーナスになる)', () => {
     const { state, event } = confirmDay(
       { streak: 39, grace: 3, lastConfirmedDate: '2026-07-11' }, '2026-07-12', true
     );
     assert.strictEqual(state.streak, 40);
     assert.strictEqual(state.grace, 3);
-    assert.strictEqual(event, 'none');
+    assert.strictEqual(event, 'bonus');
   });
 
   it('未学習でもおたすけがあれば消費してストリーク維持(+1されない)', () => {
     const { state, event } = confirmDay(
       { streak: 12, grace: 2, lastConfirmedDate: '2026-07-11' }, '2026-07-12', false
     );
-    assert.deepStrictEqual(state, { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' });
+    assert.deepStrictEqual(state, { streak: 12, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' });
     assert.strictEqual(event, 'grace_used');
   });
 
@@ -157,7 +201,7 @@ describe('confirmDay', () => {
     const { state, event } = confirmDay(
       { streak: 12, grace: 0, lastConfirmedDate: '2026-07-11' }, '2026-07-12', false
     );
-    assert.deepStrictEqual(state, { streak: 0, grace: 0, lastConfirmedDate: '2026-07-12' });
+    assert.deepStrictEqual(state, { streak: 0, grace: 0, bonus: 0, lastConfirmedDate: '2026-07-12' });
     assert.strictEqual(event, 'reset');
   });
 
@@ -167,7 +211,7 @@ describe('confirmDay', () => {
       '2026-07-12',
       false
     );
-    assert.deepStrictEqual(state, { streak: 0, grace: 1, lastConfirmedDate: '2026-07-12' });
+    assert.deepStrictEqual(state, { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' });
     assert.strictEqual(event, 'none');
   });
 
@@ -198,7 +242,7 @@ describe('confirmDay', () => {
     const { state } = confirmDay(
       { streak: 5, grace: 1, lastConfirmedDate: '2026-07-08' }, '2026-07-12', true
     );
-    assert.deepStrictEqual(state, { streak: 6, grace: 1, lastConfirmedDate: '2026-07-12' });
+    assert.deepStrictEqual(state, { streak: 6, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' });
   });
 });
 
@@ -396,7 +440,7 @@ describe('updateStreaks', () => {
 
     assert.deepStrictEqual(
       streakUsers['祥吾 (小学生コース)'],
-      { streak: 0, grace: 1, lastConfirmedDate: '2026-07-12' },
+      { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' },
       '新規ユーザーはおたすけ1のまま(streak 0では消費しない)日付だけ確定されること'
     );
   });
@@ -406,7 +450,7 @@ describe('updateStreaks', () => {
 
     assert.deepStrictEqual(
       streakUsers['光志郎 (中学生コース)'],
-      { streak: 1, grace: 1, lastConfirmedDate: '2026-07-12' }
+      { streak: 1, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
     );
   });
 
@@ -445,7 +489,62 @@ describe('updateStreaks', () => {
   });
 });
 
+describe('settleBonuses', () => {
+  const users = {
+    '祥吾 (小学生コース)': { streak: 12, grace: 3, bonus: 2, lastConfirmedDate: '2026-07-31' },
+    '千晴 (小学生コース)': { streak: 5, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-31' },
+    '光志郎 (中学生コース)': { streak: 20, grace: 3, lastConfirmedDate: '2026-07-31' }
+  };
+
+  it('全ユーザーのボーナスを0にした新しいマップと清算リストを返す', () => {
+    const { streakUsers, settlements } = settleBonuses(users);
+
+    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].bonus, 0);
+    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 12, 'ストリークは変わらないこと');
+    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].grace, 3, 'おたすけは変わらないこと');
+
+    assert.deepStrictEqual(
+      settlements.map(s => [s.userName, s.bonus]).sort(),
+      [
+        ['光志郎 (中学生コース)', 0],
+        ['千晴 (小学生コース)', 0],
+        ['祥吾 (小学生コース)', 2]
+      ].sort(),
+      'bonus欠損は0として清算リストに含まれること'
+    );
+  });
+
+  it('入力のマップを変更しない(純粋関数)', () => {
+    settleBonuses(users);
+    assert.strictEqual(users['祥吾 (小学生コース)'].bonus, 2);
+  });
+});
+
 describe('formatStreakInfo', () => {
+  it('ボーナス1以上のときストリーク行に表示される', () => {
+    const text = formatStreakInfo({
+      state: { streak: 12, grace: 3, bonus: 2, lastConfirmedDate: '2026-07-12' },
+      event: 'none'
+    });
+    assert.match(text, /💰 ボーナス: 2P/);
+  });
+
+  it('ボーナス0のときは表示されない', () => {
+    const text = formatStreakInfo({
+      state: { streak: 12, grace: 3, bonus: 0, lastConfirmedDate: '2026-07-12' },
+      event: 'none'
+    });
+    assert.doesNotMatch(text, /ボーナス/);
+  });
+
+  it('bonusイベントでお祝い行が追加される', () => {
+    const text = formatStreakInfo({
+      state: { streak: 20, grace: 3, bonus: 2, lastConfirmedDate: '2026-07-12' },
+      event: 'bonus'
+    });
+    assert.match(text, /🎉 20日連続達成!おたすけ満タンのためボーナス\+1\(合計2P\)/);
+  });
+
   it('基本表示(ストリークとおたすけ)', () => {
     const text = formatStreakInfo({
       state: { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' },

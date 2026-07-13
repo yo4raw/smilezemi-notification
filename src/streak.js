@@ -35,7 +35,7 @@ const STREAK_REQUIREMENTS = {
  * ストリーク状態の初期値を生成
  */
 function createInitialState() {
-  return { streak: 0, grace: GRACE_INITIAL, lastConfirmedDate: null };
+  return { streak: 0, grace: GRACE_INITIAL, bonus: 0, lastConfirmedDate: null };
 }
 
 /**
@@ -92,16 +92,34 @@ function confirmDay(state, dateString, studied) {
     return { state, event: 'none' };
   }
 
+  // ボーナスは全分岐で保持される(月次清算でのみ0になる)。旧データにはフィールドがないため0扱い
+  const bonus = state.bonus ?? 0;
+
   if (studied) {
     const streak = state.streak + 1;
-    const isMilestone = streak % MILESTONE_INTERVAL === 0 && state.grace < GRACE_MAX;
+    const isMilestoneDay = streak % MILESTONE_INTERVAL === 0;
+
+    // おたすけ満タン時のマイルストーンはボーナスとして貯める
+    if (isMilestoneDay && state.grace >= GRACE_MAX) {
+      return {
+        state: {
+          streak,
+          grace: state.grace,
+          bonus: bonus + 1,
+          lastConfirmedDate: dateString
+        },
+        event: 'bonus'
+      };
+    }
+
     return {
       state: {
         streak,
-        grace: isMilestone ? state.grace + 1 : state.grace,
+        grace: isMilestoneDay ? state.grace + 1 : state.grace,
+        bonus,
         lastConfirmedDate: dateString
       },
-      event: isMilestone ? 'milestone' : 'none'
+      event: isMilestoneDay ? 'milestone' : 'none'
     };
   }
 
@@ -111,6 +129,7 @@ function confirmDay(state, dateString, studied) {
       state: {
         streak: 0,
         grace: state.grace,
+        bonus,
         lastConfirmedDate: dateString
       },
       event: 'none'
@@ -122,16 +141,36 @@ function confirmDay(state, dateString, studied) {
       state: {
         streak: state.streak,
         grace: state.grace - 1,
+        bonus,
         lastConfirmedDate: dateString
       },
       event: 'grace_used'
     };
   }
 
+  // ボーナスは支給予定のためリセットでも消えない
   return {
-    state: { streak: 0, grace: 0, lastConfirmedDate: dateString },
+    state: { streak: 0, grace: 0, bonus, lastConfirmedDate: dateString },
     event: 'reset'
   };
+}
+
+/**
+ * 月次清算: 全ユーザーのボーナスを0にした新しいマップと清算リストを返す(純粋関数)
+ *
+ * @param {object} streakUsers - userName → state のマップ
+ * @returns {{streakUsers: object, settlements: Array<{userName: string, bonus: number}>}}
+ */
+function settleBonuses(streakUsers) {
+  const settled = {};
+  const settlements = [];
+
+  Object.entries(streakUsers).forEach(([userName, state]) => {
+    settlements.push({ userName, bonus: state.bonus ?? 0 });
+    settled[userName] = { ...state, bonus: 0 };
+  });
+
+  return { streakUsers: settled, settlements };
 }
 
 /**
@@ -179,11 +218,18 @@ function formatStreakInfo(result, options = {}) {
   const { state, event } = result;
   const displayStreak = state.streak + (options.todayStudied ? 1 : 0);
   const streakLabel = displayStreak > 0 ? `${displayStreak}日目` : '0日';
+  const bonus = state.bonus ?? 0;
 
-  const lines = [`🔥 連続学習: ${streakLabel}  🛟 おたすけ: ${state.grace}/${GRACE_MAX}`];
+  let firstLine = `🔥 連続学習: ${streakLabel}  🛟 おたすけ: ${state.grace}/${GRACE_MAX}`;
+  if (bonus > 0) {
+    firstLine += `  💰 ボーナス: ${bonus}P`;
+  }
+  const lines = [firstLine];
 
   if (event === 'milestone') {
     lines.push(`🎉 ${state.streak}日連続達成!おたすけ+1(残り${state.grace})`);
+  } else if (event === 'bonus') {
+    lines.push(`🎉 ${state.streak}日連続達成!おたすけ満タンのためボーナス+1(合計${bonus}P)`);
   } else if (event === 'grace_used') {
     lines.push(`💤 昨日はおたすけを使って連続記録を守りました(残り${state.grace})`);
   } else if (event === 'reset') {
@@ -276,6 +322,7 @@ module.exports = {
   STREAK_REQUIREMENTS,
   updateStreaks,
   formatStreakInfo,
+  settleBonuses,
   loadStreakData,
   saveStreakData
 };
