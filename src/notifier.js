@@ -248,7 +248,7 @@ function formatMessage(changes) {
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
-  const { dateLabel = null, showNoStudyWarning = false } = options;
+  const { dateLabel = null, showNoStudyWarning = false, streaks = null } = options;
 
   // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
   let message = dateLabel
@@ -277,6 +277,11 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
   userData.forEach((user, index) => {
     // ユーザー名
     message += `👤 ${user.userName}\n`;
+
+    // ストリーク(連続学習日数)情報
+    if (streaks && streaks[user.userName]) {
+      message += `${streaks[user.userName]}\n`;
+    }
 
     // 勉強時間
     const hours = user.studyTime?.hours ?? 0;

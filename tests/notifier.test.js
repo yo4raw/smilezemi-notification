@@ -380,4 +380,45 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.ok(message.includes('本日のデータはありません。'));
     });
   });
+
+  describe('formatDetailedMessage - ストリーク表示', () => {
+    const { formatDetailedMessage } = require('../src/notifier');
+
+    const userData = [{
+      userName: '光志郎 (中学生コース)',
+      missionCount: 1,
+      date: '2026-07-12',
+      studyTime: { hours: 0, minutes: 45 },
+      totalScore: 80,
+      missions: [{ name: '数学: 一次関数', score: 80, completed: true }]
+    }];
+
+    it('streaks オプションでユーザー名の直後にストリーク行が入る', () => {
+      const streaks = { '光志郎 (中学生コース)': '🔥 連続学習: 12日目  🛟 おたすけ: 1/3' };
+      const message = formatDetailedMessage(userData, null, { streaks });
+      const lines = message.split('\n');
+      const nameIndex = lines.findIndex(line => line.startsWith('👤 光志郎'));
+      assert.strictEqual(lines[nameIndex + 1], '🔥 連続学習: 12日目  🛟 おたすけ: 1/3');
+    });
+
+    it('複数行のストリーク情報(イベント行付き)も表示される', () => {
+      const streaks = {
+        '光志郎 (中学生コース)': '🔥 連続学習: 10日目  🛟 おたすけ: 1/3\n🎉 10日連続達成!おたすけ+1(残り1)'
+      };
+      const message = formatDetailedMessage(userData, null, { streaks });
+      assert.ok(message.includes('🎉 10日連続達成!おたすけ+1(残り1)'));
+    });
+
+    it('streaks に含まれないユーザーにはストリーク行を出さない', () => {
+      const streaks = { '別の子 (小学生コース)': '🔥 連続学習: 3日目  🛟 おたすけ: 0/3' };
+      const message = formatDetailedMessage(userData, null, { streaks });
+      assert.ok(!message.includes('連続学習'));
+    });
+
+    it('streaks オプション省略時は従来フォーマットのまま', () => {
+      const message = formatDetailedMessage(userData, null, {});
+      assert.ok(!message.includes('連続学習'));
+      assert.ok(message.includes('👤 光志郎 (中学生コース)'));
+    });
+  });
 });
