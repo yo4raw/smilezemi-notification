@@ -17,7 +17,8 @@ const {
   settleBonuses,
   loadStreakData,
   saveStreakData,
-  STREAK_REQUIREMENTS
+  STREAK_REQUIREMENTS,
+  getJuniorHighRequirement
 } = require('../src/streak');
 
 const DATA_DIR = path.join(__dirname, '../data');
@@ -26,7 +27,33 @@ const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
 describe('STREAK_REQUIREMENTS', () => {
   it('コースごとの必要完了数が正の整数として集約定義されている', () => {
     assert.ok(Number.isInteger(STREAK_REQUIREMENTS.elementaryMissions) && STREAK_REQUIREMENTS.elementaryMissions > 0);
-    assert.ok(Number.isInteger(STREAK_REQUIREMENTS.juniorHighCourses) && STREAK_REQUIREMENTS.juniorHighCourses > 0);
+    assert.ok(Number.isInteger(STREAK_REQUIREMENTS.juniorHighCourses.weekday) && STREAK_REQUIREMENTS.juniorHighCourses.weekday > 0);
+    assert.ok(Number.isInteger(STREAK_REQUIREMENTS.juniorHighCourses.weekend) && STREAK_REQUIREMENTS.juniorHighCourses.weekend > 0);
+  });
+});
+
+describe('getJuniorHighRequirement', () => {
+  it('平日(金曜)は weekday の講座数を返す', () => {
+    assert.strictEqual(getJuniorHighRequirement('2026-07-10'), STREAK_REQUIREMENTS.juniorHighCourses.weekday);
+  });
+
+  it('土曜は weekend の講座数を返す', () => {
+    assert.strictEqual(getJuniorHighRequirement('2026-07-11'), STREAK_REQUIREMENTS.juniorHighCourses.weekend);
+  });
+
+  it('日曜は weekend の講座数を返す', () => {
+    assert.strictEqual(getJuniorHighRequirement('2026-07-12'), STREAK_REQUIREMENTS.juniorHighCourses.weekend);
+  });
+
+  it('月曜は weekday の講座数を返す(週明け境界)', () => {
+    assert.strictEqual(getJuniorHighRequirement('2026-07-13'), STREAK_REQUIREMENTS.juniorHighCourses.weekday);
+  });
+
+  it('平日は3・土日は5である', () => {
+    assert.strictEqual(getJuniorHighRequirement('2026-07-10'), 3);
+    assert.strictEqual(getJuniorHighRequirement('2026-07-11'), 5);
+    assert.strictEqual(getJuniorHighRequirement('2026-07-12'), 5);
+    assert.strictEqual(getJuniorHighRequirement('2026-07-13'), 3);
   });
 });
 
