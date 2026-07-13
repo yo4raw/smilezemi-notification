@@ -22,6 +22,15 @@ jobs:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
+      # 前回データ(ミッション・ストリーク)をキャッシュから復元
+      - name: 前回データを復元
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: smilezemi-data-${{ github.run_id }}
+          restore-keys: |
+            smilezemi-data-
+
       # 2. .envファイルを作成
       - name: .envファイルを作成
         run: |
@@ -74,6 +83,15 @@ jobs:
       # 6. クローラーを実行
       - name: クローラーを実行
         run: docker compose up --abort-on-container-exit
+
+      # データをキャッシュに保存(次回実行時に復元される)
+      # 通知失敗などで exit code 1 でも確定済みストリークは保持したいため always()
+      - name: データをキャッシュに保存
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: smilezemi-data-${{ github.run_id }}
 
       # 7. スクリーンショットをアーティファクトとして保存（常に実行）
       - name: スクリーンショットを保存
