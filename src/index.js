@@ -8,7 +8,7 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
-const { sendNotification, formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { sendNotification, sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, isStudied, createInitialState } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
@@ -293,38 +293,18 @@ async function main() {
     // 文字数制限を適用
     message = truncateToLimit(message);
 
-    // LINE API リクエストボディを構築
-    const requestBody = {
-      to: config.LINE_USER_ID,
-      messages: [
-        {
-          type: 'text',
-          text: message
-        }
-      ]
-    };
+    // 通知送信（リトライ・タイムアウト・マスキングはsendPushMessageに委譲）
+    const notifyResult = await sendPushMessage(
+      message,
+      config.LINE_CHANNEL_ACCESS_TOKEN,
+      config.LINE_USER_ID
+    );
 
-    // 通知送信（fetch APIを直接使用）
-    try {
-      const response = await fetch('https://api.line.me/v2/bot/message/push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.LINE_CHANNEL_ACCESS_TOKEN}`
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ LINE通知の送信に失敗しました:', response.status, errorText);
-        errors.push(`LINE API エラー: ${response.status}`);
-      } else {
-        console.log('✅ 詳細モードでのLINE通知が完了しました');
-      }
-    } catch (notifyError) {
-      console.error('❌ LINE通知の送信に失敗しました:', notifyError.message);
-      errors.push(notifyError.message);
+    if (notifyResult.success) {
+      console.log('✅ 詳細モードでのLINE通知が完了しました');
+    } else {
+      console.error('❌ LINE通知の送信に失敗しました:', notifyResult.error);
+      errors.push(notifyResult.error);
     }
 
     // 9. 新しいデータの保存

@@ -242,6 +242,80 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
+  describe('sendPushMessage() - 整形済みメッセージ送信', () => {
+    it('正常系: 整形済みメッセージをそのまま送信できる', async () => {
+      const result = await notifier.sendPushMessage('テストメッセージ', 'test_token', 'test_user');
+
+      assert.strictEqual(result.success, true, '送信が成功すること');
+      assert.strictEqual(mockFetch.mock.calls.length, 1, 'fetchが1回呼ばれること');
+
+      const [url, options] = mockFetch.mock.calls[0].arguments;
+      assert.strictEqual(url, 'https://api.line.me/v2/bot/message/push');
+      assert.strictEqual(options.method, 'POST');
+      assert.strictEqual(options.headers['Authorization'], 'Bearer test_token');
+
+      const body = JSON.parse(options.body);
+      assert.strictEqual(body.to, 'test_user');
+      assert.strictEqual(body.messages[0].type, 'text');
+      assert.strictEqual(body.messages[0].text, 'テストメッセージ', 'メッセージが整形されずそのまま送られること');
+    });
+
+    it('異常系: 必須パラメータ欠落時はエラーを返す', async () => {
+      const result = await notifier.sendPushMessage('テスト', '', '');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /必須パラメータ/);
+      assert.strictEqual(mockFetch.mock.calls.length, 0, 'fetchが呼ばれないこと');
+    });
+
+    it('異常系: 401はリトライせず即失敗する', async () => {
+      global.fetch = mockFetch = mock.fn(async () => ({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized'
+      }));
+
+      const result = await notifier.sendPushMessage('テスト', 'bad_token', 'test_user', { retryDelay: 1 });
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /401/);
+      assert.strictEqual(mockFetch.mock.calls.length, 1, 'リトライされないこと');
+    });
+
+    it('異常系: 5xxはリトライして成功できる', async () => {
+      let callCount = 0;
+      global.fetch = mockFetch = mock.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return { ok: false, status: 500, statusText: 'Internal Server Error' };
+        }
+        return { ok: true, status: 200, statusText: 'OK' };
+      });
+
+      const result = await notifier.sendPushMessage('テスト', 'test_token', 'test_user', { retryDelay: 1 });
+
+      assert.strictEqual(result.success, true, 'リトライ後に成功すること');
+      assert.strictEqual(mockFetch.mock.calls.length, 2, '2回目で成功すること');
+    });
+
+    it('異常系: タイムアウトすると中断されリトライされる', async () => {
+      global.fetch = mockFetch = mock.fn((url, options) => new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          reject(new Error('This operation was aborted'));
+        });
+      }));
+
+      const result = await notifier.sendPushMessage('テスト', 'test_token', 'test_user', {
+        maxRetries: 2,
+        retryDelay: 1,
+        timeoutMs: 30
+      });
+
+      assert.strictEqual(result.success, false, '全試行タイムアウトで失敗すること');
+      assert.strictEqual(mockFetch.mock.calls.length, 2, 'タイムアウト後にリトライされること');
+    });
+  });
+
   describe('formatMessage() - メッセージフォーマット', () => {
     it('正常系: 変更情報を読みやすい形式でフォーマットする', () => {
       const changes = [
@@ -348,6 +422,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
       // 存在すべき関数
       assert.strictEqual(exports.includes('sendNotification'), true, 'sendNotificationが含まれること');
+      assert.strictEqual(exports.includes('sendPushMessage'), true, 'sendPushMessageが含まれること');
       assert.strictEqual(exports.includes('formatMessage'), true, 'formatMessageが含まれること');
       assert.strictEqual(exports.includes('formatDetailedMessage'), true, 'formatDetailedMessageが含まれること');
       assert.strictEqual(exports.includes('truncateToLimit'), true, 'truncateToLimitが含まれること');
