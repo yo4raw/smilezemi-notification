@@ -473,6 +473,61 @@ describe('通知モジュール (src/notifier.js)', () => {
 
       assert.doesNotMatch(message, /ミッション完了 \d+\/\d+個/, '警告行が含まれないこと');
     });
+
+    it('中学生コースのユーザーには「講座完了」表記で警告する', () => {
+      const juniorUser = {
+        userName: '光志郎 (中学生コース)',
+        missionCount: 2,
+        date: '2026-07-13',
+        studyTime: { hours: 0, minutes: 30 },
+        totalScore: 150,
+        missions: [
+          { name: '数学: いろいろな図形', score: 66, completed: true },
+          { name: '英語: 不定詞', score: 80, completed: true }
+        ]
+      };
+      const message = notifier.formatDetailedMessage([juniorUser], null, { missionWarningThreshold: 4 });
+
+      assert.match(message, /⚠️ 講座完了 2\/4個/, '講座表記で完了数と閾値が表示されること');
+      assert.match(message, /4個完了しないと連続学習にカウントされないよ/, 'ルール説明が含まれること');
+      assert.doesNotMatch(message, /ミッション完了/, 'ミッション表記にならないこと');
+    });
+
+    it('showNoStudyWarning併用時、完全未学習の日は「学習していません」のみで閾値警告を重複させない', () => {
+      const noStudyUser = {
+        userName: '光志郎 (中学生コース)',
+        missionCount: 0,
+        date: '2026-07-13',
+        studyTime: { hours: 0, minutes: 0 },
+        totalScore: 0,
+        missions: []
+      };
+      const message = notifier.formatDetailedMessage([noStudyUser], null, {
+        showNoStudyWarning: true,
+        missionWarningThreshold: 4
+      });
+
+      assert.match(message, /昨日は学習していません/, '未学習警告が表示されること');
+      assert.doesNotMatch(message, /講座完了 \d+\/\d+個/, '閾値警告が重複しないこと');
+    });
+
+    it('showNoStudyWarning併用時、部分学習(閾値未満)の日は閾値警告が表示される', () => {
+      const partialUser = {
+        userName: '光志郎 (中学生コース)',
+        missionCount: 1,
+        date: '2026-07-13',
+        studyTime: { hours: 0, minutes: 10 },
+        totalScore: 66,
+        missions: [{ name: '数学: いろいろな図形', score: 66, completed: true }]
+      };
+      const message = notifier.formatDetailedMessage([partialUser], null, {
+        showNoStudyWarning: true,
+        missionWarningThreshold: 4
+      });
+
+      assert.match(message, /⚠️ 講座完了 1\/4個/, '閾値警告が表示されること');
+      assert.doesNotMatch(message, /昨日は学習していません/, '未学習警告は表示されないこと');
+    });
   });
 
   describe('formatDetailedMessage - 朝通知オプション', () => {

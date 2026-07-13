@@ -155,7 +155,8 @@ describe('オーケストレーション (src/index.js)', () => {
         updateStreaks: overrides.updateStreaks || (() => ({ streakUsers: {}, results: [] })),
         formatStreakInfo: overrides.formatStreakInfo || (() => 'テストストリーク情報'),
         isStudied: overrides.isStudied || (() => false),
-        createInitialState: overrides.createInitialState || (() => ({}))
+        createInitialState: overrides.createInitialState || (() => ({})),
+        STREAK_REQUIREMENTS: overrides.STREAK_REQUIREMENTS || { elementaryMissions: 5, juniorHighCourses: 4 }
       }
     };
 

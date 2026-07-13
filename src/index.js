@@ -9,12 +9,12 @@ const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
 const { sendNotification, sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
-const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, isStudied, createInitialState } = require('./streak');
+const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, isStudied, createInitialState, STREAK_REQUIREMENTS } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
 
-// 小学生コースのストリークに必要な完了ミッション数(5個未満の日はカウントしない)
-const REQUIRED_MISSIONS_FOR_STREAK = 5;
+// 小学生コースのストリークに必要な完了ミッション数(この数未満の日はカウントしない)
+const REQUIRED_MISSIONS_FOR_STREAK = STREAK_REQUIREMENTS.elementaryMissions;
 
 /**
  * メイン実行関数

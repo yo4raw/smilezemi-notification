@@ -9,7 +9,7 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getTargetDates } = require('./crawler');
 const { sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
-const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo } = require('./streak');
+const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, STREAK_REQUIREMENTS } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -137,10 +137,12 @@ async function main() {
       previousStreakUsers = {};
     }
 
+    // 中学生コースは講座を規定数(STREAK_REQUIREMENTS.juniorHighCourses)終えた日だけカウントする
     const { streakUsers, results } = updateStreaks(
       previousStreakUsers,
       crawlResult.data,
-      targetDates.dateString
+      targetDates.dateString,
+      { minCompletedMissions: STREAK_REQUIREMENTS.juniorHighCourses }
     );
 
     streaks = {};
@@ -165,7 +167,8 @@ async function main() {
     let message = formatDetailedMessage(crawlResult.data, null, {
       dateLabel: `昨日(${targetDates.withPadding})`,
       showNoStudyWarning: true,
-      streaks
+      streaks,
+      missionWarningThreshold: STREAK_REQUIREMENTS.juniorHighCourses
     });
     message = truncateToLimit(message);
 
