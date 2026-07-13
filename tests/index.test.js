@@ -138,6 +138,10 @@ describe('オーケストレーション (src/index.js)', () => {
           callLog.push({ type: 'sendNotification', args });
           return { success: true };
         }),
+        sendPushMessage: overrides.sendPushMessage || (async (...args) => {
+          callLog.push({ type: 'sendPushMessage', args });
+          return { success: true };
+        }),
         formatDetailedMessage: overrides.formatDetailedMessage || (() => 'テスト詳細メッセージ'),
         truncateToLimit: overrides.truncateToLimit || ((msg) => msg)
       }
@@ -178,18 +182,18 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.exitCode, 0, '終了コードが0であること');
     });
 
-    it('正常系: LINE APIにメッセージを送信する', async () => {
+    it('正常系: LINE通知がsendPushMessage経由で送信される', async () => {
       await mainModule.main();
 
-      const fetchCalls = callLog.filter(c => c.type === 'fetch');
-      assert.strictEqual(fetchCalls.length, 1, 'fetchが1回呼ばれること');
-      const [url, options] = fetchCalls[0].args;
-      assert.strictEqual(url, 'https://api.line.me/v2/bot/message/push');
-      assert.strictEqual(options.method, 'POST');
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 1, 'sendPushMessageが1回呼ばれること');
+      const [message, accessToken, userId] = pushCalls[0].args;
+      assert.strictEqual(typeof message, 'string', '整形済みメッセージが渡されること');
+      assert.strictEqual(accessToken, 'test_token');
+      assert.strictEqual(userId, 'test_user');
 
-      const body = JSON.parse(options.body);
-      assert.strictEqual(body.to, 'test_user');
-      assert.strictEqual(body.messages[0].type, 'text');
+      const fetchCalls = callLog.filter(c => c.type === 'fetch');
+      assert.strictEqual(fetchCalls.length, 0, '素のfetch直書きが使われないこと');
     });
 
     it('正常系: データ保存が実行される', async () => {
@@ -257,9 +261,28 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.exitCode, 1);
     });
 
+    it('異常系: 詳細・基本の両方が失敗した場合、「変更なし」ではなく障害通知を送る', async () => {
+      setupMocks({
+        getAllUsersDetailedData: async () => ({ success: false, error: '詳細失敗' }),
+        getAllUsersMissionCounts: async () => ({ success: false, error: '基本も失敗' })
+      });
+
+      await mainModule.main();
+
+      const notifyCalls = callLog.filter(c => c.type === 'sendNotification');
+      assert.strictEqual(notifyCalls.length, 0, '空changesのsendNotification(=変更なし偽装)が呼ばれないこと');
+
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 1, '障害通知がsendPushMessageで送られること');
+      const [message] = pushCalls[0].args;
+      assert.match(message, /⚠️/, '警告アイコンが含まれること');
+      assert.match(message, /エラー|失敗/, '障害であることが明示されること');
+      assert.doesNotMatch(message, /変更ありませんでした/, '正常を装うメッセージでないこと');
+    });
+
     it('異常系: LINE API失敗時、errorsに記録される', async () => {
       setupMocks({
-        fetch: async () => ({ ok: false, status: 500, text: async () => 'Internal Server Error' })
+        sendPushMessage: async () => ({ success: false, error: 'LINE API エラー: 500 Internal Server Error' })
       });
 
       const result = await mainModule.main();
@@ -269,15 +292,49 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.errors.some(e => e.includes('LINE API')), true);
     });
 
-    it('異常系: LINE API例外時、errorsに記録', async () => {
+    it('異常系: LINE送信のネットワークエラー時、errorsに記録', async () => {
       setupMocks({
-        fetch: async () => { throw new Error('Network error'); }
+        sendPushMessage: async () => ({ success: false, error: 'ネットワークエラー: Network error' })
       });
 
       const result = await mainModule.main();
 
       assert.strictEqual(result.exitCode, 1);
       assert.strictEqual(Array.isArray(result.errors), true);
+    });
+
+    it('正常系: ドライランモードでは送信・保存を行わない', async () => {
+      const originalDryRun = process.env.DRY_RUN;
+      process.env.DRY_RUN = 'true';
+
+      let saveStreakCalls = 0;
+      setupMocks({
+        saveStreakData: async () => {
+          saveStreakCalls++;
+          return { success: true };
+        }
+      });
+
+      try {
+        const result = await mainModule.main();
+
+        assert.strictEqual(result.success, true, 'ドライランが成功すること');
+        assert.strictEqual(result.exitCode, 0);
+
+        const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+        assert.strictEqual(pushCalls.length, 0, 'sendPushMessageが呼ばれないこと');
+
+        const saveCalls = callLog.filter(c => c.type === 'saveData');
+        assert.strictEqual(saveCalls.length, 0, 'saveDataが呼ばれないこと');
+
+        assert.strictEqual(saveStreakCalls, 0, 'saveStreakDataが呼ばれないこと');
+      } finally {
+        if (originalDryRun === undefined) {
+          delete process.env.DRY_RUN;
+        } else {
+          process.env.DRY_RUN = originalDryRun;
+        }
+      }
     });
 
     it('異常系: ブラウザは必ず終了する（finally句）', async () => {
@@ -362,8 +419,8 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(saveStreakCalls, 0, '前日分クロール失敗時はsaveStreakDataが呼ばれないこと');
       assert.strictEqual(result.exitCode, 0, '前日分クロール失敗のみでは通知処理が異常終了しないこと');
 
-      const fetchCalls = callLog.filter(c => c.type === 'fetch');
-      assert.strictEqual(fetchCalls.length, 1, '前日分クロール失敗時も通知(fetch)が実行されること');
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 1, '前日分クロール失敗時も通知(sendPushMessage)が実行されること');
     });
 
     it('異常系: loadStreakData失敗時、errorsに記録されるが空状態で続行し自己修復する', async () => {
@@ -389,8 +446,8 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(Array.isArray(result.errors), true);
       assert.strictEqual(result.errors.includes('ストリークデータ読み込み失敗'), true, 'errorsにloadStreakDataのエラーが含まれること');
 
-      const fetchCalls = callLog.filter(c => c.type === 'fetch');
-      assert.strictEqual(fetchCalls.length, 1, 'loadStreakData失敗時も通知(fetch)は送信されること');
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 1, 'loadStreakData失敗時も通知(sendPushMessage)は送信されること');
 
       assert.strictEqual(saveStreakCalls, 1, '空状態で続行しsaveStreakDataが呼ばれること(自己修復)');
       assert.ok(capturedSavedUsers, 'saveStreakDataに空マップベースの状態が渡されること');

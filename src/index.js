@@ -8,7 +8,7 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
-const { sendNotification, formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { sendNotification, sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, isStudied, createInitialState } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
@@ -138,15 +138,24 @@ async function main() {
         console.error('❌ 基本機能でもクローリングに失敗しました:', basicCrawlResult.error);
         errors.push(basicCrawlResult.error);
 
-        // エラー通知を送信
-        try {
-          await sendNotification(
-            [],
+        // 障害を明示するエラー通知を送信（「変更なし」と偽装しない）
+        if (process.env.DRY_RUN === 'true') {
+          console.log('ℹ️ ドライランモード: エラー通知はスキップしました');
+        } else {
+          const errorMessage = [
+            '⚠️ スマイルゼミ通知でエラーが発生しました',
+            '',
+            '夜通知のデータ取得に失敗したため、本日の通知をお届けできません。',
+            'GitHub Actions のログを確認してください。'
+          ].join('\n');
+          const errorNotifyResult = await sendPushMessage(
+            errorMessage,
             config.LINE_CHANNEL_ACCESS_TOKEN,
             config.LINE_USER_ID
           );
-        } catch (notifyError) {
-          console.error('❌ エラー通知の送信にも失敗しました:', notifyError.message);
+          if (!errorNotifyResult.success) {
+            console.error('❌ エラー通知の送信にも失敗しました:', errorNotifyResult.error);
+          }
         }
 
         return {
@@ -163,6 +172,17 @@ async function main() {
 
       // データ比較と通知（基本モード）
       const compareResult = compareData(previousData, currentData);
+
+      // ドライラン: DRY_RUN=true の場合は送信・保存しない
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: 基本モードのLINE通知とデータ保存はスキップしました');
+        return {
+          success: errors.length === 0,
+          exitCode: errors.length === 0 ? 0 : 1,
+          errors: errors.length > 0 ? errors : undefined
+        };
+      }
+
       const notifyResult = await sendNotification(
         compareResult.changes,
         config.LINE_CHANNEL_ACCESS_TOKEN,
@@ -244,12 +264,17 @@ async function main() {
       streakUsers = updateResult.streakUsers;
       updateResult.results.forEach(result => resultMap.set(result.userName, result));
 
-      const streakSaveResult = await saveStreakData(streakUsers);
-      if (streakSaveResult.success) {
-        console.log('✅ ストリークデータの保存が完了しました');
+      // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
       } else {
-        console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
-        errors.push(streakSaveResult.error);
+        const streakSaveResult = await saveStreakData(streakUsers);
+        if (streakSaveResult.success) {
+          console.log('✅ ストリークデータの保存が完了しました');
+        } else {
+          console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
+          errors.push(streakSaveResult.error);
+        }
       }
     } else {
       // 前日分が取れない場合は確定判定をスキップし、前回の確定値をそのまま表示する
@@ -293,38 +318,32 @@ async function main() {
     // 文字数制限を適用
     message = truncateToLimit(message);
 
-    // LINE API リクエストボディを構築
-    const requestBody = {
-      to: config.LINE_USER_ID,
-      messages: [
-        {
-          type: 'text',
-          text: message
-        }
-      ]
-    };
+    // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない
+    if (process.env.DRY_RUN === 'true') {
+      console.log('\n📋 === 通知メッセージプレビュー ===');
+      console.log(message);
+      console.log('=== プレビュー終了 ===\n');
+      console.log('ℹ️ ドライランモード: LINE通知とデータ保存はスキップしました');
+      console.log('🎉 処理が正常に完了しました');
+      return {
+        success: errors.length === 0,
+        exitCode: errors.length === 0 ? 0 : 1,
+        errors: errors.length > 0 ? errors : undefined
+      };
+    }
 
-    // 通知送信（fetch APIを直接使用）
-    try {
-      const response = await fetch('https://api.line.me/v2/bot/message/push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.LINE_CHANNEL_ACCESS_TOKEN}`
-        },
-        body: JSON.stringify(requestBody)
-      });
+    // 通知送信（リトライ・タイムアウト・マスキングはsendPushMessageに委譲）
+    const notifyResult = await sendPushMessage(
+      message,
+      config.LINE_CHANNEL_ACCESS_TOKEN,
+      config.LINE_USER_ID
+    );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ LINE通知の送信に失敗しました:', response.status, errorText);
-        errors.push(`LINE API エラー: ${response.status}`);
-      } else {
-        console.log('✅ 詳細モードでのLINE通知が完了しました');
-      }
-    } catch (notifyError) {
-      console.error('❌ LINE通知の送信に失敗しました:', notifyError.message);
-      errors.push(notifyError.message);
+    if (notifyResult.success) {
+      console.log('✅ 詳細モードでのLINE通知が完了しました');
+    } else {
+      console.error('❌ LINE通知の送信に失敗しました:', notifyResult.error);
+      errors.push(notifyResult.error);
     }
 
     // 9. 新しいデータの保存

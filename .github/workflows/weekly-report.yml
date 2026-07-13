@@ -12,6 +12,9 @@ jobs:
   weekly-report:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write # scheduled workflowのkeepalive(enable API)に必要
 
     steps:
       # 1. リポジトリのチェックアウト
@@ -70,3 +73,37 @@ jobs:
       - name: .envファイルを削除
         if: always()
         run: rm -f .env
+
+      # 8. scheduled workflowのkeepalive
+      # publicリポジトリは60日間コミット等の活動がないとscheduled workflowが
+      # 自動無効化され、通知がサイレント停止する(連鎖して7日でキャッシュも消える)。
+      # 週次でenable APIを叩いて無効化タイマーをリセットする。
+      - name: scheduled workflowのkeepalive
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in crawler.yml morning-crawler.yml weekly-report.yml; do
+            if gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/enable" >/dev/null; then
+              echo "✅ ${wf} の無効化タイマーをリセットしました"
+            else
+              echo "::warning::${wf} のkeepaliveに失敗しました"
+            fi
+          done
+
+      # 9. ワークフロー失敗をLINEに通知（最後の砦。この通知自体の失敗はジョブを落とさない）
+      - name: 失敗をLINEに通知
+        if: failure()
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER: ${{ secrets.LINE_USER_ID }}
+        run: |
+          message=$(printf '⚠️ GitHub Actions ワークフローが失敗しました\n\nワークフロー: %s\n実行ログ: %s' "$WORKFLOW_NAME" "$RUN_URL")
+          payload=$(jq -n --arg to "$LINE_USER" --arg text "$message" '{to: $to, messages: [{type: "text", text: $text}]}')
+          curl -sS --fail-with-body -X POST https://api.line.me/v2/bot/message/push \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LINE_TOKEN" \
+            -d "$payload" || echo "::warning::失敗通知の送信に失敗しました"

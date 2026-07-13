@@ -23,7 +23,24 @@ const MAX_MESSAGE_LENGTH = 5000;
  * @returns {Promise<{success: boolean, error?: string}>}
  */
 async function sendNotification(changes, accessToken, userId, options = {}) {
-  const { maxRetries = 3, retryDelay = 1000 } = options;
+  // メッセージを構築して送信（リトライ等はsendPushMessageに委譲）
+  return sendPushMessage(formatMessage(changes), accessToken, userId, options);
+}
+
+/**
+ * 整形済みメッセージをLINEに送信する
+ *
+ * @param {string} message - 送信する整形済みメッセージ
+ * @param {string} accessToken - LINE Channel Access Token
+ * @param {string} userId - LINE User ID
+ * @param {object} [options] - オプション設定
+ * @param {number} [options.maxRetries=3] - 最大リトライ回数
+ * @param {number} [options.retryDelay=1000] - リトライ間隔（ms、指数バックオフ）
+ * @param {number} [options.timeoutMs=10000] - 1試行あたりのHTTPタイムアウト（ms）
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function sendPushMessage(message, accessToken, userId, options = {}) {
+  const { maxRetries = 3, retryDelay = 1000, timeoutMs = 10000 } = options;
 
   // パラメータ検証
   if (!accessToken || !userId) {
@@ -32,9 +49,6 @@ async function sendNotification(changes, accessToken, userId, options = {}) {
       error: '必須パラメータが欠けています: accessToken と userId が必要です'
     };
   }
-
-  // メッセージを構築
-  const message = formatMessage(changes);
 
   // リクエストボディを構築
   const requestBody = {
@@ -50,7 +64,7 @@ async function sendNotification(changes, accessToken, userId, options = {}) {
   // リトライロジック
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const result = await attemptSendNotification(requestBody, accessToken);
+      const result = await attemptSendNotification(requestBody, accessToken, timeoutMs);
 
       if (result.success) {
         return result;
@@ -100,16 +114,20 @@ async function sendNotification(changes, accessToken, userId, options = {}) {
  * 1回の通知送信試行
  * @private
  */
-async function attemptSendNotification(requestBody, accessToken) {
+async function attemptSendNotification(requestBody, accessToken, timeoutMs = 10000) {
+  // タイムアウト付きでLINE Push Message APIを呼び出し
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    // LINE Push Message APIを呼び出し
     const response = await fetch(LINE_API_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
     });
 
     // レスポンスステータスを確認
@@ -138,6 +156,14 @@ async function attemptSendNotification(requestBody, accessToken) {
     // エラーメッセージをマスキング
     const maskedError = maskTokenInError(error.message, accessToken);
 
+    // タイムアウト（AbortControllerによる中断）
+    if (error.name === 'AbortError' || error.message.includes('abort')) {
+      return {
+        success: false,
+        error: `タイムアウト: LINE APIが${timeoutMs}ms以内に応答しませんでした`
+      };
+    }
+
     // ネットワークエラー
     if (error.message.includes('network') || error.message.includes('fetch')) {
       return {
@@ -151,6 +177,8 @@ async function attemptSendNotification(requestBody, accessToken) {
       success: false,
       error: `通知送信エラー: ${maskedError}`
     };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -196,7 +224,7 @@ function formatMessage(changes) {
   message += `🔔 ${changes.length}件の変更がありました\n\n`;
 
   // 各変更を追加
-  changes.forEach((change, index) => {
+  for (const [index, change] of changes.entries()) {
     let changeIcon = '';
     let changeText = '';
 
@@ -218,22 +246,22 @@ function formatMessage(changes) {
         changeText = `${change.previousCount} → ${change.currentCount}`;
     }
 
-    message += `${changeIcon} ${change.userName}\n${changeText}\n\n`;
+    const entry = `${changeIcon} ${change.userName}\n${changeText}\n\n`;
 
-    // メッセージ長を確認（5000文字制限）
-    if (message.length > MAX_MESSAGE_LENGTH - 100) {
-      // 残りの件数を表示して終了
-      const remaining = changes.length - index - 1;
-      if (remaining > 0) {
-        message += `... 他${remaining}件の変更があります`;
-      }
-      return message;
+    // メッセージ長を確認（5000文字制限）: 追加すると省略行の余地がなくなる場合は打ち切り
+    if (message.length + entry.length > MAX_MESSAGE_LENGTH - 100) {
+      const remaining = changes.length - index;
+      message += `... 他${remaining}件の変更があります`;
+      break;
     }
-  });
+
+    message += entry;
+  }
 
   // メッセージが5000文字を超えていた場合は切り詰め
   if (message.length > MAX_MESSAGE_LENGTH) {
-    message = message.substring(0, MAX_MESSAGE_LENGTH - 20) + '\n\n（メッセージが長すぎたため省略されました）';
+    const suffix = '\n\n（メッセージが長すぎたため省略されました）';
+    message = message.substring(0, MAX_MESSAGE_LENGTH - suffix.length) + suffix;
   }
 
   return message.trim();
@@ -401,6 +429,7 @@ function truncateToLimit(message) {
 
 module.exports = {
   sendNotification,
+  sendPushMessage,
   formatMessage,
   formatDetailedMessage,
   truncateToLimit

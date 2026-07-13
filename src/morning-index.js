@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getTargetDates } = require('./crawler');
-const { formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
@@ -83,6 +83,27 @@ async function main() {
     if (!crawlResult.success) {
       console.error('❌ クローリングに失敗しました:', crawlResult.error);
       await saveErrorScreenshot(page, 'morning-crawling-failed');
+
+      // 障害を無音にしない: 「0件でも必ず通知」の仕様を障害時にも守るため、エラー通知を送ってから異常終了する
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: エラー通知はスキップしました');
+      } else {
+        const errorMessage = [
+          '⚠️ スマイルゼミ通知でエラーが発生しました',
+          '',
+          '朝通知のデータ取得に失敗したため、昨日分の通知をお届けできません。',
+          'GitHub Actions のログを確認してください。'
+        ].join('\n');
+        const errorNotifyResult = await sendPushMessage(
+          errorMessage,
+          config.LINE_CHANNEL_ACCESS_TOKEN,
+          config.LINE_USER_ID
+        );
+        if (!errorNotifyResult.success) {
+          console.error('❌ エラー通知の送信にも失敗しました:', errorNotifyResult.error);
+        }
+      }
+
       return { success: false, exitCode: 1, error: crawlResult.error };
     }
 
@@ -158,38 +179,19 @@ async function main() {
       return { success: true, exitCode: 0 };
     }
 
-    // 6. LINE API 送信
+    // 6. LINE API 送信（リトライ・タイムアウト・マスキングはsendPushMessageに委譲）
     console.log('📤 LINE通知を送信しています...');
-    const requestBody = {
-      to: config.LINE_USER_ID,
-      messages: [
-        {
-          type: 'text',
-          text: message
-        }
-      ]
-    };
+    const notifyResult = await sendPushMessage(
+      message,
+      config.LINE_CHANNEL_ACCESS_TOKEN,
+      config.LINE_USER_ID
+    );
 
-    try {
-      const response = await fetch('https://api.line.me/v2/bot/message/push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.LINE_CHANNEL_ACCESS_TOKEN}`
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ LINE通知の送信に失敗しました:', response.status, errorText);
-        errors.push(`LINE API エラー: ${response.status}`);
-      } else {
-        console.log('✅ 朝通知のLINE送信が完了しました');
-      }
-    } catch (notifyError) {
-      console.error('❌ LINE通知の送信に失敗しました:', notifyError.message);
-      errors.push(notifyError.message);
+    if (notifyResult.success) {
+      console.log('✅ 朝通知のLINE送信が完了しました');
+    } else {
+      console.error('❌ LINE通知の送信に失敗しました:', notifyResult.error);
+      errors.push(notifyResult.error);
     }
 
     // 7. 完了

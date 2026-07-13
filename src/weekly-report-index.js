@@ -8,6 +8,7 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersWeeklyReport } = require('./weekly-report-crawler');
 const { formatWeeklyReport } = require('./weekly-report-notifier');
+const { sendPushMessage } = require('./notifier');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -103,38 +104,19 @@ async function main() {
       return { success: true, exitCode: 0 };
     }
 
-    // 6. LINE API 送信
+    // 6. LINE API 送信（リトライ・タイムアウト・マスキングはsendPushMessageに委譲）
     console.log('📤 LINE通知を送信しています...');
-    const requestBody = {
-      to: config.LINE_USER_ID,
-      messages: [
-        {
-          type: 'text',
-          text: message
-        }
-      ]
-    };
+    const notifyResult = await sendPushMessage(
+      message,
+      config.LINE_CHANNEL_ACCESS_TOKEN,
+      config.LINE_USER_ID
+    );
 
-    try {
-      const response = await fetch('https://api.line.me/v2/bot/message/push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.LINE_CHANNEL_ACCESS_TOKEN}`
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ LINE通知の送信に失敗しました:', response.status, errorText);
-        errors.push(`LINE API エラー: ${response.status}`);
-      } else {
-        console.log('✅ 週間レポートのLINE通知が完了しました');
-      }
-    } catch (notifyError) {
-      console.error('❌ LINE通知の送信に失敗しました:', notifyError.message);
-      errors.push(notifyError.message);
+    if (notifyResult.success) {
+      console.log('✅ 週間レポートのLINE通知が完了しました');
+    } else {
+      console.error('❌ LINE通知の送信に失敗しました:', notifyResult.error);
+      errors.push(notifyResult.error);
     }
 
     // 7. 完了

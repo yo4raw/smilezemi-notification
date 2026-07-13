@@ -114,6 +114,10 @@ describe('週間レポートオーケストレーション (src/weekly-report-in
       exports: {
         truncateToLimit: (msg) => msg.length > 5000 ? msg.substring(0, 5000) : msg,
         sendNotification: async () => ({ success: true }),
+        sendPushMessage: overrides.sendPushMessage || (async (...args) => {
+          callLog.push({ type: 'sendPushMessage', args });
+          return { success: true };
+        }),
         formatMessage: () => '',
         formatDetailedMessage: () => ''
       }
@@ -155,14 +159,16 @@ describe('週間レポートオーケストレーション (src/weekly-report-in
       assert.strictEqual(result.exitCode, 0, '終了コードが0であること');
     });
 
-    it('正常系: LINE APIにメッセージを送信する', async () => {
+    it('正常系: LINE通知がsendPushMessage経由で送信される', async () => {
       await mainModule.main();
 
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 1, 'sendPushMessageが1回呼ばれること');
+      const [message] = pushCalls[0].args;
+      assert.strictEqual(typeof message, 'string', '整形済みメッセージが渡されること');
+
       const fetchCalls = callLog.filter(c => c.type === 'fetch');
-      assert.strictEqual(fetchCalls.length, 1, 'fetchが1回呼ばれること');
-      const [url, options] = fetchCalls[0].args;
-      assert.strictEqual(url, 'https://api.line.me/v2/bot/message/push');
-      assert.strictEqual(options.method, 'POST');
+      assert.strictEqual(fetchCalls.length, 0, '素のfetch直書きが使われないこと');
     });
 
     it('正常系: ドライランモードで通知をスキップ', async () => {
@@ -172,8 +178,8 @@ describe('週間レポートオーケストレーション (src/weekly-report-in
 
       assert.strictEqual(result.success, true, 'ドライランが成功すること');
       assert.strictEqual(result.exitCode, 0);
-      const fetchCalls = callLog.filter(c => c.type === 'fetch');
-      assert.strictEqual(fetchCalls.length, 0, 'fetchが呼ばれないこと');
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 0, 'sendPushMessageが呼ばれないこと');
     });
 
     it('異常系: 設定読み込み失敗時、exitCode 1', async () => {
@@ -222,7 +228,7 @@ describe('週間レポートオーケストレーション (src/weekly-report-in
 
     it('異常系: LINE API失敗時、errorsに記録', async () => {
       setupMocks({
-        fetch: async () => ({ ok: false, status: 500, text: async () => 'Internal Server Error' })
+        sendPushMessage: async () => ({ success: false, error: 'LINE API エラー: 500 Internal Server Error' })
       });
 
       const result = await mainModule.main();
@@ -232,9 +238,9 @@ describe('週間レポートオーケストレーション (src/weekly-report-in
       assert.strictEqual(result.errors.length > 0, true);
     });
 
-    it('異常系: LINE API例外時、errorsに記録', async () => {
+    it('異常系: LINE送信のネットワークエラー時、errorsに記録', async () => {
       setupMocks({
-        fetch: async () => { throw new Error('Network error'); }
+        sendPushMessage: async () => ({ success: false, error: 'ネットワークエラー: Network error' })
       });
 
       const result = await mainModule.main();
