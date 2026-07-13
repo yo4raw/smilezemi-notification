@@ -282,10 +282,10 @@ describe('loadStreakData / saveStreakData', () => {
     assert.deepStrictEqual(loadResult.data, users);
   });
 
-  it('保存ファイルに version(1.2) と ISO 8601 timestamp が含まれる', async () => {
+  it('保存ファイルに version(1.3) と ISO 8601 timestamp が含まれる', async () => {
     await saveStreakData({});
     const content = JSON.parse(await fs.readFile(STREAK_FILE, 'utf-8'));
-    assert.strictEqual(content.version, '1.2');
+    assert.strictEqual(content.version, '1.3');
     assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(content.timestamp));
   });
 
@@ -322,19 +322,34 @@ describe('loadStreakData / saveStreakData', () => {
     assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 3, '1.1データも満タンチャージ対象なこと');
   });
 
-  it('1.2データの読み込みではおたすけ0でも変化しない(消費済みは再付与しない)', async () => {
+  it('1.2データの読み込み時も全ユーザーのおたすけを3にする(v1.3再チャージ)', async () => {
     await fs.mkdir(DATA_DIR, { recursive: true });
     await fs.writeFile(STREAK_FILE, JSON.stringify({
       version: '1.2',
       users: {
-        '祥吾 (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-12' }
+        '祥吾 (小学生コース)': { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
       }
     }), 'utf-8');
 
     const result = await loadStreakData();
 
     assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 0, '1.2データは移行対象外なこと');
+    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 3, '1.2データも満タンチャージ対象なこと');
+  });
+
+  it('1.3データの読み込みではおたすけ0でも変化しない(消費済みは再付与しない)', async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(STREAK_FILE, JSON.stringify({
+      version: '1.3',
+      users: {
+        '祥吾 (小学生コース)': { streak: 3, grace: 0, bonus: 0, lastConfirmedDate: '2026-07-12' }
+      }
+    }), 'utf-8');
+
+    const result = await loadStreakData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 0, '1.3データは移行対象外なこと');
   });
 
   it('不正なJSONの場合はエラーを返す', async () => {
