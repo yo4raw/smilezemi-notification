@@ -433,6 +433,48 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
+  describe('formatDetailedMessage - ミッション未達警告 (missionWarningThreshold)', () => {
+    const baseUser = {
+      userName: '祥吾 (小学生コース)',
+      missionCount: 3,
+      date: '2026-07-13',
+      studyTime: { hours: 1, minutes: 0 },
+      totalScore: 240,
+      missions: [
+        { name: '算数', score: 80, completed: true },
+        { name: '国語', score: 90, completed: true },
+        { name: '理科', score: 70, completed: true }
+      ]
+    };
+
+    it('完了ミッションが閾値未満なら警告行が表示される', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, { missionWarningThreshold: 5 });
+
+      assert.match(message, /⚠️ ミッション完了 3\/5個/, '完了数と閾値が表示されること');
+      assert.match(message, /カウントされない/, 'ストリークにカウントされない旨が含まれること');
+    });
+
+    it('完了ミッションが閾値以上なら警告行は表示されない', () => {
+      const user = { ...baseUser, missionCount: 5 };
+      const message = notifier.formatDetailedMessage([user], null, { missionWarningThreshold: 5 });
+
+      assert.doesNotMatch(message, /ミッション完了 \d+\/\d+個/, '警告行が含まれないこと');
+    });
+
+    it('閾値未指定なら警告行は表示されない(朝通知・週間レポート互換)', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, {});
+
+      assert.doesNotMatch(message, /ミッション完了 \d+\/\d+個/, '警告行が含まれないこと');
+    });
+
+    it('dataReliable:false のユーザーには警告を出さない(取得失敗の誤警告防止)', () => {
+      const user = { ...baseUser, missionCount: 0, dataReliable: false };
+      const message = notifier.formatDetailedMessage([user], null, { missionWarningThreshold: 5 });
+
+      assert.doesNotMatch(message, /ミッション完了 \d+\/\d+個/, '警告行が含まれないこと');
+    });
+  });
+
   describe('formatDetailedMessage - 朝通知オプション', () => {
     const { formatDetailedMessage } = require('../src/notifier');
 
