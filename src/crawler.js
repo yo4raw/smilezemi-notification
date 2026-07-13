@@ -821,14 +821,23 @@ async function getTodayMissionCount(page, courseName = null, dateOffset = 0) {
       };
     }
 
-    // 全ての日付要素を取得
-    const allDates = await page.locator('text=/\\d+\\/\\d+/').all();
+    // 全ての日付要素を取得（左側の日付ラベルのみ、X座標 < 250）。
+    // 右側(x≈1015)には「4/5」等のスコア表示があり、日付と誤認すると
+    // セクション境界が途中で切れてミッションを取りこぼす。
+    const allDateElements = await page.locator('text=/\\d+\\/\\d+/').all();
+    const allDates = [];
+    for (const el of allDateElements) {
+      const box = await el.boundingBox();
+      if (box && box.x < 250) {
+        const text = await el.textContent();
+        allDates.push({ text, box });
+      }
+    }
 
     // 今日の日付のインデックスを見つける
     let todayIndex = -1;
     for (let i = 0; i < allDates.length; i++) {
-      const dateText = await allDates[i].textContent();
-      if (dateText.includes(today)) {
+      if (allDates[i].text.includes(today)) {
         todayIndex = i;
         break;
       }
@@ -853,40 +862,28 @@ async function getTodayMissionCount(page, courseName = null, dateOffset = 0) {
       };
     }
 
-    // 次の日付の位置を取得
+    // 次の日付の位置を取得（左側の日付ラベルのみ）
     let nextDateY = Infinity;
     const nextDateIndex = todayIndex + 1;
 
     if (nextDateIndex < allDates.length) {
-      const nextDateBox = await allDates[nextDateIndex].boundingBox();
-      if (nextDateBox) {
-        nextDateY = nextDateBox.y;
-      }
+      nextDateY = allDates[nextDateIndex].box.y;
     }
 
     // 今日の日付セクション内のミッション要素を取得
-    // class="missionIcon__i6nW8"を持つ<span>ミッション</span>のみを対象
+    // class="missionIcon__i6nW8"を持つ<span>ミッション</span>のみを対象。
+    // タイムラインは実施済み学習の記録のため、セクション内のアイコン数=完了ミッション数。
+    // (NEWラベルは未読バッジであり完了/未完了とは無関係)
     const allMissionIcons = await page.locator('.missionIcon__i6nW8').all();
     let completedMissionCount = 0;
-    let totalMissionCount = 0;
 
     for (const missionIcon of allMissionIcons) {
       const box = await missionIcon.boundingBox();
       if (box && box.y > todayBox.y && box.y < nextDateY) {
-        totalMissionCount++;
-
-        // 親要素（subIcon__p_BWc）を取得して、NEWラベルの有無を確認
-        const parent = missionIcon.locator('..');
-        const hasNewLabel = await parent.locator('text="NEW"').count() > 0;
-
-        // NEWラベルがない = 完了したミッション
-        if (!hasNewLabel) {
-          completedMissionCount++;
-        }
+        completedMissionCount++;
       }
     }
 
-    console.log(`📊 今日(${today})の総ミッション数: ${totalMissionCount}件`);
     console.log(`📊 今日(${today})の完了ミッション数: ${completedMissionCount}件`);
 
     return {
@@ -1169,9 +1166,9 @@ async function getMissionDetails(page, courseName = null, dateOffset = 0) {
         // 親要素を取得
         const parent = missionIcon.locator('..');
 
-        // NEWラベルの有無で完了判定
-        const hasNewLabel = await parent.locator('text="NEW"').count() > 0;
-        const completed = !hasNewLabel;
+        // タイムラインに載っている=実施済みのため常に完了扱い
+        // (NEWラベルは未読バッジであり完了/未完了とは無関係)
+        const completed = true;
 
         // ミッション名を取得（親要素の兄弟として.title__C3bzFを探す）
         let missionName = selectors.missionDetails.missionName.defaultName;
