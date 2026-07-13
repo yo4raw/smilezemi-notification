@@ -115,9 +115,9 @@ GitHub Actions のログを確認してください。
 
 `if: always()` の save は維持する(通知失敗時も確定済みストリークを保持する既存意図の通り)。整合性チェックが fail した場合は後続ステップ自体が走らないため save は発生しない。
 
-**現状の問題2**: `crawler.yml:85` の `docker compose up --abort-on-container-exit` は `--exit-code-from` がないため、コンテナの exit code がジョブに伝搬しない(ローカル実験で確認予定)。伝搬しない場合、クローラーが exit 1 してもジョブは緑になり、B4 の失敗通知が夜通知で機能しない。
+**現状の問題2(実験で否定)**: `crawler.yml:85` の `docker compose up --abort-on-container-exit` はコンテナの exit code を伝搬しない疑いがあったが、ローカル実験(Compose v2、単一サービスで exit 7)の結果、**現行バージョンでは伝搬することを確認した**。
 
-**設計2**: `docker compose up --exit-code-from crawler` に変更(`--exit-code-from` は `--abort-on-container-exit` を含意)。朝・週間は `docker compose run` のため伝搬済みで変更不要。
+**設計2**: 挙動は同じだが、意図の明示とバージョン差異への保険として `docker compose up --exit-code-from crawler` に変更する(`--exit-code-from` は `--abort-on-container-exit` を含意)。朝・週間は `docker compose run` のため元から伝搬済みで変更不要。
 
 ### B4: ワークフロー失敗時LINE通知 + keepalive
 
