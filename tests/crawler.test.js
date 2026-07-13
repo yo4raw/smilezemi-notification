@@ -344,6 +344,21 @@ describe('クローラーモジュール (src/crawler.js)', () => {
       });
     });
 
+    it('正常系: 日付がJST基準(getTargetDatesと同一)であること', async () => {
+      const mockPage = createMockPage({ userNames: ['太郎さん'] });
+      const result = await crawler.getAllUsersMissionCounts(mockPage);
+
+      assert.strictEqual(result.success, true);
+      const expectedDate = crawler.getTargetDates(0).dateString;
+      result.data.forEach(item => {
+        assert.strictEqual(
+          item.date,
+          expectedDate,
+          'UTCではなくJST基準の当日日付が記録されること'
+        );
+      });
+    });
+
     it('異常系: ユーザー一覧取得に失敗した場合、エラーを返す', async () => {
       const mockPage = createMockPage({
         throwOnFirstLocator: new Error('Failed to get users'),

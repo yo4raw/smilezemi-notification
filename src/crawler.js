@@ -1563,9 +1563,8 @@ async function getAllUsersMissionCounts(page) {
     const data = [];
     let hasPartialFailure = false;
 
-    // 当日の日付を取得（YYYY-MM-DD形式）
-    const today = new Date();
-    const dateString = today.toISOString().split('T')[0];
+    // 当日の日付を取得（YYYY-MM-DD形式、JST基準）
+    const { dateString } = getTargetDates(0);
 
     // 各ユーザーのミッション数を取得
     for (let i = 0; i < users.length; i++) {
