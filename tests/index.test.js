@@ -366,9 +366,21 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(fetchCalls.length, 1, '前日分クロール失敗時も通知(fetch)が実行されること');
     });
 
-    it('異常系: loadStreakData失敗時、errorsに記録されるが通知は送信される', async () => {
+    it('異常系: loadStreakData失敗時、errorsに記録されるが空状態で続行し自己修復する', async () => {
+      let saveStreakCalls = 0;
+      let capturedSavedUsers;
+      let capturedFormatOptions;
       setupMocks({
-        loadStreakData: async () => ({ success: false, error: 'ストリークデータ読み込み失敗' })
+        loadStreakData: async () => ({ success: false, error: 'ストリークデータ読み込み失敗' }),
+        saveStreakData: async (streakUsers) => {
+          saveStreakCalls++;
+          capturedSavedUsers = streakUsers;
+          return { success: true };
+        },
+        formatDetailedMessage: (currentData, missionChangesResult, options) => {
+          capturedFormatOptions = options;
+          return 'テスト詳細メッセージ';
+        }
       });
 
       const result = await mainModule.main();
@@ -379,6 +391,10 @@ describe('オーケストレーション (src/index.js)', () => {
 
       const fetchCalls = callLog.filter(c => c.type === 'fetch');
       assert.strictEqual(fetchCalls.length, 1, 'loadStreakData失敗時も通知(fetch)は送信されること');
+
+      assert.strictEqual(saveStreakCalls, 1, '空状態で続行しsaveStreakDataが呼ばれること(自己修復)');
+      assert.ok(capturedSavedUsers, 'saveStreakDataに空マップベースの状態が渡されること');
+      assert.ok(capturedFormatOptions.streaks, 'formatDetailedMessageにstreaksマップが渡されること');
     });
 
     it('正常系: formatDetailedMessageに渡すoptions.streaksに対象ユーザーのキーが含まれる', async () => {

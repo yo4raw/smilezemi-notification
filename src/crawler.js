@@ -1357,6 +1357,11 @@ async function getCourseData(page, userName, courseName, dateString, dateOffset 
     // ユーザー名にコース名を追加（コース選択がある場合）
     const displayName = courseName ? `${userName} (${courseName})` : userName;
 
+    // いずれかのサブ取得が失敗しデフォルト値(0/[])で埋めた場合は、
+    // 実際の未学習と区別できるよう信頼できないデータであることを明示する
+    // (ストリーク判定でシステム起因の誤リセットを防ぐために使用)
+    const dataReliable = studyTimeResult.success && missionCountResult.success && missionsResult.success;
+
     // v2.0データ構造で返却
     return {
       success: true,
@@ -1366,7 +1371,8 @@ async function getCourseData(page, userName, courseName, dateString, dateOffset 
         date: dateString,
         studyTime,
         totalScore,
-        missions
+        missions,
+        dataReliable
       },
       detailsAvailable
     };

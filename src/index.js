@@ -214,52 +214,58 @@ async function main() {
     console.log('🔥 ストリークを更新しています...');
     const streakLoadResult = await loadStreakData();
 
+    let streakUsers;
     if (streakLoadResult.success) {
-      let streakUsers = streakLoadResult.data;
-      const resultMap = new Map();
-
-      const yesterdayDates = getTargetDates(-1);
-      console.log(`🔍 ストリーク確定のため前日(${yesterdayDates.withPadding})のデータを取得しています...`);
-      const yesterdayCrawlResult = await getAllUsersDetailedData(page, {
-        courseFilter: 'elementary',
-        dateOffset: -1
-      });
-
-      if (yesterdayCrawlResult.success) {
-        const updateResult = updateStreaks(
-          streakUsers,
-          yesterdayCrawlResult.data,
-          yesterdayDates.dateString
-        );
-        streakUsers = updateResult.streakUsers;
-        updateResult.results.forEach(result => resultMap.set(result.userName, result));
-
-        const streakSaveResult = await saveStreakData(streakUsers);
-        if (streakSaveResult.success) {
-          console.log('✅ ストリークデータの保存が完了しました');
-        } else {
-          console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
-          errors.push(streakSaveResult.error);
-        }
-      } else {
-        // 前日分が取れない場合は確定判定をスキップし、前回の確定値をそのまま表示する
-        // (未判定日は翌日以降に空白日として中立処理される)
-        console.warn('⚠️ 前日分の取得に失敗したため、ストリークの確定判定をスキップします:', yesterdayCrawlResult.error);
-      }
-
-      // 通知用の表示情報を構築(当日すでに学習していれば暫定で+1表示)
-      streaks = {};
-      currentData.forEach(user => {
-        const result = resultMap.get(user.userName) || {
-          state: streakUsers[user.userName] || createInitialState(),
-          event: 'none'
-        };
-        streaks[user.userName] = formatStreakInfo(result, { todayStudied: isStudied(user) });
-      });
+      streakUsers = streakLoadResult.data;
     } else {
-      console.warn('⚠️ ストリークデータの読み込みに失敗したため、ストリーク表示をスキップします:', streakLoadResult.error);
+      // 読み込み失敗はエラーとして記録しつつ、空状態で続行して次回保存時に自己修復させる
+      // (システム側の問題で子供にペナルティを与えず、通知処理も止め続けないため)
+      console.error('❌ ストリークデータの読み込みに失敗しました:', streakLoadResult.error);
       errors.push(streakLoadResult.error);
+      console.warn('⚠️ ストリークデータを初期化して続行します');
+      streakUsers = {};
     }
+
+    const resultMap = new Map();
+
+    const yesterdayDates = getTargetDates(-1);
+    console.log(`🔍 ストリーク確定のため前日(${yesterdayDates.withPadding})のデータを取得しています...`);
+    const yesterdayCrawlResult = await getAllUsersDetailedData(page, {
+      courseFilter: 'elementary',
+      dateOffset: -1
+    });
+
+    if (yesterdayCrawlResult.success) {
+      const updateResult = updateStreaks(
+        streakUsers,
+        yesterdayCrawlResult.data,
+        yesterdayDates.dateString
+      );
+      streakUsers = updateResult.streakUsers;
+      updateResult.results.forEach(result => resultMap.set(result.userName, result));
+
+      const streakSaveResult = await saveStreakData(streakUsers);
+      if (streakSaveResult.success) {
+        console.log('✅ ストリークデータの保存が完了しました');
+      } else {
+        console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
+        errors.push(streakSaveResult.error);
+      }
+    } else {
+      // 前日分が取れない場合は確定判定をスキップし、前回の確定値をそのまま表示する
+      // (未判定日は翌日以降に空白日として中立処理される)
+      console.warn('⚠️ 前日分の取得に失敗したため、ストリークの確定判定をスキップします:', yesterdayCrawlResult.error);
+    }
+
+    // 通知用の表示情報を構築(当日すでに学習していれば暫定で+1表示)
+    streaks = {};
+    currentData.forEach(user => {
+      const result = resultMap.get(user.userName) || {
+        state: streakUsers[user.userName] || createInitialState(),
+        event: 'none'
+      };
+      streaks[user.userName] = formatStreakInfo(result, { todayStudied: isStudied(user) });
+    });
 
     // 7. データ比較（変更検出）
     console.log('🔄 データを比較しています...');

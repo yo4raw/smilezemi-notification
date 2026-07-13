@@ -104,33 +104,40 @@ async function main() {
     console.log('🔥 ストリークを更新しています...');
     const streakLoadResult = await loadStreakData();
 
+    let previousStreakUsers;
     if (streakLoadResult.success) {
-      const { streakUsers, results } = updateStreaks(
-        streakLoadResult.data,
-        crawlResult.data,
-        targetDates.dateString
-      );
-
-      streaks = {};
-      results.forEach(result => {
-        streaks[result.userName] = formatStreakInfo(result);
-      });
-
-      // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
-      if (process.env.DRY_RUN === 'true') {
-        console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
-      } else {
-        const streakSaveResult = await saveStreakData(streakUsers);
-        if (streakSaveResult.success) {
-          console.log('✅ ストリークデータの保存が完了しました');
-        } else {
-          console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
-          errors.push(streakSaveResult.error);
-        }
-      }
+      previousStreakUsers = streakLoadResult.data;
     } else {
-      console.warn('⚠️ ストリークデータの読み込みに失敗したため、ストリーク表示をスキップします:', streakLoadResult.error);
+      // 読み込み失敗はエラーとして記録しつつ、空状態で続行して次回保存時に自己修復させる
+      // (システム側の問題で子供にペナルティを与えず、通知処理も止め続けないため)
+      console.error('❌ ストリークデータの読み込みに失敗しました:', streakLoadResult.error);
       errors.push(streakLoadResult.error);
+      console.warn('⚠️ ストリークデータを初期化して続行します');
+      previousStreakUsers = {};
+    }
+
+    const { streakUsers, results } = updateStreaks(
+      previousStreakUsers,
+      crawlResult.data,
+      targetDates.dateString
+    );
+
+    streaks = {};
+    results.forEach(result => {
+      streaks[result.userName] = formatStreakInfo(result);
+    });
+
+    // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
+    if (process.env.DRY_RUN === 'true') {
+      console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
+    } else {
+      const streakSaveResult = await saveStreakData(streakUsers);
+      if (streakSaveResult.success) {
+        console.log('✅ ストリークデータの保存が完了しました');
+      } else {
+        console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
+        errors.push(streakSaveResult.error);
+      }
     }
 
     // 5. メッセージフォーマット（前日は確定データのため差分比較なし。未学習でも必ず通知）

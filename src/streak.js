@@ -94,7 +94,7 @@ function confirmDay(state, dateString, studied) {
  * 全ユーザー分の確定判定を適用(純粋関数、入力は変更しない)
  *
  * @param {object} streakUsers - userName → state のマップ
- * @param {Array} users - 判定対象日のクロール済みユーザーデータ(v2.0形式)
+ * @param {Array} users - 判定対象日のクロール済みユーザーデータ(v2.0形式、dataReliable省略時はtrue扱い)
  * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
  * @returns {{streakUsers: object, results: Array<{userName: string, state: object, event: string}>}}
  */
@@ -104,7 +104,17 @@ function updateStreaks(streakUsers, users, dateString) {
 
   users.forEach(user => {
     const current = updated[user.userName] || createInitialState();
-    const { state, event } = confirmDay(current, dateString, isStudied(user));
+    const studied = isStudied(user);
+
+    // dataReliable: false かつ未学習判定の場合、クロール部分失敗によるデフォルト値(0/[])
+    // が原因の偽陰性である可能性があるため確定をスキップする(空白日の中立処理に委ねる)。
+    // 学習した証跡がある場合(studied === true)は信頼して通常通り確定する。
+    if (user.dataReliable === false && !studied) {
+      results.push({ userName: user.userName, state: current, event: 'none' });
+      return;
+    }
+
+    const { state, event } = confirmDay(current, dateString, studied);
     updated[user.userName] = state;
     results.push({ userName: user.userName, state, event });
   });

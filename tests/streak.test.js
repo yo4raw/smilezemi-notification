@@ -230,6 +230,46 @@ describe('updateStreaks', () => {
       { streak: 3, grace: 0, lastConfirmedDate: '2026-07-11' }
     );
   });
+
+  it('dataReliable:false かつ未学習の場合は確定をスキップし状態を維持する(誤リセット防止)', () => {
+    const initial = {
+      '光志郎 (中学生コース)': { streak: 5, grace: 1, lastConfirmedDate: '2026-07-11' }
+    };
+    const unreliableNotStudiedUser = {
+      userName: '光志郎 (中学生コース)',
+      studyTime: { hours: 0, minutes: 0 },
+      missions: [],
+      dataReliable: false
+    };
+    const { streakUsers, results } = updateStreaks(initial, [unreliableNotStudiedUser], '2026-07-12');
+
+    assert.deepStrictEqual(streakUsers['光志郎 (中学生コース)'], initial['光志郎 (中学生コース)']);
+    assert.strictEqual(results[0].event, 'none');
+    assert.deepStrictEqual(results[0].state, initial['光志郎 (中学生コース)']);
+  });
+
+  it('dataReliable:false でも学習実績があれば通常通り確定する(正の証跡は信頼する)', () => {
+    const unreliableStudiedUser = {
+      userName: '光志郎 (中学生コース)',
+      studyTime: { hours: 0, minutes: 30 },
+      missions: [{ name: '数学', score: 80, completed: true }],
+      dataReliable: false
+    };
+    const { streakUsers, results } = updateStreaks({}, [unreliableStudiedUser], '2026-07-12');
+
+    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].streak, 1);
+    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].lastConfirmedDate, '2026-07-12');
+    assert.strictEqual(results[0].event, 'none');
+  });
+
+  it('dataReliable が未指定の場合は信頼できるものとして通常通り確定する(既存呼び出し互換)', () => {
+    const { streakUsers } = updateStreaks({}, [notStudiedUser], '2026-07-12');
+
+    assert.deepStrictEqual(
+      streakUsers['祥吾 (小学生コース)'],
+      { streak: 0, grace: 0, lastConfirmedDate: '2026-07-12' }
+    );
+  });
 });
 
 describe('formatStreakInfo', () => {
