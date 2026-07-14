@@ -1354,6 +1354,10 @@ async function getCourseData(page, userName, courseName, dateString, dateOffset 
     // ユーザー名にコース名を追加（コース選択がある場合）
     const displayName = courseName ? `${userName} (${courseName})` : userName;
 
+    // コース種別(小学生/中学生)を判定して付与する。
+    // ストリーク確定・警告のしきい値をコース別に切り替えるために使う。
+    const course = isJuniorHighSchool(courseName, page) ? 'juniorHigh' : 'elementary';
+
     // いずれかのサブ取得が失敗しデフォルト値(0/[])で埋めた場合は、
     // 実際の未学習と区別できるよう信頼できないデータであることを明示する
     // (ストリーク判定でシステム起因の誤リセットを防ぐために使用)
@@ -1364,6 +1368,7 @@ async function getCourseData(page, userName, courseName, dateString, dateOffset 
       success: true,
       data: {
         userName: displayName,
+        course,
         missionCount,
         date: dateString,
         studyTime,
@@ -1616,6 +1621,7 @@ module.exports = {
   getTargetDates,
   resolveTargetCourses,
   shouldProcessSingleCourseUser,
+  isJuniorHighSchool,
   switchToUser,
   checkCourseSelection,
   selectCourse,
