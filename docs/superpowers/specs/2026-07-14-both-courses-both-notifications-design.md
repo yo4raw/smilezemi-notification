@@ -69,7 +69,7 @@ return {
 
 ### 2. コース別しきい値 (`src/notifier.js`)
 
-`formatDetailedMessage` のオプション `missionWarningThreshold`(単一数値)を `missionWarningThresholds: { elementary: number, juniorHigh: number }` に置き換える。フォーマッタは各ユーザーの `course`(無ければ従来通り名前サフィックス `includes('中学生コース')` にフォールバック)で、しきい値・スコア単位(%/点)・ラベル(講座/ミッション)を選ぶ。
+`formatDetailedMessage` に新オプション `missionWarningThresholds: { elementary: number, juniorHigh: number }` を追加する。既存の単一数値オプション `missionWarningThreshold`(全ユーザー共通)は後方互換のため残す(既存テスト・単一コース利用のため)。両方指定時は `missionWarningThresholds` を優先。フォーマッタは各ユーザーの `course`(無ければ従来通り名前サフィックス `includes('中学生コース')` にフォールバック)で、しきい値・スコア単位(%/点)・ラベル(講座/ミッション)を選ぶ。
 
 ```js
 const { missionWarningThresholds = null } = options;
