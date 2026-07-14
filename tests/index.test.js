@@ -151,12 +151,19 @@ describe('オーケストレーション (src/index.js)', () => {
       id: resolveModule('../src/streak'), filename: resolveModule('../src/streak'), loaded: true,
       exports: {
         loadStreakData: overrides.loadStreakData || (async () => ({ success: true, data: {} })),
-        saveStreakData: overrides.saveStreakData || (async () => ({ success: true })),
-        updateStreaks: overrides.updateStreaks || (() => ({ streakUsers: {}, results: [] })),
+        saveStreakData: overrides.saveStreakData || (async () => {
+          callLog.push({ type: 'saveStreakData' });
+          return { success: true };
+        }),
+        updateStreaks: overrides.updateStreaks || (() => {
+          callLog.push({ type: 'updateStreaks' });
+          return { streakUsers: {}, results: [] };
+        }),
         formatStreakInfo: overrides.formatStreakInfo || (() => 'テストストリーク情報'),
         isStudied: overrides.isStudied || (() => false),
-        createInitialState: overrides.createInitialState || (() => ({})),
-        STREAK_REQUIREMENTS: overrides.STREAK_REQUIREMENTS || { elementaryMissions: 5, juniorHighCourses: { weekday: 4, weekend: 6 } }
+        createInitialState: overrides.createInitialState || (() => ({ streak: 0, grace: 1, bonus: 0, lastConfirmedDate: null })),
+        getRequirementForCourse: overrides.getRequirementForCourse || ((course) => course === 'juniorHigh' ? 3 : 4),
+        STREAK_REQUIREMENTS: overrides.STREAK_REQUIREMENTS || { elementaryMissions: 4, juniorHighCourses: { weekday: 3, weekend: 5 } }
       }
     };
 
@@ -304,20 +311,22 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(Array.isArray(result.errors), true);
     });
 
-    it('正常系: 夜通知はストリーク判定・暫定表示・警告表示に5ミッション閾値を適用する', async () => {
-      let capturedUpdateOptions;
+    it('正常系: 夜通知は確定処理(updateStreaks/saveStreakData)を行わない', async () => {
+      await mainModule.main();
+
+      const updateCalls = callLog.filter(c => c.type === 'updateStreaks');
+      const saveStreakCalls = callLog.filter(c => c.type === 'saveStreakData');
+      assert.strictEqual(updateCalls.length, 0, '夜通知はupdateStreaksを呼ばない');
+      assert.strictEqual(saveStreakCalls.length, 0, '夜通知はsaveStreakDataを呼ばない');
+    });
+
+    it('正常系: 夜通知は当日学習判定にコース別しきい値を使い、警告閾値も渡す', async () => {
       let capturedIsStudiedOptions;
       let capturedFormatOptions;
       setupMocks({
-        updateStreaks: (streakUsers, users, dateString, options) => {
-          capturedUpdateOptions = options;
-          return { streakUsers: {}, results: [] };
-        },
-        isStudied: (user, options) => {
-          capturedIsStudiedOptions = options;
-          return false;
-        },
-        formatDetailedMessage: (currentData, missionChangesResult, options) => {
+        isStudied: (user, options) => { capturedIsStudiedOptions = options; return true; },
+        getRequirementForCourse: (course) => course === 'juniorHigh' ? 3 : 4,
+        formatDetailedMessage: (currentData, changes, options) => {
           capturedFormatOptions = options;
           return 'テスト詳細メッセージ';
         }
@@ -325,21 +334,15 @@ describe('オーケストレーション (src/index.js)', () => {
 
       await mainModule.main();
 
-      assert.deepStrictEqual(
-        capturedUpdateOptions,
-        { minCompletedMissions: 5 },
-        '前日確定判定に5ミッション閾値が渡ること'
-      );
+      // デフォルトの太郎は course 未設定 → elementary 扱い → 4
       assert.deepStrictEqual(
         capturedIsStudiedOptions,
-        { minCompletedMissions: 5 },
-        '当日の暫定+1判定に5ミッション閾値が渡ること'
+        { minCompletedMissions: 4 },
+        '当日暫定判定に elementary しきい値(4)が渡ること'
       );
-      assert.strictEqual(
-        capturedFormatOptions.missionWarningThreshold,
-        5,
-        '警告表示に5ミッション閾値が渡ること'
-      );
+      assert.ok(capturedFormatOptions.missionWarningThresholds, 'missionWarningThresholds が渡ること');
+      assert.strictEqual(capturedFormatOptions.missionWarningThresholds.elementary, 4);
+      assert.strictEqual(capturedFormatOptions.missionWarningThresholds.juniorHigh, 3);
     });
 
     it('正常系: ドライランモードでは送信・保存を行わない', async () => {
@@ -407,73 +410,31 @@ describe('オーケストレーション (src/index.js)', () => {
   });
 
   describe('ストリーク統合', () => {
-    it('正常系: 前日分クロールが courseFilter:elementary, dateOffset:-1 で呼ばれる', async () => {
+    it('正常系: 当日クロールが courseFilter:null で1回だけ呼ばれる(前日クロールしない)', async () => {
       const detailedCalls = [];
       setupMocks({
         getAllUsersDetailedData: async (page, options) => {
           detailedCalls.push(options);
-          if (detailedCalls.length === 1) {
-            return {
-              success: true,
-              data: [{ userName: '太郎', missionCount: 5, date: '2025-12-25', studyTime: '1時間30分', missions: [], totalScore: 100 }],
-              detailsAvailable: true,
-              partialFailure: false
-            };
-          }
-          return { success: true, data: [] };
+          return {
+            success: true,
+            data: [{ userName: '太郎', course: 'elementary', missionCount: 5, date: '2025-12-25', studyTime: { hours: 1, minutes: 30 }, missions: [], totalScore: 100 }],
+            detailsAvailable: true,
+            partialFailure: false
+          };
         }
       });
 
       await mainModule.main();
 
-      assert.strictEqual(detailedCalls.length, 2, 'getAllUsersDetailedDataが2回呼ばれること（当日分・前日分）');
-      assert.deepStrictEqual(detailedCalls[0], { courseFilter: 'elementary' }, '1回目は当日分の呼び出しであること');
-      assert.deepStrictEqual(detailedCalls[1], { courseFilter: 'elementary', dateOffset: -1 }, '2回目は前日分の呼び出しであること');
+      assert.strictEqual(detailedCalls.length, 1, 'getAllUsersDetailedData は当日分の1回だけ');
+      assert.deepStrictEqual(detailedCalls[0], { courseFilter: null }, '両コース(null)で当日分を取得すること');
     });
 
-    it('異常系: 前日分クロール失敗時、saveStreakDataが呼ばれず通知処理は継続する', async () => {
-      let callCount = 0;
-      let saveStreakCalls = 0;
-      setupMocks({
-        getAllUsersDetailedData: async () => {
-          callCount++;
-          if (callCount === 1) {
-            return {
-              success: true,
-              data: [{ userName: '太郎', missionCount: 5, date: '2025-12-25', studyTime: '1時間30分', missions: [], totalScore: 100 }],
-              detailsAvailable: true,
-              partialFailure: false
-            };
-          }
-          return { success: false, error: '前日分取得失敗' };
-        },
-        saveStreakData: async () => {
-          saveStreakCalls++;
-          return { success: true };
-        }
-      });
-
-      const result = await mainModule.main();
-
-      assert.strictEqual(saveStreakCalls, 0, '前日分クロール失敗時はsaveStreakDataが呼ばれないこと');
-      assert.strictEqual(result.exitCode, 0, '前日分クロール失敗のみでは通知処理が異常終了しないこと');
-
-      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
-      assert.strictEqual(pushCalls.length, 1, '前日分クロール失敗時も通知(sendPushMessage)が実行されること');
-    });
-
-    it('異常系: loadStreakData失敗時、errorsに記録されるが空状態で続行し自己修復する', async () => {
-      let saveStreakCalls = 0;
-      let capturedSavedUsers;
+    it('異常系: loadStreakData失敗時、errorsに記録し保存せず表示のみで続行する', async () => {
       let capturedFormatOptions;
       setupMocks({
         loadStreakData: async () => ({ success: false, error: 'ストリークデータ読み込み失敗' }),
-        saveStreakData: async (streakUsers) => {
-          saveStreakCalls++;
-          capturedSavedUsers = streakUsers;
-          return { success: true };
-        },
-        formatDetailedMessage: (currentData, missionChangesResult, options) => {
+        formatDetailedMessage: (currentData, changes, options) => {
           capturedFormatOptions = options;
           return 'テスト詳細メッセージ';
         }
@@ -481,16 +442,15 @@ describe('オーケストレーション (src/index.js)', () => {
 
       const result = await mainModule.main();
 
-      assert.strictEqual(result.exitCode, 1, 'loadStreakData失敗時は終了コード1になること');
-      assert.strictEqual(Array.isArray(result.errors), true);
-      assert.strictEqual(result.errors.includes('ストリークデータ読み込み失敗'), true, 'errorsにloadStreakDataのエラーが含まれること');
+      assert.strictEqual(result.exitCode, 1, 'loadStreakData失敗時は終了コード1');
+      assert.strictEqual(result.errors.includes('ストリークデータ読み込み失敗'), true, 'errorsに記録されること');
+
+      const saveStreakCalls = callLog.filter(c => c.type === 'saveStreakData');
+      assert.strictEqual(saveStreakCalls.length, 0, '夜通知は保存しないこと');
 
       const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
-      assert.strictEqual(pushCalls.length, 1, 'loadStreakData失敗時も通知(sendPushMessage)は送信されること');
-
-      assert.strictEqual(saveStreakCalls, 1, '空状態で続行しsaveStreakDataが呼ばれること(自己修復)');
-      assert.ok(capturedSavedUsers, 'saveStreakDataに空マップベースの状態が渡されること');
-      assert.ok(capturedFormatOptions.streaks, 'formatDetailedMessageにstreaksマップが渡されること');
+      assert.strictEqual(pushCalls.length, 1, '通知は送信されること');
+      assert.ok(capturedFormatOptions.streaks, 'streaksマップは渡されること(空状態ベース)');
     });
 
     it('正常系: formatDetailedMessageに渡すoptions.streaksに対象ユーザーのキーが含まれる', async () => {
