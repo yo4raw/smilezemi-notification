@@ -18,7 +18,9 @@ const {
   loadStreakData,
   saveStreakData,
   STREAK_REQUIREMENTS,
-  getJuniorHighRequirement
+  getJuniorHighRequirement,
+  getRequirementForCourse,
+  updateStreaksByCourse
 } = require('../src/streak');
 
 const DATA_DIR = path.join(__dirname, '../data');
@@ -647,5 +649,64 @@ describe('formatStreakInfo', () => {
       event: 'reset'
     });
     assert.ok(text.includes('😢 連続記録がリセットされました'));
+  });
+});
+
+describe('getRequirementForCourse', () => {
+  it('elementary は elementaryMissions を返す', () => {
+    assert.strictEqual(
+      getRequirementForCourse('elementary', '2026-07-13'),
+      STREAK_REQUIREMENTS.elementaryMissions
+    );
+  });
+
+  it('juniorHigh は平日しきい値を返す(2026-07-13は月曜)', () => {
+    assert.strictEqual(
+      getRequirementForCourse('juniorHigh', '2026-07-13'),
+      STREAK_REQUIREMENTS.juniorHighCourses.weekday
+    );
+  });
+
+  it('juniorHigh は土日しきい値を返す(2026-07-11は土曜)', () => {
+    assert.strictEqual(
+      getRequirementForCourse('juniorHigh', '2026-07-11'),
+      STREAK_REQUIREMENTS.juniorHighCourses.weekend
+    );
+  });
+
+  it('未知/未設定コースは elementary 扱い', () => {
+    assert.strictEqual(
+      getRequirementForCourse(undefined, '2026-07-13'),
+      STREAK_REQUIREMENTS.elementaryMissions
+    );
+  });
+});
+
+describe('updateStreaksByCourse', () => {
+  it('コースごとに異なるしきい値で確定する', () => {
+    // 小学生: 4ミッションで学習成立 / 中学生(月曜): 3講座で学習成立
+    const elemUser = { userName: '太郎 (小学生コース)', course: 'elementary', missionCount: 4, missions: [] };
+    const jhUser = { userName: '花子 (中学生コース)', course: 'juniorHigh', missionCount: 3, missions: [] };
+
+    const { streakUsers, results } = updateStreaksByCourse(
+      {}, [elemUser, jhUser], '2026-07-13'
+    );
+
+    assert.strictEqual(streakUsers['太郎 (小学生コース)'].streak, 1, '小学生は4ミッションで+1');
+    assert.strictEqual(streakUsers['花子 (中学生コース)'].streak, 1, '中学生は3講座で+1');
+    assert.strictEqual(results.length, 2, '両コース分のresultが返る');
+  });
+
+  it('中学生の平日しきい値未満(2講座)は学習不成立', () => {
+    const jhUser = { userName: '花子 (中学生コース)', course: 'juniorHigh', missionCount: 2, missions: [] };
+    const { streakUsers } = updateStreaksByCourse({}, [jhUser], '2026-07-13');
+    assert.strictEqual(streakUsers['花子 (中学生コース)'].streak, 0, '2講座では+1されない');
+  });
+
+  it('入力の streakUsers を破壊しない', () => {
+    const input = {};
+    const elemUser = { userName: '太郎 (小学生コース)', course: 'elementary', missionCount: 4, missions: [] };
+    updateStreaksByCourse(input, [elemUser], '2026-07-13');
+    assert.deepStrictEqual(input, {}, '入力マップは変更されない');
   });
 });
