@@ -277,7 +277,13 @@ function formatMessage(changes) {
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
-  const { dateLabel = null, showNoStudyWarning = false, streaks = null, missionWarningThreshold = null } = options;
+  const {
+    dateLabel = null,
+    showNoStudyWarning = false,
+    streaks = null,
+    missionWarningThreshold = null,
+    missionWarningThresholds = null
+  } = options;
 
   // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
   let message = dateLabel
@@ -317,22 +323,26 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     const minutes = user.studyTime?.minutes ?? 0;
     message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
 
-    // 中学生コースのスコア単位は "%" 、小学生コースは "点"
-    const isJuniorHigh = user.userName.includes('中学生コース');
+    // コース種別: course フィールド優先、なければ名前サフィックスで判定
+    const course = user.course || (user.userName.includes('中学生コース') ? 'juniorHigh' : 'elementary');
+    const isJuniorHigh = course === 'juniorHigh';
     const scoreUnit = isJuniorHigh ? '%' : '点';
     const detailLabel = isJuniorHigh ? '学習詳細' : 'ミッション詳細';
 
     const missions = user.missions ?? [];
     const isNoStudy = hours === 0 && minutes === 0 && missions.length === 0;
 
-    // 完了数未達の警告(小学生=ミッション5個 / 中学生=講座4個)。
-    // 取得失敗時(dataReliable:false)は誤警告を防ぐため出さない。
-    // 完全未学習の日にshowNoStudyWarningが出る場合は重複させない。
-    if (missionWarningThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
+    // 完了数未達の警告。コース別しきい値(missionWarningThresholds)を優先し、
+    // なければ単一の missionWarningThreshold を使う(後方互換)。
+    const warnThreshold = missionWarningThresholds
+      ? (isJuniorHigh ? missionWarningThresholds.juniorHigh : missionWarningThresholds.elementary)
+      : missionWarningThreshold;
+
+    if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
       const completedCount = countCompletedMissions(user);
-      if (completedCount < missionWarningThreshold) {
+      if (completedCount < warnThreshold) {
         const unitLabel = isJuniorHigh ? '講座' : 'ミッション';
-        message += `⚠️ ${unitLabel}完了 ${completedCount}/${missionWarningThreshold}個 — ${missionWarningThreshold}個完了しないと連続学習にカウントされないよ!\n`;
+        message += `⚠️ ${unitLabel}完了 ${completedCount}/${warnThreshold}個 — ${warnThreshold}個完了しないと連続学習にカウントされないよ!\n`;
       }
     }
 
