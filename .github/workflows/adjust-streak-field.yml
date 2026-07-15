@@ -1,0 +1,96 @@
+name: ストリークフィールド手動変更
+
+# おたすけ(grace)・連続日数(streak)・ボーナス(bonus)を手動で絶対値に変更する。
+# キャッシュを復元 → scripts/set-streak-field.js で1ユーザーの1フィールドを更新 →
+# 新しい run_id キーでキャッシュ保存。次回のスケジュール実行で自動的に反映される。
+#
+# 検証(フィールド種別・範囲・既存ユーザーのみ)はスクリプト側に集約している。
+# 注意: スケジュール実行と同時刻に走らせるとキャッシュ保存が後勝ちで競合しうるため、
+#       通知ワークフローが動いていない時間帯に実行すること。
+
+on:
+  workflow_dispatch:
+    inputs:
+      field:
+        description: 変更するフィールド
+        required: true
+        type: choice
+        options:
+          - grace
+          - streak
+          - bonus
+      user:
+        description: 'ユーザーキー(例: たろう (小学生コース))。show-streak-dataで正確な値を確認'
+        required: true
+        type: string
+      value:
+        description: 設定する絶対値(grace は 0〜3、streak/bonus は 0 以上)
+        required: true
+        type: string
+      dry_run:
+        description: true にすると変更内容を表示するだけで保存しない
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  adjust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # キャッシュ整合性チェック(gh api)に必要
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: 前回データを復元
+        id: restore-data
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: smilezemi-data-${{ github.run_id }}
+          restore-keys: |
+            smilezemi-data-
+
+      # 既存エントリがあるのに復元できなかった場合はキャッシュ異常の可能性が高い。
+      # 空データに変更を書いて保存すると履歴が実質消失するため中断する
+      - name: キャッシュ復元の整合性を検証
+        if: steps.restore-data.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=smilezemi-data-" --jq '.total_count')
+          if [ "$count" -gt 0 ]; then
+            echo "::error::既存のキャッシュエントリ(${count}件)があるのに復元できませんでした。データ保護のためジョブを中断します。"
+            exit 1
+          fi
+          echo "キャッシュエントリなし(初回実行またはエビクション後)"
+
+      - name: Node.jsをセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 入力はシェルへ直接展開せず env 経由で渡す(インジェクション防止)
+      - name: フィールドを変更
+        env:
+          FIELD: ${{ inputs.field }}
+          USER_KEY: ${{ inputs.user }}
+          VALUE: ${{ inputs.value }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          DRY_FLAG=""
+          if [ "${DRY_RUN}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          node scripts/set-streak-field.js --user "${USER_KEY}" --field "${FIELD}" --value "${VALUE}" ${DRY_FLAG}
+
+      # 変更が成功し、かつ dry_run でない場合のみ新しいキャッシュとして保存する
+      - name: 変更後データを保存
+        if: ${{ success() && !inputs.dry_run }}
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: smilezemi-data-${{ github.run_id }}
