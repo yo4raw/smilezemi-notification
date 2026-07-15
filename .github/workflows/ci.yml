@@ -24,5 +24,8 @@ jobs:
       - name: 依存パッケージをインストール
         run: npm ci
 
+      - name: Lintを実行
+        run: npm run lint
+
       - name: テストを実行
         run: npm test
