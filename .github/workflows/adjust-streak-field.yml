@@ -20,7 +20,7 @@ on:
           - streak
           - bonus
       user:
-        description: 'ユーザーキー(例: たろう (小学生コース))。show-streak-dataで正確な値を確認'
+        description: 'ユーザーキー(完全一致。例: やまだたろうさん)。show-streak-dataで正確なキーを確認'
         required: true
         type: string
       value:
