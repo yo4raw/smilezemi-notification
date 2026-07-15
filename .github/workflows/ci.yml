@@ -29,3 +29,16 @@ jobs:
 
       - name: テストを実行
         run: npm test
+
+  # 本番ワークフローはDockerイメージ経由で実行されるため、
+  # ビルドが壊れているとテストが通っていても本番が落ちる。ビルド成否をCIで検証する。
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Dockerイメージをビルド
+        run: docker build -t smilezemi-notification-ci .
