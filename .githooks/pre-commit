@@ -1,0 +1,5 @@
+#!/bin/sh
+npx oxlint --deny-warnings src || {
+  echo "oxlint で問題が見つかりました。修正するか 'npm run lint:fix' を実行してください。" >&2
+  exit 1
+}

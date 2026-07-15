@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js",
+    "prepare": "git config core.hooksPath .githooks",
+    "lint": "oxlint --deny-warnings src",
+    "lint:fix": "oxlint --fix src",
     "test": "node --test --test-force-exit --experimental-test-isolation=none tests/*.test.js",
     "test:watch": "node --test --test-force-exit --experimental-test-isolation=none --watch tests/*.test.js",
     "docker:build": "docker-compose build",
@@ -33,6 +36,7 @@
     "playwright": "^1.58.2"
   },
   "devDependencies": {
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "oxlint": "1.74.0"
   }
 }

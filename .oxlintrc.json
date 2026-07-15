@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    // no-await-in-loop(perf): 本プロジェクトのループ内awaitは、Playwrightの単一page/browser
+    // インスタンスを介した「順序依存のブラウザ操作」(ユーザー切替・要素探索でのbreak早期終了等)、
+    // および認証・LINE通知の指数バックオフ付きリトライループが大半で、いずれも意図的に逐次実行が
+    // 必要な処理。Promise.all化は状態競合や早期終了ロジックの破壊につながるため無効化する。
+    "no-await-in-loop": "off"
+  },
+  "ignorePatterns": ["node_modules", "vendor", "data", "logs", "screenshots"]
+}
