@@ -377,7 +377,7 @@ git commit -m "feat: crawler に courseFilter と dateOffset オプションを�
 
     it('dateLabel 指定でヘッダに日付ラベルが入る', () => {
       const userData = [{
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 1,
         date: '2026-07-09',
         studyTime: { hours: 1, minutes: 5 },
@@ -391,7 +391,7 @@ git commit -m "feat: crawler に courseFilter と dateOffset オプションを�
 
     it('showNoStudyWarning: 未学習ユーザーに警告文言を表示し詳細セクションを出さない', () => {
       const userData = [{
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 0,
         date: '2026-07-09',
         studyTime: { hours: 0, minutes: 0 },
@@ -408,7 +408,7 @@ git commit -m "feat: crawler に courseFilter と dateOffset オプションを�
 
     it('showNoStudyWarning でも学習ありのユーザーには警告を出さない', () => {
       const userData = [{
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 1,
         date: '2026-07-09',
         studyTime: { hours: 0, minutes: 30 },

@@ -332,7 +332,7 @@ EOF
 ```js
     it('missionWarningThresholds: courseフィールドで小学生に elementary 閾値を適用', () => {
       const user = {
-        userName: '祥吾', course: 'elementary', missionCount: 3,
+        userName: 'じろう', course: 'elementary', missionCount: 3,
         date: '2026-07-13', studyTime: { hours: 1, minutes: 0 }, totalScore: 240,
         missions: [{ name: '算数', score: 80, completed: true }]
       };
@@ -344,7 +344,7 @@ EOF
 
     it('missionWarningThresholds: courseフィールドで中学生に juniorHigh 閾値を適用', () => {
       const user = {
-        userName: '光志郎', course: 'juniorHigh', missionCount: 2,
+        userName: 'たろう', course: 'juniorHigh', missionCount: 2,
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };
@@ -356,12 +356,12 @@ EOF
 
     it('missionWarningThresholds: 混在データを1メッセージでコース別に警告する', () => {
       const elem = {
-        userName: '祥吾', course: 'elementary', missionCount: 3,
+        userName: 'じろう', course: 'elementary', missionCount: 3,
         date: '2026-07-13', studyTime: { hours: 1, minutes: 0 }, totalScore: 240,
         missions: [{ name: '算数', score: 80, completed: true }]
       };
       const jh = {
-        userName: '光志郎', course: 'juniorHigh', missionCount: 2,
+        userName: 'たろう', course: 'juniorHigh', missionCount: 2,
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };
@@ -374,7 +374,7 @@ EOF
 
     it('missionWarningThresholds は course 未設定時に名前サフィックスで判定する', () => {
       const jh = {
-        userName: '光志郎 (中学生コース)', missionCount: 2,
+        userName: 'たろう (中学生コース)', missionCount: 2,
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };

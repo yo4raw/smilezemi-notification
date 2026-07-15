@@ -80,7 +80,7 @@ formatStreakInfo(state, options) → string               // 通知用のスト�
 {
   "version": "1.0",
   "users": {
-    "光志郎 (中学生コース)": {
+    "たろう (中学生コース)": {
       "streak": 12,
       "grace": 1,
       "lastConfirmedDate": "2026-07-12"
@@ -100,7 +100,7 @@ formatStreakInfo(state, options) → string               // 通知用のスト�
 ### 通知イメージ
 
 ```
-👤 光志郎 (中学生コース)
+👤 たろう (中学生コース)
 🔥 連続学習: 13日目  🛟 おたすけ: 1/3
 ⏱️ 勉強時間: 00:45
 ...

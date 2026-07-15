@@ -435,7 +435,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
   describe('formatDetailedMessage - ミッション未達警告 (missionWarningThreshold)', () => {
     const baseUser = {
-      userName: '祥吾 (小学生コース)',
+      userName: 'じろう (小学生コース)',
       missionCount: 3,
       date: '2026-07-13',
       studyTime: { hours: 1, minutes: 0 },
@@ -476,7 +476,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('中学生コースのユーザーには「講座完了」表記で警告する', () => {
       const juniorUser = {
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 2,
         date: '2026-07-13',
         studyTime: { hours: 0, minutes: 30 },
@@ -495,7 +495,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('showNoStudyWarning併用時、完全未学習の日は「学習していません」のみで閾値警告を重複させない', () => {
       const noStudyUser = {
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 0,
         date: '2026-07-13',
         studyTime: { hours: 0, minutes: 0 },
@@ -513,7 +513,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('showNoStudyWarning併用時、部分学習(閾値未満)の日は閾値警告が表示される', () => {
       const partialUser = {
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 1,
         date: '2026-07-13',
         studyTime: { hours: 0, minutes: 10 },
@@ -531,7 +531,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('missionWarningThresholds: courseフィールドで小学生に elementary 閾値を適用', () => {
       const user = {
-        userName: '祥吾', course: 'elementary', missionCount: 3,
+        userName: 'じろう', course: 'elementary', missionCount: 3,
         date: '2026-07-13', studyTime: { hours: 1, minutes: 0 }, totalScore: 240,
         missions: [{ name: '算数', score: 80, completed: true }]
       };
@@ -543,7 +543,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('missionWarningThresholds: courseフィールドで中学生に juniorHigh 閾値を適用', () => {
       const user = {
-        userName: '光志郎', course: 'juniorHigh', missionCount: 2,
+        userName: 'たろう', course: 'juniorHigh', missionCount: 2,
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };
@@ -555,12 +555,12 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('missionWarningThresholds: 混在データを1メッセージでコース別に警告する', () => {
       const elem = {
-        userName: '祥吾', course: 'elementary', missionCount: 3,
+        userName: 'じろう', course: 'elementary', missionCount: 3,
         date: '2026-07-13', studyTime: { hours: 1, minutes: 0 }, totalScore: 240,
         missions: [{ name: '算数', score: 80, completed: true }]
       };
       const jh = {
-        userName: '光志郎', course: 'juniorHigh', missionCount: 2,
+        userName: 'たろう', course: 'juniorHigh', missionCount: 2,
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };
@@ -573,7 +573,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('missionWarningThresholds は course 未設定時に名前サフィックスで判定する', () => {
       const jh = {
-        userName: '光志郎 (中学生コース)', missionCount: 2,
+        userName: 'たろう (中学生コース)', missionCount: 2,
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };
@@ -589,7 +589,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('dateLabel 指定でヘッダに日付ラベルが入る', () => {
       const userData = [{
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 1,
         date: '2026-07-09',
         studyTime: { hours: 1, minutes: 5 },
@@ -603,7 +603,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('showNoStudyWarning: 未学習ユーザーに警告文言を表示し詳細セクションを出さない', () => {
       const userData = [{
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 0,
         date: '2026-07-09',
         studyTime: { hours: 0, minutes: 0 },
@@ -620,7 +620,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('showNoStudyWarning でも学習ありのユーザーには警告を出さない', () => {
       const userData = [{
-        userName: '光志郎 (中学生コース)',
+        userName: 'たろう (中学生コース)',
         missionCount: 1,
         date: '2026-07-09',
         studyTime: { hours: 0, minutes: 30 },
@@ -648,7 +648,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     const { formatDetailedMessage } = require('../src/notifier');
 
     const userData = [{
-      userName: '光志郎 (中学生コース)',
+      userName: 'たろう (中学生コース)',
       missionCount: 1,
       date: '2026-07-12',
       studyTime: { hours: 0, minutes: 45 },
@@ -657,16 +657,16 @@ describe('通知モジュール (src/notifier.js)', () => {
     }];
 
     it('streaks オプションでユーザー名の直後にストリーク行が入る', () => {
-      const streaks = { '光志郎 (中学生コース)': '🔥 連続学習: 12日目  🛟 おたすけ: 1/3' };
+      const streaks = { 'たろう (中学生コース)': '🔥 連続学習: 12日目  🛟 おたすけ: 1/3' };
       const message = formatDetailedMessage(userData, null, { streaks });
       const lines = message.split('\n');
-      const nameIndex = lines.findIndex(line => line.startsWith('👤 光志郎'));
+      const nameIndex = lines.findIndex(line => line.startsWith('👤 たろう'));
       assert.strictEqual(lines[nameIndex + 1], '🔥 連続学習: 12日目  🛟 おたすけ: 1/3');
     });
 
     it('複数行のストリーク情報(イベント行付き)も表示される', () => {
       const streaks = {
-        '光志郎 (中学生コース)': '🔥 連続学習: 10日目  🛟 おたすけ: 1/3\n🎉 10日連続達成!おたすけ+1(残り1)'
+        'たろう (中学生コース)': '🔥 連続学習: 10日目  🛟 おたすけ: 1/3\n🎉 10日連続達成!おたすけ+1(残り1)'
       };
       const message = formatDetailedMessage(userData, null, { streaks });
       assert.ok(message.includes('🎉 10日連続達成!おたすけ+1(残り1)'));
@@ -681,7 +681,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     it('streaks オプション省略時は従来フォーマットのまま', () => {
       const message = formatDetailedMessage(userData, null, {});
       assert.ok(!message.includes('連続学習'));
-      assert.ok(message.includes('👤 光志郎 (中学生コース)'));
+      assert.ok(message.includes('👤 たろう (中学生コース)'));
     });
   });
 });

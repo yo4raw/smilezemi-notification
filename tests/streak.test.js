@@ -314,7 +314,7 @@ describe('loadStreakData / saveStreakData', () => {
 
   it('保存したデータを読み込める(ラウンドトリップ)', async () => {
     const users = {
-      '光志郎 (中学生コース)': { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' }
+      'たろう (中学生コース)': { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' }
     };
     const saveResult = await saveStreakData(users);
     assert.strictEqual(saveResult.success, true);
@@ -336,17 +336,17 @@ describe('loadStreakData / saveStreakData', () => {
     await fs.writeFile(STREAK_FILE, JSON.stringify({
       version: '1.0',
       users: {
-        '祥吾 (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-12' },
-        '光志郎 (中学生コース)': { streak: 15, grace: 2, lastConfirmedDate: '2026-07-12' }
+        'じろう (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-12' },
+        'たろう (中学生コース)': { streak: 15, grace: 2, lastConfirmedDate: '2026-07-12' }
       }
     }), 'utf-8');
 
     const result = await loadStreakData();
 
     assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 3, 'おたすけ0は3になること');
-    assert.strictEqual(result.data['祥吾 (小学生コース)'].streak, 3, 'ストリークは変わらないこと');
-    assert.strictEqual(result.data['光志郎 (中学生コース)'].grace, 3, 'おたすけ2も3になること');
+    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, 'おたすけ0は3になること');
+    assert.strictEqual(result.data['じろう (小学生コース)'].streak, 3, 'ストリークは変わらないこと');
+    assert.strictEqual(result.data['たろう (中学生コース)'].grace, 3, 'おたすけ2も3になること');
   });
 
   it('1.1データの読み込み時も全ユーザーのおたすけを3にする', async () => {
@@ -354,14 +354,14 @@ describe('loadStreakData / saveStreakData', () => {
     await fs.writeFile(STREAK_FILE, JSON.stringify({
       version: '1.1',
       users: {
-        '祥吾 (小学生コース)': { streak: 3, grace: 1, lastConfirmedDate: '2026-07-12' }
+        'じろう (小学生コース)': { streak: 3, grace: 1, lastConfirmedDate: '2026-07-12' }
       }
     }), 'utf-8');
 
     const result = await loadStreakData();
 
     assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 3, '1.1データも満タンチャージ対象なこと');
+    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, '1.1データも満タンチャージ対象なこと');
   });
 
   it('1.2データの読み込み時も全ユーザーのおたすけを3にする(v1.3再チャージ)', async () => {
@@ -369,14 +369,14 @@ describe('loadStreakData / saveStreakData', () => {
     await fs.writeFile(STREAK_FILE, JSON.stringify({
       version: '1.2',
       users: {
-        '祥吾 (小学生コース)': { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
+        'じろう (小学生コース)': { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
       }
     }), 'utf-8');
 
     const result = await loadStreakData();
 
     assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 3, '1.2データも満タンチャージ対象なこと');
+    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, '1.2データも満タンチャージ対象なこと');
   });
 
   it('1.3データの読み込みではおたすけ0でも変化しない(消費済みは再付与しない)', async () => {
@@ -384,14 +384,14 @@ describe('loadStreakData / saveStreakData', () => {
     await fs.writeFile(STREAK_FILE, JSON.stringify({
       version: '1.3',
       users: {
-        '祥吾 (小学生コース)': { streak: 3, grace: 0, bonus: 0, lastConfirmedDate: '2026-07-12' }
+        'じろう (小学生コース)': { streak: 3, grace: 0, bonus: 0, lastConfirmedDate: '2026-07-12' }
       }
     }), 'utf-8');
 
     const result = await loadStreakData();
 
     assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['祥吾 (小学生コース)'].grace, 0, '1.3データは移行対象外なこと');
+    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 0, '1.3データは移行対象外なこと');
   });
 
   it('不正なJSONの場合はエラーを返す', async () => {
@@ -416,38 +416,38 @@ describe('loadStreakData / saveStreakData', () => {
 
 describe('updateStreaks', () => {
   const studiedUser = {
-    userName: '光志郎 (中学生コース)',
+    userName: 'たろう (中学生コース)',
     studyTime: { hours: 0, minutes: 45 },
     missions: [{ name: '数学', score: 80, completed: true }]
   };
   const notStudiedUser = {
-    userName: '祥吾 (小学生コース)',
+    userName: 'じろう (小学生コース)',
     studyTime: { hours: 0, minutes: 0 },
     missions: []
   };
 
   it('複数ユーザーをそれぞれ独立に判定する', () => {
     const { streakUsers, results } = updateStreaks({}, [studiedUser, notStudiedUser], '2026-07-12');
-    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].streak, 1);
-    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 0);
+    assert.strictEqual(streakUsers['たろう (中学生コース)'].streak, 1);
+    assert.strictEqual(streakUsers['じろう (小学生コース)'].streak, 0);
     assert.strictEqual(results.length, 2);
   });
 
   it('既存の状態から更新される', () => {
     const initial = {
-      '光志郎 (中学生コース)': { streak: 9, grace: 0, lastConfirmedDate: '2026-07-11' }
+      'たろう (中学生コース)': { streak: 9, grace: 0, lastConfirmedDate: '2026-07-11' }
     };
     const { streakUsers, results } = updateStreaks(initial, [studiedUser], '2026-07-12');
-    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].streak, 10);
+    assert.strictEqual(streakUsers['たろう (中学生コース)'].streak, 10);
     assert.strictEqual(results[0].event, 'milestone');
   });
 
   it('入力のマップを変更しない(純粋関数)', () => {
     const initial = {
-      '光志郎 (中学生コース)': { streak: 5, grace: 0, lastConfirmedDate: '2026-07-11' }
+      'たろう (中学生コース)': { streak: 5, grace: 0, lastConfirmedDate: '2026-07-11' }
     };
     updateStreaks(initial, [studiedUser], '2026-07-12');
-    assert.strictEqual(initial['光志郎 (中学生コース)'].streak, 5);
+    assert.strictEqual(initial['たろう (中学生コース)'].streak, 5);
   });
 
   it('クロール対象にいないユーザーの状態は変更されない', () => {
@@ -463,32 +463,32 @@ describe('updateStreaks', () => {
 
   it('dataReliable:false かつ未学習の場合は確定をスキップし状態を維持する(誤リセット防止)', () => {
     const initial = {
-      '光志郎 (中学生コース)': { streak: 5, grace: 1, lastConfirmedDate: '2026-07-11' }
+      'たろう (中学生コース)': { streak: 5, grace: 1, lastConfirmedDate: '2026-07-11' }
     };
     const unreliableNotStudiedUser = {
-      userName: '光志郎 (中学生コース)',
+      userName: 'たろう (中学生コース)',
       studyTime: { hours: 0, minutes: 0 },
       missions: [],
       dataReliable: false
     };
     const { streakUsers, results } = updateStreaks(initial, [unreliableNotStudiedUser], '2026-07-12');
 
-    assert.deepStrictEqual(streakUsers['光志郎 (中学生コース)'], initial['光志郎 (中学生コース)']);
+    assert.deepStrictEqual(streakUsers['たろう (中学生コース)'], initial['たろう (中学生コース)']);
     assert.strictEqual(results[0].event, 'none');
-    assert.deepStrictEqual(results[0].state, initial['光志郎 (中学生コース)']);
+    assert.deepStrictEqual(results[0].state, initial['たろう (中学生コース)']);
   });
 
   it('dataReliable:false でも学習実績があれば通常通り確定する(正の証跡は信頼する)', () => {
     const unreliableStudiedUser = {
-      userName: '光志郎 (中学生コース)',
+      userName: 'たろう (中学生コース)',
       studyTime: { hours: 0, minutes: 30 },
       missions: [{ name: '数学', score: 80, completed: true }],
       dataReliable: false
     };
     const { streakUsers, results } = updateStreaks({}, [unreliableStudiedUser], '2026-07-12');
 
-    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].streak, 1);
-    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].lastConfirmedDate, '2026-07-12');
+    assert.strictEqual(streakUsers['たろう (中学生コース)'].streak, 1);
+    assert.strictEqual(streakUsers['たろう (中学生コース)'].lastConfirmedDate, '2026-07-12');
     assert.strictEqual(results[0].event, 'none');
   });
 
@@ -496,7 +496,7 @@ describe('updateStreaks', () => {
     const { streakUsers } = updateStreaks({}, [notStudiedUser], '2026-07-12');
 
     assert.deepStrictEqual(
-      streakUsers['祥吾 (小学生コース)'],
+      streakUsers['じろう (小学生コース)'],
       { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' },
       '新規ユーザーはおたすけ1のまま(streak 0では消費しない)日付だけ確定されること'
     );
@@ -506,17 +506,17 @@ describe('updateStreaks', () => {
     const { streakUsers } = updateStreaks({}, [studiedUser], '2026-07-12');
 
     assert.deepStrictEqual(
-      streakUsers['光志郎 (中学生コース)'],
+      streakUsers['たろう (中学生コース)'],
       { streak: 1, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
     );
   });
 
   it('minCompletedMissions オプションが判定に伝搬する(完了4個は未学習扱いでおたすけ消費)', () => {
     const initial = {
-      '祥吾 (小学生コース)': { streak: 7, grace: 1, lastConfirmedDate: '2026-07-11' }
+      'じろう (小学生コース)': { streak: 7, grace: 1, lastConfirmedDate: '2026-07-11' }
     };
     const fourMissionsUser = {
-      userName: '祥吾 (小学生コース)',
+      userName: 'じろう (小学生コース)',
       studyTime: { hours: 1, minutes: 0 },
       missionCount: 4,
       missions: []
@@ -528,44 +528,44 @@ describe('updateStreaks', () => {
       { minCompletedMissions: 5 }
     );
 
-    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 7, '+1されないこと');
-    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].grace, 0, 'おたすけが消費されること');
+    assert.strictEqual(streakUsers['じろう (小学生コース)'].streak, 7, '+1されないこと');
+    assert.strictEqual(streakUsers['じろう (小学生コース)'].grace, 0, 'おたすけが消費されること');
     assert.strictEqual(results[0].event, 'grace_used');
   });
 
   it('minCompletedMissions オプションで完了5個の日は+1される', () => {
     const fiveMissionsUser = {
-      userName: '祥吾 (小学生コース)',
+      userName: 'じろう (小学生コース)',
       studyTime: { hours: 0, minutes: 0 },
       missionCount: 5,
       missions: []
     };
     const { streakUsers } = updateStreaks({}, [fiveMissionsUser], '2026-07-12', { minCompletedMissions: 5 });
 
-    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 1);
+    assert.strictEqual(streakUsers['じろう (小学生コース)'].streak, 1);
   });
 });
 
 describe('settleBonuses', () => {
   const users = {
-    '祥吾 (小学生コース)': { streak: 12, grace: 3, bonus: 2, lastConfirmedDate: '2026-07-31' },
-    '千晴 (小学生コース)': { streak: 5, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-31' },
-    '光志郎 (中学生コース)': { streak: 20, grace: 3, lastConfirmedDate: '2026-07-31' }
+    'じろう (小学生コース)': { streak: 12, grace: 3, bonus: 2, lastConfirmedDate: '2026-07-31' },
+    'はなこ (小学生コース)': { streak: 5, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-31' },
+    'たろう (中学生コース)': { streak: 20, grace: 3, lastConfirmedDate: '2026-07-31' }
   };
 
   it('全ユーザーのボーナスを0にした新しいマップと清算リストを返す', () => {
     const { streakUsers, settlements } = settleBonuses(users);
 
-    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].bonus, 0);
-    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 12, 'ストリークは変わらないこと');
-    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].grace, 3, 'おたすけは変わらないこと');
+    assert.strictEqual(streakUsers['じろう (小学生コース)'].bonus, 0);
+    assert.strictEqual(streakUsers['じろう (小学生コース)'].streak, 12, 'ストリークは変わらないこと');
+    assert.strictEqual(streakUsers['じろう (小学生コース)'].grace, 3, 'おたすけは変わらないこと');
 
     assert.deepStrictEqual(
       settlements.map(s => [s.userName, s.bonus]).sort(),
       [
-        ['光志郎 (中学生コース)', 0],
-        ['千晴 (小学生コース)', 0],
-        ['祥吾 (小学生コース)', 2]
+        ['たろう (中学生コース)', 0],
+        ['はなこ (小学生コース)', 0],
+        ['じろう (小学生コース)', 2]
       ].sort(),
       'bonus欠損は0として清算リストに含まれること'
     );
@@ -573,7 +573,7 @@ describe('settleBonuses', () => {
 
   it('入力のマップを変更しない(純粋関数)', () => {
     settleBonuses(users);
-    assert.strictEqual(users['祥吾 (小学生コース)'].bonus, 2);
+    assert.strictEqual(users['じろう (小学生コース)'].bonus, 2);
   });
 });
 
