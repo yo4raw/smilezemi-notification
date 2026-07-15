@@ -304,7 +304,7 @@ async function loadStreakData() {
   try {
     try {
       await fs.access(STREAK_FILE);
-    } catch (error) {
+    } catch {
       // ファイルが存在しない場合(初回実行時)は空のマップを返す
       return { success: true, data: {} };
     }
