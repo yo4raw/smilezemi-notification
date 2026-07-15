@@ -78,8 +78,14 @@ scripts/                      # validate-env.js, validate-security.sh, test-dock
 ├── crawler.yml               # 日次クローリング・両コース (UTC 06:17起動→JST 20:00まで待機) + data/キャッシュ
 ├── morning-crawler.yml       # 朝通知・両コース (UTC 17:47起動→JST 7:00まで待機) + data/キャッシュ
 ├── weekly-report.yml         # 週間レポート (cron: 毎週月曜 UTC 08:00)
-└── monthly-bonus.yml         # 月次ボーナス清算 (月末候補日起動 + JST1日ガード → JST 8:00)
+├── monthly-bonus.yml         # 月次ボーナス清算 (月末候補日起動 + JST1日ガード → JST 8:00)
+├── show-streak-data.yml      # 手動: ストリークデータ現在値の表示 (読み取り専用, workflow_dispatch)
+└── adjust-streak-field.yml   # 手動: grace/streak/bonusを絶対値で変更しキャッシュ保存 (workflow_dispatch)
 ```
+
+### ストリーク値の手動変更 (運用スキル)
+
+grace(おたすけ)・streak(連続日数)・bonus は本番では actions/cache 内にのみ存在するため、手動変更は `adjust-streak-field.yml` (workflow_dispatch) で行う: キャッシュ復元 → `scripts/set-streak-field.js` で1ユーザーの1フィールドを絶対値設定 → 新run_idキーで保存 → 次回スケジュール実行で反映。検証(フィールド種別・範囲・既存ユーザーのみ)はスクリプトに集約。現在値確認は読み取り専用の `show-streak-data.yml` / `scripts/show-streak-data.js`。フィールドごとに `.claude/skills/smilezemi-set-{grace,streak,bonus}` の3スキルへ分離し、各スキルは自分のfieldのみ渡して誤操作を防ぐ。
 
 ## Tech Stack
 
