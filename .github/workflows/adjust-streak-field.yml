@@ -47,7 +47,7 @@ jobs:
 
       - name: 前回データを復元
         id: restore-data
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}
@@ -90,7 +90,7 @@ jobs:
       # 変更が成功し、かつ dry_run でない場合のみ新しいキャッシュとして保存する
       - name: 変更後データを保存
         if: ${{ success() && !inputs.dry_run }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}

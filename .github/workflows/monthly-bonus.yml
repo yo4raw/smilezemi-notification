@@ -74,7 +74,7 @@ jobs:
       - name: 前回データを復元
         if: steps.date-guard.outputs.run == 'true'
         id: restore-data
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}
@@ -103,7 +103,7 @@ jobs:
       # 8. データをキャッシュに保存(清算後のリセット状態を次回実行に引き継ぐ)
       - name: データをキャッシュに保存
         if: always() && steps.date-guard.outputs.run == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}

@@ -20,7 +20,7 @@ jobs:
 
       - name: 前回データを復元
         id: restore-data
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}
