@@ -1,6 +1,6 @@
 /**
  * 朝通知 - メイン実行フロー
- * 毎朝 JST 7:00 に中学生コースの前日学習実績を LINE に通知する。
+ * 毎朝 JST 7:00 に両コース(小学生・中学生)の前日学習実績を LINE に通知する。
  * 前日は確定データのため差分比較・mission_data.json への保存は行わない。
  */
 
@@ -9,7 +9,14 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getTargetDates } = require('./crawler');
 const { sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
-const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, getJuniorHighRequirement } = require('./streak');
+const {
+  loadStreakData,
+  saveStreakData,
+  updateStreaksByCourse,
+  formatStreakInfo,
+  getJuniorHighRequirement,
+  STREAK_REQUIREMENTS
+} = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -25,7 +32,7 @@ async function main() {
   const errors = [];
 
   try {
-    console.log('🚀 スマイルゼミ 朝通知(中学生コース・前日分) 開始');
+    console.log('🚀 スマイルゼミ 朝通知(両コース・前日分) 開始');
 
     // 1. 環境変数の読み込みとバリデーション
     console.log('📋 設定を読み込んでいます...');
@@ -72,11 +79,11 @@ async function main() {
     context = loginResult.context;
     console.log('✅ ログインが完了しました');
 
-    // 4. 中学生コースの前日分データを取得
+    // 4. 両コースの前日分データを取得
     const targetDates = getTargetDates(-1);
-    console.log(`🔍 前日(${targetDates.withPadding})の中学生コースデータを取得しています...`);
+    console.log(`🔍 前日(${targetDates.withPadding})の両コースデータを取得しています...`);
     const crawlResult = await getAllUsersDetailedData(page, {
-      courseFilter: 'juniorHigh',
+      courseFilter: null,
       dateOffset: -1
     });
 
@@ -113,7 +120,7 @@ async function main() {
 
     // 対象ユーザーがいない場合は通知せず正常終了
     if (crawlResult.data.length === 0) {
-      console.log('ℹ️ 中学生コースの対象ユーザーがいないため、通知をスキップして終了します');
+      console.log('ℹ️ 対象ユーザーがいないため、通知をスキップして終了します');
       return { success: true, exitCode: 0 };
     }
 
@@ -137,13 +144,11 @@ async function main() {
       previousStreakUsers = {};
     }
 
-    // 中学生コースは講座を規定数終えた日だけカウントする(判定対象日の曜日で平日/土日のしきい値が変わる)
-    const requiredCourses = getJuniorHighRequirement(targetDates.dateString);
-    const { streakUsers, results } = updateStreaks(
+    // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生は前日曜日で3or5)
+    const { streakUsers, results } = updateStreaksByCourse(
       previousStreakUsers,
       crawlResult.data,
-      targetDates.dateString,
-      { minCompletedMissions: requiredCourses }
+      targetDates.dateString
     );
 
     streaks = {};
@@ -169,7 +174,10 @@ async function main() {
       dateLabel: `昨日(${targetDates.withPadding})`,
       showNoStudyWarning: true,
       streaks,
-      missionWarningThreshold: requiredCourses
+      missionWarningThresholds: {
+        elementary: STREAK_REQUIREMENTS.elementaryMissions,
+        juniorHigh: getJuniorHighRequirement(targetDates.dateString)
+      }
     });
     message = truncateToLimit(message);
 

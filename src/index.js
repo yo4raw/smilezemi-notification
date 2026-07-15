@@ -9,12 +9,9 @@ const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
 const { sendNotification, sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
-const { loadStreakData, saveStreakData, updateStreaks, formatStreakInfo, isStudied, createInitialState, STREAK_REQUIREMENTS } = require('./streak');
+const { loadStreakData, formatStreakInfo, isStudied, createInitialState, getRequirementForCourse } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
-
-// 小学生コースのストリークに必要な完了ミッション数(この数未満の日はカウントしない)
-const REQUIRED_MISSIONS_FOR_STREAK = STREAK_REQUIREMENTS.elementaryMissions;
 
 /**
  * メイン実行関数
@@ -121,9 +118,10 @@ async function main() {
 
     // 6. クローリング（詳細データ取得 - v2.0）
     // Requirements: 1.1, 2.1, 3.1, 4.1, 5.1
-    // 中学生コースは朝通知(src/morning-index.js)で前日分を通知するため、ここでは小学生コースのみ対象
+    // 両コース(小学生・中学生)の当日分を速報として取得する。
+    // ストリーク確定は翌朝の朝通知が前日分で行うため、ここでは確定しない。
     console.log('🔍 詳細データを取得しています...');
-    const crawlResult = await getAllUsersDetailedData(page, { courseFilter: 'elementary' });
+    const crawlResult = await getAllUsersDetailedData(page, { courseFilter: null });
 
     if (!crawlResult.success) {
       console.error('❌ クローリングに失敗しました:', crawlResult.error);
@@ -216,9 +214,9 @@ async function main() {
     const currentData = crawlResult.data;
     console.log(`✅ 詳細データの取得が完了しました（${currentData.length}件）`);
 
-    // 対象ユーザーが0件(全員中学生コース等)の場合は通知せず正常終了
+    // 対象ユーザーが0件の場合は通知せず正常終了
     if (currentData.length === 0) {
-      console.log('ℹ️ 小学生コースの対象ユーザーがいないため、通知をスキップして終了します');
+      console.log('ℹ️ 対象ユーザーがいないため、通知をスキップして終了します');
       return { success: true, exitCode: 0 };
     }
 
@@ -230,72 +228,31 @@ async function main() {
       console.warn('⚠️ 詳細情報の一部が取得できませんでした');
     }
 
-    // 6.5 ストリーク(連続学習日数)の更新
-    // 20時時点の当日データでは確定できないため、前日分を追加クロールして確定判定する。
-    // 当日分は「確定ストリーク+当日学習済みなら暫定+1」として表示に使う。
+    // 6.5 ストリーク(連続学習日数)の表示
+    // 夜通知は速報のため確定・保存はしない(確定は翌朝の朝通知が前日分で行う)。
+    // streak_data.json の確定値を読み、当日すでにしきい値達成なら暫定+1して表示する。
     let streaks = null;
-    console.log('🔥 ストリークを更新しています...');
+    console.log('🔥 ストリーク情報を読み込んでいます...');
     const streakLoadResult = await loadStreakData();
 
     let streakUsers;
     if (streakLoadResult.success) {
       streakUsers = streakLoadResult.data;
     } else {
-      // 読み込み失敗はエラーとして記録しつつ、空状態で続行して次回保存時に自己修復させる
-      // (システム側の問題で子供にペナルティを与えず、通知処理も止め続けないため)
+      // 読み込み失敗はエラー記録しつつ空状態で表示を続行する(確定は朝が担うため保存はしない)
       console.error('❌ ストリークデータの読み込みに失敗しました:', streakLoadResult.error);
       errors.push(streakLoadResult.error);
-      console.warn('⚠️ ストリークデータを初期化して続行します');
+      console.warn('⚠️ ストリークデータを初期化して表示します');
       streakUsers = {};
     }
 
-    const resultMap = new Map();
-
-    const yesterdayDates = getTargetDates(-1);
-    console.log(`🔍 ストリーク確定のため前日(${yesterdayDates.withPadding})のデータを取得しています...`);
-    const yesterdayCrawlResult = await getAllUsersDetailedData(page, {
-      courseFilter: 'elementary',
-      dateOffset: -1
-    });
-
-    if (yesterdayCrawlResult.success) {
-      const updateResult = updateStreaks(
-        streakUsers,
-        yesterdayCrawlResult.data,
-        yesterdayDates.dateString,
-        { minCompletedMissions: REQUIRED_MISSIONS_FOR_STREAK }
-      );
-      streakUsers = updateResult.streakUsers;
-      updateResult.results.forEach(result => resultMap.set(result.userName, result));
-
-      // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
-      if (process.env.DRY_RUN === 'true') {
-        console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
-      } else {
-        const streakSaveResult = await saveStreakData(streakUsers);
-        if (streakSaveResult.success) {
-          console.log('✅ ストリークデータの保存が完了しました');
-        } else {
-          console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
-          errors.push(streakSaveResult.error);
-        }
-      }
-    } else {
-      // 前日分が取れない場合は確定判定をスキップし、前回の確定値をそのまま表示する
-      // (未判定日は翌日以降に空白日として中立処理される)
-      console.warn('⚠️ 前日分の取得に失敗したため、ストリークの確定判定をスキップします:', yesterdayCrawlResult.error);
-    }
-
-    // 通知用の表示情報を構築(当日すでに5個完了していれば暫定で+1表示)
+    const todayDateString = getTargetDates(0).dateString;
     streaks = {};
     currentData.forEach(user => {
-      const result = resultMap.get(user.userName) || {
-        state: streakUsers[user.userName] || createInitialState(),
-        event: 'none'
-      };
-      streaks[user.userName] = formatStreakInfo(result, {
-        todayStudied: isStudied(user, { minCompletedMissions: REQUIRED_MISSIONS_FOR_STREAK })
-      });
+      const state = streakUsers[user.userName] || createInitialState();
+      const threshold = getRequirementForCourse(user.course, todayDateString);
+      const todayStudied = isStudied(user, { minCompletedMissions: threshold });
+      streaks[user.userName] = formatStreakInfo({ state, event: 'none' }, { todayStudied });
     });
 
     // 7. データ比較（変更検出）
@@ -318,10 +275,13 @@ async function main() {
     // Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     console.log('📤 LINE通知を送信しています...');
 
-    // 詳細メッセージをフォーマット（ミッション変化情報・5個未満警告を含む）
+    // 詳細メッセージをフォーマット（ミッション変化情報・コース別しきい値未達警告を含む）
     let message = formatDetailedMessage(currentData, missionChangesResult, {
       streaks,
-      missionWarningThreshold: REQUIRED_MISSIONS_FOR_STREAK
+      missionWarningThresholds: {
+        elementary: getRequirementForCourse('elementary', todayDateString),
+        juniorHigh: getRequirementForCourse('juniorHigh', todayDateString)
+      }
     });
 
     // 文字数制限を適用

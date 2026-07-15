@@ -528,6 +528,60 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.match(message, /⚠️ 講座完了 1\/4個/, '閾値警告が表示されること');
       assert.doesNotMatch(message, /昨日は学習していません/, '未学習警告は表示されないこと');
     });
+
+    it('missionWarningThresholds: courseフィールドで小学生に elementary 閾値を適用', () => {
+      const user = {
+        userName: '祥吾', course: 'elementary', missionCount: 3,
+        date: '2026-07-13', studyTime: { hours: 1, minutes: 0 }, totalScore: 240,
+        missions: [{ name: '算数', score: 80, completed: true }]
+      };
+      const message = notifier.formatDetailedMessage([user], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
+      });
+      assert.match(message, /⚠️ ミッション完了 3\/4個/, '小学生は elementary(4) 閾値・ミッション表記');
+    });
+
+    it('missionWarningThresholds: courseフィールドで中学生に juniorHigh 閾値を適用', () => {
+      const user = {
+        userName: '光志郎', course: 'juniorHigh', missionCount: 2,
+        date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
+        missions: [{ name: '数学: 図形', score: 66, completed: true }]
+      };
+      const message = notifier.formatDetailedMessage([user], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
+      });
+      assert.match(message, /⚠️ 講座完了 2\/3個/, '中学生は juniorHigh(3) 閾値・講座表記');
+    });
+
+    it('missionWarningThresholds: 混在データを1メッセージでコース別に警告する', () => {
+      const elem = {
+        userName: '祥吾', course: 'elementary', missionCount: 3,
+        date: '2026-07-13', studyTime: { hours: 1, minutes: 0 }, totalScore: 240,
+        missions: [{ name: '算数', score: 80, completed: true }]
+      };
+      const jh = {
+        userName: '光志郎', course: 'juniorHigh', missionCount: 2,
+        date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
+        missions: [{ name: '数学: 図形', score: 66, completed: true }]
+      };
+      const message = notifier.formatDetailedMessage([elem, jh], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
+      });
+      assert.match(message, /ミッション完了 3\/4個/, '小学生の警告');
+      assert.match(message, /講座完了 2\/3個/, '中学生の警告');
+    });
+
+    it('missionWarningThresholds は course 未設定時に名前サフィックスで判定する', () => {
+      const jh = {
+        userName: '光志郎 (中学生コース)', missionCount: 2,
+        date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
+        missions: [{ name: '数学: 図形', score: 66, completed: true }]
+      };
+      const message = notifier.formatDetailedMessage([jh], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
+      });
+      assert.match(message, /⚠️ 講座完了 2\/3個/, 'サフィックスで中学生と判定');
+    });
   });
 
   describe('formatDetailedMessage - 朝通知オプション', () => {

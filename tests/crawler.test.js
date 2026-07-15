@@ -500,6 +500,26 @@ describe('クローラーモジュール (src/crawler.js)', () => {
     });
   });
 
+  describe('isJuniorHighSchool (course 導出の根拠)', () => {
+    it('コース名が中学生コースなら true', () => {
+      assert.strictEqual(crawler.isJuniorHighSchool('中学生コース', null), true);
+    });
+
+    it('コース名が小学生コースなら false', () => {
+      assert.strictEqual(crawler.isJuniorHighSchool('小学生コース', null), false);
+    });
+
+    it('コース名未指定でも URL が /study/c/ なら true', () => {
+      const fakePage = { url: () => 'https://smile-zemi.jp/mimamoru-net/ui/study/c/timeline' };
+      assert.strictEqual(crawler.isJuniorHighSchool(null, fakePage), true);
+    });
+
+    it('コース名未指定で URL が /study/s/ なら false', () => {
+      const fakePage = { url: () => 'https://smile-zemi.jp/mimamoru-net/ui/study/s/timeline' };
+      assert.strictEqual(crawler.isJuniorHighSchool(null, fakePage), false);
+    });
+  });
+
   describe('shouldProcessSingleCourseUser', () => {
     const juniorUrl = 'https://smile-zemi.jp/mimamoru-net/ui/study/c/timeline';
     const elementaryUrl = 'https://smile-zemi.jp/mimamoru-net/ui/study/s/timeline';

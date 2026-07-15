@@ -223,6 +223,46 @@ function updateStreaks(streakUsers, users, dateString, options = {}) {
 }
 
 /**
+ * コースのしきい値(ストリーク成立に必要な完了数)を返す(純粋関数)
+ * @param {'elementary'|'juniorHigh'|undefined} course
+ * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
+ * @returns {number}
+ */
+function getRequirementForCourse(course, dateString) {
+  return course === 'juniorHigh'
+    ? getJuniorHighRequirement(dateString)
+    : STREAK_REQUIREMENTS.elementaryMissions;
+}
+
+/**
+ * コース別にしきい値を切り替えて確定判定を適用する(純粋関数、入力は変更しない)
+ * user.course で elementary / juniorHigh に分割し、それぞれのしきい値で updateStreaks を連鎖適用する
+ *
+ * @param {object} streakUsers - userName → state のマップ
+ * @param {Array} users - 判定対象日のクロール済みユーザーデータ(course フィールド付き)
+ * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
+ * @returns {{streakUsers: object, results: Array<{userName: string, state: object, event: string}>}}
+ */
+function updateStreaksByCourse(streakUsers, users, dateString) {
+  let current = streakUsers;
+  const results = [];
+
+  for (const course of ['elementary', 'juniorHigh']) {
+    const courseUsers = users.filter(user => (user.course || 'elementary') === course);
+    if (courseUsers.length === 0) continue;
+
+    const threshold = getRequirementForCourse(course, dateString);
+    const updateResult = updateStreaks(current, courseUsers, dateString, {
+      minCompletedMissions: threshold
+    });
+    current = updateResult.streakUsers;
+    results.push(...updateResult.results);
+  }
+
+  return { streakUsers: current, results };
+}
+
+/**
  * 通知メッセージ用のストリーク表示行を生成
  *
  * @param {{state: object, event: string}} result - updateStreaks の results 要素
@@ -338,7 +378,9 @@ module.exports = {
   confirmDay,
   STREAK_REQUIREMENTS,
   getJuniorHighRequirement,
+  getRequirementForCourse,
   updateStreaks,
+  updateStreaksByCourse,
   formatStreakInfo,
   settleBonuses,
   loadStreakData,
