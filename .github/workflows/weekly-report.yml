@@ -19,7 +19,7 @@ jobs:
     steps:
       # 1. リポジトリのチェックアウト
       - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # 2. .envファイルを作成
       - name: .envファイルを作成
