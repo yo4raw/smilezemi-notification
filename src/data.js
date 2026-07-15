@@ -54,7 +54,7 @@ async function loadPreviousData() {
     // ファイルが存在するか確認
     try {
       await fs.access(DATA_FILE);
-    } catch (error) {
+    } catch {
       // ファイルが存在しない場合（初回実行時）は空配列を返す
       return {
         success: true,

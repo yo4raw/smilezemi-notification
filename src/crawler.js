@@ -129,7 +129,7 @@ async function getCurrentUserName(page) {
 
     throw new Error('右上のユーザー名が見つかりません');
   } catch (error) {
-    throw new Error(`現在のユーザー名取得エラー: ${error.message}`);
+    throw new Error(`現在のユーザー名取得エラー: ${error.message}`, { cause: error });
   }
 }
 
@@ -168,7 +168,7 @@ async function checkCourseSelection(page) {
       hasJuniorHighSchool: juniorHighSchoolVisible,
       hasElementarySchool: elementarySchoolVisible
     };
-  } catch (error) {
+  } catch {
     return {
       hasCourseSelection: false,
       hasJuniorHighSchool: false,
@@ -375,8 +375,7 @@ async function switchToUser(page, userName) {
 
           // 右上のユーザー名エリア以外の要素を選択
           // （右上は画面の右半分 x >= width * 0.5 かつ上部 y <= height * 0.2）
-          const viewport = page.viewportSize();
-          if (!(box.x >= viewport.width * 0.5 && box.y <= viewport.height * 0.2)) {
+          if (!(box.x >= rightHalfX && box.y <= topAreaY)) {
             targetElement = allUserElements[i];
             console.log(`  ✅ サイドバー内にユーザー名 "${maskName(userName)}" を発見 [${i}]`);
             break;
@@ -900,6 +899,49 @@ async function getTodayMissionCount(page, courseName = null, dateOffset = 0) {
 }
 
 /**
+ * 勉強時間テキストをパースする（"X時間Y分" "Y分" "X時間" 形式に対応）
+ * @private
+ * @param {string} text - パース対象のテキスト
+ * @returns {{hours: number, minutes: number}|null} パース結果（失敗時はnull）
+ */
+function parseStudyTime(text) {
+  let hours = 0;
+  let minutes = 0;
+
+  // "X時間Y分" 形式
+  const fullMatch = text.match(/(\d+)時間(\d+)分/);
+  if (fullMatch) {
+    hours = parseInt(fullMatch[1], 10);
+    minutes = parseInt(fullMatch[2], 10);
+  } else {
+    // "Y分" のみの形式
+    const minutesMatch = text.match(/(\d+)分/);
+    if (minutesMatch) {
+      minutes = parseInt(minutesMatch[1], 10);
+    } else {
+      // "X時間" のみの形式
+      const hoursMatch = text.match(/(\d+)時間/);
+      if (hoursMatch) {
+        hours = parseInt(hoursMatch[1], 10);
+      } else {
+        return null;
+      }
+    }
+  }
+
+  // 分が60以上の場合は時間に変換
+  if (minutes >= 60) {
+    hours += Math.floor(minutes / 60);
+    minutes = minutes % 60;
+  }
+
+  return {
+    hours,
+    minutes
+  };
+}
+
+/**
  * 勉強時間を取得
  * Requirements: 1.1, 1.2, 1.3, 6.1
  * @private
@@ -937,44 +979,6 @@ async function getStudyTime(page, courseName = null, dateOffset = 0) {
         minutes: 0
       };
     }
-
-    // パース用の柔軟な関数
-    const parseStudyTime = (text) => {
-      let hours = 0;
-      let minutes = 0;
-
-      // "X時間Y分" 形式
-      const fullMatch = text.match(/(\d+)時間(\d+)分/);
-      if (fullMatch) {
-        hours = parseInt(fullMatch[1], 10);
-        minutes = parseInt(fullMatch[2], 10);
-      } else {
-        // "Y分" のみの形式
-        const minutesMatch = text.match(/(\d+)分/);
-        if (minutesMatch) {
-          minutes = parseInt(minutesMatch[1], 10);
-        } else {
-          // "X時間" のみの形式
-          const hoursMatch = text.match(/(\d+)時間/);
-          if (hoursMatch) {
-            hours = parseInt(hoursMatch[1], 10);
-          } else {
-            return null;
-          }
-        }
-      }
-
-      // 分が60以上の場合は時間に変換
-      if (minutes >= 60) {
-        hours += Math.floor(minutes / 60);
-        minutes = minutes % 60;
-      }
-
-      return {
-        hours,
-        minutes
-      };
-    };
 
     // 勉強時間要素を探す（タイムアウト5秒）
     const timeElement = page.locator(studyTime.selector).first();

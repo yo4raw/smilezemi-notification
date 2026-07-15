@@ -98,6 +98,8 @@ npm test                  # 全テスト実行
 node --test --test-force-exit --experimental-test-isolation=none tests/streak.test.js
                           # 単一テストファイル実行（オプション2つは必須）
 npm run validate:all      # 全検証（env + security）
+npm run lint              # oxlintでsrc/をlint（--deny-warningsで警告もエラー扱い）
+npm run lint:fix          # oxlintで自動修正
 npm run docker:build      # Dockerイメージビルド
 npm run test:docker       # Docker環境テスト
 
