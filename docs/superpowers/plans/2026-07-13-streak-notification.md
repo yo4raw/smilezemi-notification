@@ -343,7 +343,7 @@ describe('loadStreakData / saveStreakData', () => {
 
   it('保存したデータを読み込める(ラウンドトリップ)', async () => {
     const users = {
-      '光志郎 (中学生コース)': { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' }
+      'たろう (中学生コース)': { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' }
     };
     const saveResult = await saveStreakData(users);
     assert.strictEqual(saveResult.success, true);
@@ -511,38 +511,38 @@ git commit -m "feat: ストリークデータの読み込み・保存を追加"
 ```js
 describe('updateStreaks', () => {
   const studiedUser = {
-    userName: '光志郎 (中学生コース)',
+    userName: 'たろう (中学生コース)',
     studyTime: { hours: 0, minutes: 45 },
     missions: [{ name: '数学', score: 80, completed: true }]
   };
   const notStudiedUser = {
-    userName: '祥吾 (小学生コース)',
+    userName: 'じろう (小学生コース)',
     studyTime: { hours: 0, minutes: 0 },
     missions: []
   };
 
   it('複数ユーザーをそれぞれ独立に判定する', () => {
     const { streakUsers, results } = updateStreaks({}, [studiedUser, notStudiedUser], '2026-07-12');
-    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].streak, 1);
-    assert.strictEqual(streakUsers['祥吾 (小学生コース)'].streak, 0);
+    assert.strictEqual(streakUsers['たろう (中学生コース)'].streak, 1);
+    assert.strictEqual(streakUsers['じろう (小学生コース)'].streak, 0);
     assert.strictEqual(results.length, 2);
   });
 
   it('既存の状態から更新される', () => {
     const initial = {
-      '光志郎 (中学生コース)': { streak: 9, grace: 0, lastConfirmedDate: '2026-07-11' }
+      'たろう (中学生コース)': { streak: 9, grace: 0, lastConfirmedDate: '2026-07-11' }
     };
     const { streakUsers, results } = updateStreaks(initial, [studiedUser], '2026-07-12');
-    assert.strictEqual(streakUsers['光志郎 (中学生コース)'].streak, 10);
+    assert.strictEqual(streakUsers['たろう (中学生コース)'].streak, 10);
     assert.strictEqual(results[0].event, 'milestone');
   });
 
   it('入力のマップを変更しない(純粋関数)', () => {
     const initial = {
-      '光志郎 (中学生コース)': { streak: 5, grace: 0, lastConfirmedDate: '2026-07-11' }
+      'たろう (中学生コース)': { streak: 5, grace: 0, lastConfirmedDate: '2026-07-11' }
     };
     updateStreaks(initial, [studiedUser], '2026-07-12');
-    assert.strictEqual(initial['光志郎 (中学生コース)'].streak, 5);
+    assert.strictEqual(initial['たろう (中学生コース)'].streak, 5);
   });
 
   it('クロール対象にいないユーザーの状態は変更されない', () => {
@@ -714,7 +714,7 @@ git commit -m "feat: ストリーク一括更新と通知用表示生成を追�
     const { formatDetailedMessage } = require('../src/notifier');
 
     const userData = [{
-      userName: '光志郎 (中学生コース)',
+      userName: 'たろう (中学生コース)',
       missionCount: 1,
       date: '2026-07-12',
       studyTime: { hours: 0, minutes: 45 },
@@ -723,16 +723,16 @@ git commit -m "feat: ストリーク一括更新と通知用表示生成を追�
     }];
 
     it('streaks オプションでユーザー名の直後にストリーク行が入る', () => {
-      const streaks = { '光志郎 (中学生コース)': '🔥 連続学習: 12日目  🛟 おたすけ: 1/3' };
+      const streaks = { 'たろう (中学生コース)': '🔥 連続学習: 12日目  🛟 おたすけ: 1/3' };
       const message = formatDetailedMessage(userData, null, { streaks });
       const lines = message.split('\n');
-      const nameIndex = lines.findIndex(line => line.startsWith('👤 光志郎'));
+      const nameIndex = lines.findIndex(line => line.startsWith('👤 たろう'));
       assert.strictEqual(lines[nameIndex + 1], '🔥 連続学習: 12日目  🛟 おたすけ: 1/3');
     });
 
     it('複数行のストリーク情報(イベント行付き)も表示される', () => {
       const streaks = {
-        '光志郎 (中学生コース)': '🔥 連続学習: 10日目  🛟 おたすけ: 1/3\n🎉 10日連続達成!おたすけ+1(残り1)'
+        'たろう (中学生コース)': '🔥 連続学習: 10日目  🛟 おたすけ: 1/3\n🎉 10日連続達成!おたすけ+1(残り1)'
       };
       const message = formatDetailedMessage(userData, null, { streaks });
       assert.ok(message.includes('🎉 10日連続達成!おたすけ+1(残り1)'));
@@ -747,7 +747,7 @@ git commit -m "feat: ストリーク一括更新と通知用表示生成を追�
     it('streaks オプション省略時は従来フォーマットのまま', () => {
       const message = formatDetailedMessage(userData, null, {});
       assert.ok(!message.includes('連続学習'));
-      assert.ok(message.includes('👤 光志郎 (中学生コース)'));
+      assert.ok(message.includes('👤 たろう (中学生コース)'));
     });
   });
 ```
