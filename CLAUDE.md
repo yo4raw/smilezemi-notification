@@ -120,6 +120,14 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 `SMILEZEMI_USERNAME`, `SMILEZEMI_PASSWORD`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_USER_ID`
 (GitHub Secretsまたは`.env`ファイルで管理。本番はdocker composeのenv_file経由)
 
+### LINE通知の2チャンネル構成
+
+送信先はLINEグループで、グループへのpushは**メッセージ数×グループ人数**でカウントされる（4人グループ=1通知4カウント）。朝夜通知を1チャンネルに集約すると無料枠(月200)を構造的に超過するため、チャンネルを分離している（詳細: `docs/superpowers/specs/2026-07-26-line-quota-two-channels-design.md`）:
+
+- **朝通知**: 専用チャンネル「Smilebot2」。GitHub Secrets `LINE_CHANNEL_ACCESS_TOKEN_MORNING` を `morning-crawler.yml` がコンテナ内の `LINE_CHANNEL_ACCESS_TOKEN` に注入する（アプリコードは1変数のみ参照）
+- **夜通知・週間レポート・月次ボーナス**: 既存チャンネル。Secrets `LINE_CHANNEL_ACCESS_TOKEN`
+- 両チャンネルは同一プロバイダー配下（userId/groupIdが共通になるため必須）。`LINE_USER_ID` は共通
+
 ## Key Design Decisions
 
 - **Playwright over Puppeteer**: GitHub Actions環境との互換性、安定したセレクタAPI
