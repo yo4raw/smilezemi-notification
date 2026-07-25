@@ -71,8 +71,9 @@ async function sendPushMessage(message, accessToken, userId, options = {}) {
         return result;
       }
 
-      // 認証エラー（401）の場合はリトライしない
-      if (result.error && result.error.includes('401')) {
+      // リトライで解決しないエラーは即失敗にする:
+      // 401=トークン無効、429=月間送信数上限またはレート制限
+      if (result.error && (result.error.includes('401') || result.error.includes('429'))) {
         return result;
       }
 
@@ -133,18 +134,32 @@ async function attemptSendNotification(requestBody, accessToken, timeoutMs = 100
 
     // レスポンスステータスを確認
     if (!response.ok) {
+      // LINE APIはエラー理由をボディで返す（例: "You have reached your monthly limit."）。
+      // 原因調査に必須のためエラーメッセージに含める。取得失敗時はstatusのみで続行
+      let detail = '';
+      try {
+        if (typeof response.text === 'function') {
+          const body = (await response.text()).trim();
+          if (body) {
+            detail = ` - ${maskTokenInError(body, accessToken)}`;
+          }
+        }
+      } catch {
+        // ボディ取得失敗は無視（statusだけでも報告する）
+      }
+
       // 認証エラー（401）
       if (response.status === 401) {
         return {
           success: false,
-          error: '認証エラー: アクセストークンが無効です (401 Unauthorized)'
+          error: `認証エラー: アクセストークンが無効です (401 Unauthorized)${detail}`
         };
       }
 
       // その他のAPIエラー
       return {
         success: false,
-        error: `LINE API エラー: ${response.status} ${response.statusText}`
+        error: `LINE API エラー: ${response.status} ${response.statusText}${detail}`
       };
     }
 

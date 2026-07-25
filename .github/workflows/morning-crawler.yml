@@ -51,11 +51,15 @@ jobs:
           echo "キャッシュエントリなし(初回実行またはエビクション後)のため、初期状態で続行します"
 
       # 2. .envファイルを作成
+      # 朝通知は専用チャンネル(LINE_CHANNEL_ACCESS_TOKEN_MORNING)から送信する。
+      # グループへのpushは人数分カウントされ、朝夜を1チャンネルに集約すると
+      # 無料枠(月200)を超過するため、朝通知だけ別チャンネルに分離している。
+      # 詳細: docs/superpowers/specs/2026-07-26-line-quota-two-channels-design.md
       - name: .envファイルを作成
         run: |
           echo "SMILEZEMI_USERNAME=${{ secrets.SMILEZEMI_USERNAME }}" >> .env
           echo "SMILEZEMI_PASSWORD=${{ secrets.SMILEZEMI_PASSWORD }}" >> .env
-          echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" >> .env
+          echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN_MORNING }}" >> .env
           echo "LINE_USER_ID=${{ secrets.LINE_USER_ID }}" >> .env
 
       # 3. 環境変数の検証
@@ -70,8 +74,8 @@ jobs:
             echo "❌ SMILEZEMI_PASSWORD が設定されていません"
             exit 1
           fi
-          if [ -z "${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" ]; then
-            echo "❌ LINE_CHANNEL_ACCESS_TOKEN が設定されていません"
+          if [ -z "${{ secrets.LINE_CHANNEL_ACCESS_TOKEN_MORNING }}" ]; then
+            echo "❌ LINE_CHANNEL_ACCESS_TOKEN_MORNING が設定されていません"
             exit 1
           fi
           if [ -z "${{ secrets.LINE_USER_ID }}" ]; then
@@ -134,7 +138,7 @@ jobs:
         env:
           WORKFLOW_NAME: ${{ github.workflow }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN_MORNING }}
           LINE_USER: ${{ secrets.LINE_USER_ID }}
         run: |
           message=$(printf '⚠️ GitHub Actions ワークフローが失敗しました\n\nワークフロー: %s\n実行ログ: %s' "$WORKFLOW_NAME" "$RUN_URL")

@@ -282,6 +282,48 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.strictEqual(mockFetch.mock.calls.length, 1, 'リトライされないこと');
     });
 
+    it('異常系: 429(月間上限超過)はリトライせず即失敗する', async () => {
+      global.fetch = mockFetch = mock.fn(async () => ({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        text: async () => '{"message":"You have reached your monthly limit."}'
+      }));
+
+      const result = await notifier.sendPushMessage('テスト', 'test_token', 'test_user', { retryDelay: 1 });
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /429/);
+      assert.strictEqual(mockFetch.mock.calls.length, 1, '上限超過はリトライしても解決しないためリトライされないこと');
+    });
+
+    it('異常系: エラー時はレスポンスボディの内容がエラーメッセージに含まれる', async () => {
+      global.fetch = mockFetch = mock.fn(async () => ({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        text: async () => '{"message":"You have reached your monthly limit."}'
+      }));
+
+      const result = await notifier.sendPushMessage('テスト', 'test_token', 'test_user', { retryDelay: 1 });
+
+      assert.match(result.error, /monthly limit/, '原因調査のためAPIが返す理由が記録されること');
+    });
+
+    it('異常系: レスポンスボディが読めなくてもエラー処理が壊れない', async () => {
+      // text()を持たないレスポンス(ボディ取得不可)でも従来どおりstatusは報告される
+      global.fetch = mockFetch = mock.fn(async () => ({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests'
+      }));
+
+      const result = await notifier.sendPushMessage('テスト', 'test_token', 'test_user', { retryDelay: 1 });
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /429/);
+    });
+
     it('異常系: 5xxはリトライして成功できる', async () => {
       let callCount = 0;
       global.fetch = mockFetch = mock.fn(async () => {
