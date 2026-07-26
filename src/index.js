@@ -248,12 +248,53 @@ async function main() {
 
     const todayDateString = getTargetDates(0).dateString;
     streaks = {};
+    let hasUnqualifiedUser = false;
     currentData.forEach(user => {
       const state = streakUsers[user.userName] || createInitialState();
       const threshold = getRequirementForCourse(user.course, todayDateString);
       const todayStudied = isStudied(user, { minCompletedMissions: threshold });
+      if (!todayStudied) {
+        hasUnqualifiedUser = true;
+      }
       streaks[user.userName] = formatStreakInfo({ state, event: 'none' }, { todayStudied });
     });
+
+    // 6.6 送信要否の判定
+    // 夜通知は速報のため、全員が当日のストリーク要件を達成済みの日は送信しない。
+    // 送信先グループへのpushは人数分カウントされ無料枠(月200)が逼迫しているため、
+    // 「このままだと記録更新できないユーザーがいる」= 夜のうちに促す価値がある日だけ通知する。
+    // 確定通知は翌朝の朝通知が毎日必ず送る。
+    // 詳細: docs/superpowers/specs/2026-07-26-line-quota-reduction-design.md
+    if (!hasUnqualifiedUser) {
+      console.log('ℹ️ 全ユーザーが本日のストリーク要件を達成済みのため、夜通知をスキップします(送信数節約)');
+
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: データ保存はスキップしました');
+        console.log('🎉 処理が正常に完了しました');
+        return {
+          success: errors.length === 0,
+          exitCode: errors.length === 0 ? 0 : 1,
+          errors: errors.length > 0 ? errors : undefined
+        };
+      }
+
+      // 通知しない日もデータは保存し、翌日の差分比較の基準を保つ
+      console.log('💾 データを保存しています...');
+      const saveResult = await saveData(currentData);
+      if (saveResult.success) {
+        console.log('✅ データの保存が完了しました');
+      } else {
+        console.error('❌ データの保存に失敗しました:', saveResult.error);
+        errors.push(saveResult.error);
+      }
+
+      console.log('🎉 処理が正常に完了しました');
+      return {
+        success: errors.length === 0,
+        exitCode: errors.length === 0 ? 0 : 1,
+        errors: errors.length > 0 ? errors : undefined
+      };
+    }
 
     // 7. データ比較（変更検出）
     console.log('🔄 データを比較しています...');
