@@ -503,7 +503,7 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.doesNotMatch(message, /ミッション完了 \d+\/\d+個/, '警告行が含まれないこと');
     });
 
-    it('閾値未指定なら警告行は表示されない(朝通知・週間レポート互換)', () => {
+    it('閾値未指定なら警告行は表示されない', () => {
       const message = notifier.formatDetailedMessage([baseUser], null, {});
 
       assert.doesNotMatch(message, /ミッション完了 \d+\/\d+個/, '警告行が含まれないこと');

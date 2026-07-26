@@ -17,18 +17,18 @@ GitHub Actions (cron) → actions/cacheでdata/復元 → Docker → Playwright 
   → data/をactions/cacheに保存(次回実行に引き継ぎ)
 ```
 
-### Four Entry Points
+### Three Entry Points
 
 1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。両コース(小学生・中学生)の当日分を速報通知。ストリークは確定値＋当日暫定+1を表示するのみで確定・保存しない。**送信数節約のため、当日のストリーク要件未達のユーザーが1人でもいる日だけ送信**（全員達成日はデータ保存のみ）
 2. **朝通知** (`src/morning-index.js`): 毎日 JST 7:00 に実行。両コース(小学生・中学生)の前日確定分を通知。前日は確定データのためストリークを確定する(唯一の確定点)
-3. **週間レポート** (`src/weekly-report-index.js`): 毎週月曜 JST 17:00 に実行。週間学習ガイダンスレポートを取得しLINE通知
-4. **月次ボーナス清算** (`src/monthly-bonus-index.js`): 毎月1日 JST 8:00 に実行。前月分のボーナスポイントを子供ごとに通知して0にリセット。クロール不要のためブラウザを起動しない
+3. **月次ボーナス清算** (`src/monthly-bonus-index.js`): 毎月1日 JST 8:00 に実行。前月分のボーナスポイントを子供ごとに通知して0にリセット。クロール不要のためブラウザを起動しない
+
+※ 週間レポート通知は LINE 送信数削減のため 2026-07 に廃止（コードごと削除。必要なら git 履歴から復元）
 
 ### Workflows
 
 - `.github/workflows/crawler.yml` → `docker compose up` → `node src/index.js`
 - `.github/workflows/morning-crawler.yml` → `docker compose run --rm crawler node src/morning-index.js`
-- `.github/workflows/weekly-report.yml` → `docker compose run --rm crawler node src/weekly-report-index.js`
 - `.github/workflows/monthly-bonus.yml` → `docker compose run --rm crawler node src/monthly-bonus-index.js`（月末候補日28-31のUTC 22:47起動 + JST日付ガードで「1日」のみ実行）
 
 ### データ永続化 (actions/cache)
@@ -58,18 +58,15 @@ GitHub Actions はクリーンな checkout から始まるため、`data/` デ�
 src/
 ├── index.js                  # メインエントリ（日次通知・両コース・当日速報）
 ├── morning-index.js          # 朝通知エントリ（両コース・前日確定）
-├── weekly-report-index.js    # 週間レポートエントリ
 ├── monthly-bonus-index.js    # 月次ボーナス清算エントリ（ブラウザ非依存）
 ├── config.js                 # 環境変数管理 (loadConfig, maskSensitiveData, validateSecrets)
 ├── config/
-│   └── selectors.js          # DOMセレクタ定義（login, dashboard, missionDetails, weeklyReport等）
+│   └── selectors.js          # DOMセレクタ定義（login, dashboard, missionDetails等）
 ├── auth.js                   # 認証モジュール (login, attemptLogin)
 ├── crawler.js                # クローリング (getUserList, getAllUsersDetailedData, getTargetDates等)
 ├── data.js                   # ミッションデータ永続化 (loadPreviousData, compareData, saveData)
 ├── streak.js                 # ストリーク管理 (confirmDay, updateStreaks, formatStreakInfo, load/saveStreakData)
-├── notifier.js               # LINE通知 (sendNotification, formatDetailedMessage, truncateToLimit)
-├── weekly-report-crawler.js  # 週間レポートクローリング (getAllUsersWeeklyReport, getGuidanceReport)
-└── weekly-report-notifier.js # 週間レポート通知フォーマット (formatWeeklyReport)
+└── notifier.js               # LINE通知 (sendNotification, formatDetailedMessage, truncateToLimit)
 
 tests/                        # Node.js built-in test runner (node --test)
 scripts/                      # validate-env.js, validate-security.sh, test-docker.sh 等
@@ -77,7 +74,6 @@ scripts/                      # validate-env.js, validate-security.sh, test-dock
 .github/workflows/
 ├── crawler.yml               # 日次クローリング・両コース (UTC 06:17起動→JST 20:00まで待機) + data/キャッシュ
 ├── morning-crawler.yml       # 朝通知・両コース (UTC 17:47起動→JST 7:00まで待機) + data/キャッシュ
-├── weekly-report.yml         # 週間レポート (cron: 毎週月曜 UTC 08:00)
 ├── monthly-bonus.yml         # 月次ボーナス清算 (月末候補日起動 + JST1日ガード → JST 8:00)
 ├── show-streak-data.yml      # 手動: ストリークデータ現在値の表示 (読み取り専用, workflow_dispatch)
 └── adjust-streak-field.yml   # 手動: grace/streak/bonusを絶対値で変更しキャッシュ保存 (workflow_dispatch)
@@ -122,9 +118,9 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 
 ### LINE送信数の制約（重要）
 
-送信先はLINEグループで、グループへのpushは**メッセージ数×グループ人数**でカウントされる（4人グループ=1通知4カウント）。無料プランの月間上限は200カウントで、朝夜とも毎日送ると構造的に超過する。対策として**夜通知は「当日のストリーク要件未達のユーザーが1人でもいる日」だけ送信**する（全員達成の日はスキップ。朝・週次・月次は無条件送信）。詳細: `docs/superpowers/specs/2026-07-26-line-quota-reduction-design.md`
+送信先はLINEグループで、グループへのpushは**メッセージ数×グループ人数**でカウントされる（4人グループ=1通知4カウント）。無料プランの月間上限は200カウントで、朝夜とも毎日送ると構造的に超過する。対策として**夜通知は「当日のストリーク要件未達のユーザーが1人でもいる日」だけ送信**し（全員達成の日はスキップ。朝・月次は無条件送信）、週間レポート通知は廃止した。詳細: `docs/superpowers/specs/2026-07-26-line-quota-reduction-design.md`
 
-- 通知を増やす変更をする際は必ず月間カウントを見積もること（固定分≈148、夜通知の残枠≈52=月13日分）
+- 通知を増やす変更をする際は必ず月間カウントを見積もること（固定分≈128=朝124+月次4、夜通知の残枠≈72=月18日分）
 - 1つのLINEグループに公式アカウント(bot)は1つしか入れないため、チャンネル追加で枠を増やす手は使えない
 - 上限超過時はLINE APIが429を返す。notifier.jsは429を非リトライで即失敗させ、レスポンスボディの理由をログに残す
 
