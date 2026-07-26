@@ -324,7 +324,8 @@ describe('オーケストレーション (src/index.js)', () => {
       let capturedIsStudiedOptions;
       let capturedFormatOptions;
       setupMocks({
-        isStudied: (user, options) => { capturedIsStudiedOptions = options; return true; },
+        // 未達(false)にして送信経路を通す(全員達成だと送信スキップされ警告閾値を検証できない)
+        isStudied: (user, options) => { capturedIsStudiedOptions = options; return false; },
         getRequirementForCourse: (course) => course === 'juniorHigh' ? 3 : 4,
         formatDetailedMessage: (currentData, changes, options) => {
           capturedFormatOptions = options;
@@ -343,6 +344,66 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.ok(capturedFormatOptions.missionWarningThresholds, 'missionWarningThresholds が渡ること');
       assert.strictEqual(capturedFormatOptions.missionWarningThresholds.elementary, 4);
       assert.strictEqual(capturedFormatOptions.missionWarningThresholds.juniorHigh, 3);
+    });
+
+    it('正常系: 全ユーザーがストリーク要件達成済みの日は夜通知を送信しない(送信数節約)', async () => {
+      setupMocks({
+        isStudied: () => true
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.success, true, '送信スキップでも正常終了すること');
+      assert.strictEqual(result.exitCode, 0);
+
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 0, '全員達成の日はsendPushMessageが呼ばれないこと');
+
+      const saveCalls = callLog.filter(c => c.type === 'saveData');
+      assert.strictEqual(saveCalls.length, 1, '通知しない日もデータは保存されること');
+    });
+
+    it('正常系: 未達ユーザーが1人でもいる日は夜通知を送信する', async () => {
+      // 太郎(達成)と次郎(未達)の2ユーザー
+      setupMocks({
+        getAllUsersDetailedData: async () => ({
+          success: true,
+          detailsAvailable: true,
+          data: [
+            { userName: '太郎', missionCount: 5, missions: [] },
+            { userName: '次郎', missionCount: 1, missions: [] }
+          ]
+        }),
+        isStudied: (user) => user.userName === '太郎'
+      });
+
+      await mainModule.main();
+
+      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      assert.strictEqual(pushCalls.length, 1, '未達ユーザーがいる日は送信されること');
+    });
+
+    it('正常系: ドライラン+全員達成の日は送信もデータ保存も行わない', async () => {
+      const originalDryRun = process.env.DRY_RUN;
+      process.env.DRY_RUN = 'true';
+
+      setupMocks({
+        isStudied: () => true
+      });
+
+      try {
+        const result = await mainModule.main();
+
+        assert.strictEqual(result.success, true);
+        assert.strictEqual(callLog.filter(c => c.type === 'sendPushMessage').length, 0);
+        assert.strictEqual(callLog.filter(c => c.type === 'saveData').length, 0, 'ドライランではデータ保存しないこと');
+      } finally {
+        if (originalDryRun === undefined) {
+          delete process.env.DRY_RUN;
+        } else {
+          process.env.DRY_RUN = originalDryRun;
+        }
+      }
     });
 
     it('正常系: ドライランモードでは送信・保存を行わない', async () => {

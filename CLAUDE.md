@@ -19,7 +19,7 @@ GitHub Actions (cron) → actions/cacheでdata/復元 → Docker → Playwright 
 
 ### Four Entry Points
 
-1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。両コース(小学生・中学生)の当日分を速報通知。ストリークは確定値＋当日暫定+1を表示するのみで確定・保存しない
+1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。両コース(小学生・中学生)の当日分を速報通知。ストリークは確定値＋当日暫定+1を表示するのみで確定・保存しない。**送信数節約のため、当日のストリーク要件未達のユーザーが1人でもいる日だけ送信**（全員達成日はデータ保存のみ）
 2. **朝通知** (`src/morning-index.js`): 毎日 JST 7:00 に実行。両コース(小学生・中学生)の前日確定分を通知。前日は確定データのためストリークを確定する(唯一の確定点)
 3. **週間レポート** (`src/weekly-report-index.js`): 毎週月曜 JST 17:00 に実行。週間学習ガイダンスレポートを取得しLINE通知
 4. **月次ボーナス清算** (`src/monthly-bonus-index.js`): 毎月1日 JST 8:00 に実行。前月分のボーナスポイントを子供ごとに通知して0にリセット。クロール不要のためブラウザを起動しない
@@ -120,13 +120,13 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 `SMILEZEMI_USERNAME`, `SMILEZEMI_PASSWORD`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_USER_ID`
 (GitHub Secretsまたは`.env`ファイルで管理。本番はdocker composeのenv_file経由)
 
-### LINE通知の2チャンネル構成
+### LINE送信数の制約（重要）
 
-送信先はLINEグループで、グループへのpushは**メッセージ数×グループ人数**でカウントされる（4人グループ=1通知4カウント）。朝夜通知を1チャンネルに集約すると無料枠(月200)を構造的に超過するため、チャンネルを分離している（詳細: `docs/superpowers/specs/2026-07-26-line-quota-two-channels-design.md`）:
+送信先はLINEグループで、グループへのpushは**メッセージ数×グループ人数**でカウントされる（4人グループ=1通知4カウント）。無料プランの月間上限は200カウントで、朝夜とも毎日送ると構造的に超過する。対策として**夜通知は「当日のストリーク要件未達のユーザーが1人でもいる日」だけ送信**する（全員達成の日はスキップ。朝・週次・月次は無条件送信）。詳細: `docs/superpowers/specs/2026-07-26-line-quota-reduction-design.md`
 
-- **朝通知**: 専用チャンネル「Smilebot2」。GitHub Secrets `LINE_CHANNEL_ACCESS_TOKEN_MORNING` を `morning-crawler.yml` がコンテナ内の `LINE_CHANNEL_ACCESS_TOKEN` に注入する（アプリコードは1変数のみ参照）
-- **夜通知・週間レポート・月次ボーナス**: 既存チャンネル。Secrets `LINE_CHANNEL_ACCESS_TOKEN`
-- 両チャンネルは同一プロバイダー配下（userId/groupIdが共通になるため必須）。`LINE_USER_ID` は共通
+- 通知を増やす変更をする際は必ず月間カウントを見積もること（固定分≈148、夜通知の残枠≈52=月13日分）
+- 1つのLINEグループに公式アカウント(bot)は1つしか入れないため、チャンネル追加で枠を増やす手は使えない
+- 上限超過時はLINE APIが429を返す。notifier.jsは429を非リトライで即失敗させ、レスポンスボディの理由をログに残す
 
 ## Key Design Decisions
 
