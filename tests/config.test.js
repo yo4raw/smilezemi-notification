@@ -60,6 +60,42 @@ describe('環境変数管理', () => {
         message: /SMILEZEMI_PASSWORD/
       });
     });
+
+    it('DISCORD_WEBHOOK_URLが設定されていれば設定オブジェクトに含める', () => {
+      process.env.SMILEZEMI_USERNAME = 'testuser';
+      process.env.SMILEZEMI_PASSWORD = 'testpass';
+      process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test_token';
+      process.env.LINE_USER_ID = 'U1234567890';
+      process.env.DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/123/abc';
+
+      const config = loadConfig();
+
+      assert.strictEqual(config.DISCORD_WEBHOOK_URL, 'https://discord.com/api/webhooks/123/abc');
+    });
+
+    it('DISCORD_WEBHOOK_URLは任意: 未設定でもエラーにならずundefinedになる', () => {
+      process.env.SMILEZEMI_USERNAME = 'testuser';
+      process.env.SMILEZEMI_PASSWORD = 'testpass';
+      process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test_token';
+      process.env.LINE_USER_ID = 'U1234567890';
+      delete process.env.DISCORD_WEBHOOK_URL;
+
+      const config = loadConfig();
+
+      assert.strictEqual(config.DISCORD_WEBHOOK_URL, undefined);
+    });
+
+    it('DISCORD_WEBHOOK_URLが空文字なら未設定扱い(undefined)にする', () => {
+      process.env.SMILEZEMI_USERNAME = 'testuser';
+      process.env.SMILEZEMI_PASSWORD = 'testpass';
+      process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test_token';
+      process.env.LINE_USER_ID = 'U1234567890';
+      process.env.DISCORD_WEBHOOK_URL = '   ';
+
+      const config = loadConfig();
+
+      assert.strictEqual(config.DISCORD_WEBHOOK_URL, undefined);
+    });
   });
 
   describe('validateSecrets', () => {
@@ -147,6 +183,16 @@ describe('環境変数管理', () => {
       assert.ok(!masked.includes('secretpass123'));
       assert.ok(!masked.includes('mytoken456'));
       assert.ok(masked.includes('***'));
+    });
+
+    it('webhookを含むフィールドをマスキングする', () => {
+      const masked = maskSensitiveData({
+        userName: 'たろう',
+        discordWebhookUrl: 'https://discord.com/api/webhooks/123/secret'
+      });
+
+      assert.strictEqual(masked.discordWebhookUrl, '***');
+      assert.strictEqual(masked.userName, 'たろう');
     });
   });
 });

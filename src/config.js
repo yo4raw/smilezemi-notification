@@ -16,7 +16,8 @@ const SENSITIVE_FIELDS = [
   'channelAccessToken',
   'accessToken',
   'secret',
-  'key'
+  'key',
+  'webhook'
 ];
 
 /**
@@ -32,6 +33,7 @@ function loadConfig() {
     console.log(`  SMILEZEMI_PASSWORD: ${process.env.SMILEZEMI_PASSWORD ? `存在 (長さ: ${process.env.SMILEZEMI_PASSWORD.length})` : '未設定'}`);
     console.log(`  LINE_CHANNEL_ACCESS_TOKEN: ${process.env.LINE_CHANNEL_ACCESS_TOKEN ? `存在 (長さ: ${process.env.LINE_CHANNEL_ACCESS_TOKEN.length})` : '未設定'}`);
     console.log(`  LINE_USER_ID: ${process.env.LINE_USER_ID ? `存在 (長さ: ${process.env.LINE_USER_ID.length})` : '未設定'}`);
+    console.log(`  DISCORD_WEBHOOK_URL: ${process.env.DISCORD_WEBHOOK_URL ? '存在 (任意)' : '未設定 (任意: LINE失敗時のフォールバックが無効)'}`);
   }
 
   const secrets = {
@@ -49,11 +51,16 @@ function loadConfig() {
     );
   }
 
+  // 任意設定: 未設定ならLINE失敗時のDiscordフォールバックが無効になるだけで、
+  // 通知そのものは従来どおり動く。そのためREQUIRED_SECRETSには含めない
+  const discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL?.trim();
+
   return {
     SMILEZEMI_USERNAME: secrets.SMILEZEMI_USERNAME,
     SMILEZEMI_PASSWORD: secrets.SMILEZEMI_PASSWORD,
     LINE_CHANNEL_ACCESS_TOKEN: secrets.LINE_CHANNEL_ACCESS_TOKEN,
-    LINE_USER_ID: secrets.LINE_USER_ID
+    LINE_USER_ID: secrets.LINE_USER_ID,
+    DISCORD_WEBHOOK_URL: discordWebhookUrl || undefined
   };
 }
 
