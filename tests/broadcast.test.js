@@ -254,6 +254,128 @@ describe('送信フォールバック層 (src/broadcast.js)', () => {
     });
   });
 
+  describe('broadcastToAll() - 全宛先送信（月次清算の疎通確認用）', () => {
+    it('正常系: LINEが成功してもDiscordにも送る', async () => {
+      const result = await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(callLog.filter(c => c.type === 'line').length, 1);
+      assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 1, 'LINE成功でもDiscordを呼ぶこと');
+      assert.strictEqual(result.results.length, 2);
+      assert.strictEqual(result.results[0].channel, 'line');
+      assert.strictEqual(result.results[1].channel, 'discord');
+    });
+
+    it('正常系: LINE成功時、Discordには理由行のない本文をそのまま送る', async () => {
+      await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.strictEqual(sentMessage, '清算メッセージ', '転送ヘッダを付けないこと');
+    });
+
+    it('正常系: LINE失敗時はDiscordのメッセージに理由行が付く', async () => {
+      setupMocks({
+        sendPushMessage: async (...args) => {
+          callLog.push({ type: 'line', args });
+          return { success: false, error: 'LINE API エラー: 429 Too Many Requests' };
+        }
+      });
+
+      const result = await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, true, 'Discordに届いていれば成功扱い');
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.match(sentMessage, /^⚠️ LINEへの送信に失敗したためDiscordに転送しました/);
+      assert.match(sentMessage, /理由: LINE API エラー: 429/);
+      assert.match(sentMessage, /清算メッセージ/);
+    });
+
+    it('正常系: LINE成功・Discord失敗でもsuccessはtrue（resultsに失敗が残る）', async () => {
+      setupMocks({
+        sendDiscordMessage: async (...args) => {
+          callLog.push({ type: 'discord', args });
+          return { success: false, error: 'Discord API エラー: 404 Not Found - Unknown Webhook' };
+        }
+      });
+
+      const result = await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, true, 'LINEに届いているので成功扱い');
+      const discordResult = result.results.find(r => r.channel === 'discord');
+      assert.strictEqual(discordResult.success, false);
+      assert.match(discordResult.error, /Unknown Webhook/, '失効を判別できる理由が残ること');
+    });
+
+    it('異常系: 両方失敗したらsuccessはfalse', async () => {
+      setupMocks({
+        sendPushMessage: async () => ({ success: false, error: 'LINE API エラー: 429' }),
+        sendDiscordMessage: async () => ({ success: false, error: 'Discord API エラー: 404' })
+      });
+
+      const result = await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.results.length, 2);
+    });
+
+    it('正常系: Webhook未設定ならDiscordを呼ばず、resultsにdiscordが入らない', async () => {
+      const result = await broadcast.broadcastToAll('清算メッセージ', {
+        ...defaultConfig,
+        DISCORD_WEBHOOK_URL: undefined
+      });
+
+      assert.strictEqual(result.success, true, 'LINEに届いているので成功');
+      assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 0);
+      assert.strictEqual(result.results.length, 1, 'LINEの結果だけが残ること');
+      assert.strictEqual(result.results.find(r => r.channel === 'discord'), undefined);
+    });
+
+    it('正常系: LINE送信が例外を投げてもDiscordへ送る', async () => {
+      setupMocks({
+        sendPushMessage: async () => {
+          throw new Error('想定外の例外');
+        }
+      });
+
+      const result = await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 1, '例外でもDiscordへ送ること');
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.match(sentMessage, /想定外の例外/, '例外の理由が転送メッセージに載ること');
+    });
+
+    it('セキュリティ: 例外メッセージに含まれるトークンはDiscordへ転送されない', async () => {
+      setupMocks({
+        sendPushMessage: async () => {
+          throw new Error('failed with token=test_token and user=U0000000000');
+        }
+      });
+
+      const result = await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.strictEqual(sentMessage.includes('test_token'), false, 'LINEトークンが漏れないこと');
+      assert.strictEqual(sentMessage.includes('U0000000000'), false, 'ユーザーIDが漏れないこと');
+      const lineResult = result.results.find(r => r.channel === 'line');
+      assert.strictEqual(lineResult.error.includes('test_token'), false);
+    });
+
+    it('正常系: Discordへは2000文字に切り詰めて渡す', async () => {
+      await broadcast.broadcastToAll('あ'.repeat(5000), defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.strictEqual(sentMessage.length <= 2000, true);
+    });
+
+    it('正常系: LINEへは5000文字に切り詰めて渡す', async () => {
+      await broadcast.broadcastToAll('あ'.repeat(9000), defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'line').args;
+      assert.strictEqual(sentMessage.length <= 5000, true);
+    });
+  });
+
   describe('formatFallbackMessage()', () => {
     it('理由行と本文を空行で区切って返す', () => {
       const result = broadcast.formatFallbackMessage('本文', 'LINE API エラー: 429');
