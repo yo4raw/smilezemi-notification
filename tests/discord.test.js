@@ -69,6 +69,28 @@ describe('Discord通知モジュール (src/discord.js)', () => {
       assert.match(result.error, /Unknown Webhook/, 'レスポンスボディの理由が含まれること');
     });
 
+    it('異常系: 429(レート制限)はリトライして成功できる', async () => {
+      let callCount = 0;
+      const mockFetch = mock.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            ok: false, status: 429, statusText: 'Too Many Requests',
+            text: async () => '{"message": "You are being rate limited.", "retry_after": 0.1}'
+          };
+        }
+        return { ok: true, status: 204, statusText: 'No Content', text: async () => '' };
+      });
+      global.fetch = mockFetch;
+
+      const result = await discord.sendDiscordMessage('テストメッセージ', TEST_WEBHOOK_URL, {
+        maxRetries: 3, retryDelay: 1
+      });
+
+      assert.strictEqual(result.success, true, 'リトライ後に成功すること');
+      assert.strictEqual(mockFetch.mock.calls.length, 2, '429はリトライすること');
+    });
+
     it('異常系: 5xxはリトライし、最終的に失敗を返す', async () => {
       const mockFetch = mock.fn(async () => ({
         ok: false, status: 500, statusText: 'Internal Server Error', text: async () => ''

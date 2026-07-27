@@ -33,6 +33,30 @@ function formatFallbackMessage(message, lineError) {
 }
 
 /**
+ * 設定値のシークレット（LINEトークン・ユーザーID）を文字列からマスキングする
+ *
+ * 例外メッセージはnotifier側のマスキングを経ていない生の文字列なので、
+ * Discordへ転送する前にここで落とす。正規表現を組むとシークレットに含まれる
+ * 特殊文字で破綻するため split/join でリテラル一致の全置換を行う。
+ *
+ * @private
+ * @param {string} text - マスキング対象の文字列
+ * @param {object} config - 設定オブジェクト
+ * @returns {string}
+ */
+function maskConfigSecrets(text, config) {
+  let masked = String(text);
+
+  for (const secret of [config.LINE_CHANNEL_ACCESS_TOKEN, config.LINE_USER_ID, config.DISCORD_WEBHOOK_URL]) {
+    if (secret && secret.length >= 8 && masked.includes(secret)) {
+      masked = masked.split(secret).join('***');
+    }
+  }
+
+  return masked;
+}
+
+/**
  * メッセージをLINEへ送り、失敗した場合のみDiscordへ転送する
  *
  * success は「1つ以上の宛先に届いたか」を表す。LINEの月間枠が尽きている間ずっと
@@ -46,12 +70,25 @@ function formatFallbackMessage(message, lineError) {
 async function broadcastMessage(message, config, options = {}) {
   const results = [];
 
-  const lineResult = await sendPushMessage(
-    truncateToLimit(message, LINE_MAX_MESSAGE_LENGTH),
-    config.LINE_CHANNEL_ACCESS_TOKEN,
-    config.LINE_USER_ID,
-    options
-  );
+  // LINE送信が想定外の例外で落ちてもDiscordへのフォールバックへ進めるようにする。
+  // 例外がここを素通りするとDiscordが一度も呼ばれず通知が無音になるため、
+  // 「LINEがどう失敗してもDiscordに回る」という不変条件をこのtry/catchで保証する
+  let lineResult;
+  try {
+    lineResult = await sendPushMessage(
+      truncateToLimit(message, LINE_MAX_MESSAGE_LENGTH),
+      config.LINE_CHANNEL_ACCESS_TOKEN,
+      config.LINE_USER_ID,
+      options
+    );
+  } catch (error) {
+    // 例外メッセージはDiscordの理由行に載るため、シークレットを落としてから積む
+    lineResult = {
+      success: false,
+      error: `LINE送信で予期しない例外が発生しました: ${maskConfigSecrets(error && error.message ? error.message : error, config)}`
+    };
+  }
+
   results.push({ channel: 'line', success: lineResult.success, error: lineResult.error });
 
   if (lineResult.success) {

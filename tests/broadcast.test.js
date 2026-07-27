@@ -10,6 +10,9 @@ const assert = require('node:assert');
 
 const MODULE_PATHS = ['../src/notifier', '../src/discord', '../src/broadcast'];
 
+// 切り詰めはモックせず本物を使う（ヘッダ付加後に実際に上限へ収まるかを検証したいため）
+const { truncateToLimit } = require('../src/notifier');
+
 function resolveModule(p) {
   return require.resolve(p);
 }
@@ -41,9 +44,8 @@ describe('送信フォールバック層 (src/broadcast.js)', () => {
           callLog.push({ type: 'line', args });
           return { success: true };
         }),
-        // 切り詰めは本物と同じ挙動を使いたいので簡易実装で代替する
-        truncateToLimit: (message, maxLength = 5000) =>
-          message.length <= maxLength ? message : message.substring(0, maxLength)
+        // 切り詰めは本物をそのまま使う（省略サフィックス・サロゲート処理まで含めて検証する）
+        truncateToLimit
       }
     };
 
@@ -176,6 +178,79 @@ describe('送信フォールバック層 (src/broadcast.js)', () => {
       assert.strictEqual(result.success, false);
       assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 0, 'Discordを呼ばないこと');
       assert.strictEqual(result.results.length, 1, 'LINEの結果だけが残ること');
+    });
+
+    it('異常系: sendPushMessageが例外を投げてもDiscordへ転送する', async () => {
+      setupMocks({
+        sendPushMessage: async (...args) => {
+          callLog.push({ type: 'line', args });
+          throw new SyntaxError('Invalid regular expression: /abc[/: Unterminated character class');
+        }
+      });
+
+      const result = await broadcast.broadcastMessage('本文メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, true, '例外でもDiscordに届けば成功扱い');
+      assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 1, '例外時もDiscordへ転送すること');
+      assert.strictEqual(result.results[0].channel, 'line');
+      assert.strictEqual(result.results[0].success, false);
+      assert.match(result.results[0].error, /Unterminated character class/, '例外メッセージが理由に残ること');
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.match(sentMessage, /Unterminated character class/, '理由行に例外メッセージが載ること');
+    });
+
+    it('異常系: 例外メッセージにトークンが含まれてもマスクしてから転送する', async () => {
+      setupMocks({
+        sendPushMessage: async () => {
+          throw new Error(`Invalid regular expression: /${defaultConfig.LINE_CHANNEL_ACCESS_TOKEN}/`);
+        }
+      });
+
+      const result = await broadcast.broadcastMessage('本文メッセージ', defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.ok(
+        !sentMessage.includes(defaultConfig.LINE_CHANNEL_ACCESS_TOKEN),
+        'Discordへの転送文にトークンが生で出ないこと'
+      );
+      assert.ok(
+        !result.results[0].error.includes(defaultConfig.LINE_CHANNEL_ACCESS_TOKEN),
+        '結果のエラー文にもトークンが残らないこと'
+      );
+    });
+
+    it('異常系: 例外時にWebhook未設定なら転送せず失敗を返す', async () => {
+      setupMocks({
+        sendPushMessage: async () => {
+          throw new Error('予期しない例外');
+        }
+      });
+
+      const result = await broadcast.broadcastMessage('本文メッセージ', {
+        ...defaultConfig,
+        DISCORD_WEBHOOK_URL: undefined
+      });
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 0, 'Discordを呼ばないこと');
+      assert.strictEqual(result.results.length, 1);
+    });
+
+    it('正常系: 絵文字だらけの長文でも孤立サロゲートを含めずDiscordへ渡す', async () => {
+      setupMocks({
+        sendPushMessage: async () => ({ success: false, error: 'LINE API エラー: 429' })
+      });
+
+      await broadcast.broadcastMessage('👤'.repeat(3000), defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.strictEqual(sentMessage.length <= 2000, true, 'Discordの上限に収めること');
+      // JSON.stringify は孤立サロゲートをエスケープシーケンスとして残すため、\ud83d 単独が出ないことを見る
+      assert.ok(
+        !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(sentMessage),
+        '孤立した高サロゲートが残らないこと'
+      );
     });
   });
 

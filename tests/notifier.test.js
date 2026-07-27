@@ -356,6 +356,57 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.strictEqual(result.success, false, '全試行タイムアウトで失敗すること');
       assert.strictEqual(mockFetch.mock.calls.length, 2, 'タイムアウト後にリトライされること');
     });
+
+    it('セキュリティ: 正規表現の特殊文字を含むトークンもエラー文からマスクされる', async () => {
+      // LINEのトークンは Base64 系で + / = を含みうる。[ ( はマスク処理を壊しやすい文字
+      const token = 'abc+def/ghi=[jkl](mno).pqr*stu?vwx^yz${1}|end';
+      global.fetch = mockFetch = mock.fn(async () => {
+        throw new Error(`network failure with token ${token} in message`);
+      });
+
+      const result = await notifier.sendPushMessage('テスト', token, 'test_user', {
+        maxRetries: 1,
+        retryDelay: 1
+      });
+
+      assert.strictEqual(result.success, false);
+      assert.ok(!result.error.includes(token), 'トークンがエラー文に残らないこと');
+      assert.match(result.error, /\*\*\*/, 'マスク記号に置換されること');
+    });
+
+    it('セキュリティ: 特殊文字を含むトークンでもマスク処理が例外を投げない', async () => {
+      // 未エスケープで RegExp を組むと SyntaxError になるトークン
+      const token = 'token-with-unterminated-class-[abc';
+      global.fetch = mockFetch = mock.fn(async () => {
+        throw new Error(`fetch failed for ${token}`);
+      });
+
+      const result = await notifier.sendPushMessage('テスト', token, 'test_user', {
+        maxRetries: 1,
+        retryDelay: 1
+      });
+
+      assert.strictEqual(result.success, false, '例外ではなく失敗結果を返すこと');
+      assert.ok(!result.error.includes(token), 'トークンがエラー文に残らないこと');
+    });
+
+    it('セキュリティ: レスポンスボディに含まれる特殊文字入りトークンもマスクされる', async () => {
+      const token = 'body+token/with[special]chars';
+      global.fetch = mockFetch = mock.fn(async () => ({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: async () => `{"message":"invalid token ${token}"}`
+      }));
+
+      const result = await notifier.sendPushMessage('テスト', token, 'test_user', {
+        maxRetries: 1,
+        retryDelay: 1
+      });
+
+      assert.strictEqual(result.success, false);
+      assert.ok(!result.error.includes(token), 'トークンがエラー文に残らないこと');
+    });
   });
 
   describe('formatMessage() - メッセージフォーマット', () => {
@@ -750,6 +801,37 @@ describe('通知モジュール (src/notifier.js)', () => {
       const short = 'みじかいメッセージ';
 
       assert.strictEqual(notifier.truncateToLimit(short, 2000), short);
+    });
+
+    it('絵文字(サロゲートペア)の途中で切れても孤立サロゲートを残さない', () => {
+      // 👤 は UTF-16 で2コードユニット。切断位置が奇数になるよう長さを選ぶ
+      const long = '👤'.repeat(1500);
+
+      const result = notifier.truncateToLimit(long, 2000);
+
+      assert.strictEqual(result.length <= 2000, true, '上限に収まること');
+      assert.ok(
+        !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(result),
+        '孤立した高サロゲートが残らないこと'
+      );
+      assert.ok(
+        !/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(result),
+        '孤立した低サロゲートが残らないこと'
+      );
+      assert.match(result, /省略/, '省略された旨が付くこと');
+    });
+
+    it('切断位置がサロゲートペアの境界と一致する場合はそのまま切る', () => {
+      // 先頭にASCIIを1文字入れて切断位置をずらし、境界一致のケースを作る
+      const long = 'a' + '👤'.repeat(1500);
+
+      const result = notifier.truncateToLimit(long, 2000);
+
+      assert.strictEqual(result.length <= 2000, true, '上限に収まること');
+      assert.ok(
+        !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(result),
+        '孤立した高サロゲートが残らないこと'
+      );
     });
   });
 });

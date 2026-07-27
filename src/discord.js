@@ -73,7 +73,7 @@ async function sendDiscordMessage(message, webhookUrl, options = {}) {
 
     lastError = result.error;
 
-    // 4xx はリトライしても解決しない（404=Webhook削除, 400=ペイロード不正, 401=認証）
+    // 429以外の4xxはリトライしても解決しない（404=Webhook削除, 400=ペイロード不正, 401=認証）
     if (!result.retryable) {
       return { success: false, error: lastError };
     }
@@ -119,9 +119,11 @@ async function attemptSendDiscord(requestBody, webhookUrl, timeoutMs) {
         // ボディ取得失敗は無視（statusだけでも報告する）
       }
 
+      // 429はレート制限（Retry-After付きの「後で再送せよ」）なのでリトライする。
+      // LINEの429=月間送信上限とは意味が違い、少し待てば送れる
       return {
         success: false,
-        retryable: response.status >= 500,
+        retryable: response.status === 429 || response.status >= 500,
         error: maskWebhookUrl(
           `Discord API エラー: ${response.status} ${response.statusText}${detail}`,
           webhookUrl

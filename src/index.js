@@ -8,8 +8,8 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
-const { formatMessage, formatDetailedMessage } = require('./notifier');
-const { broadcastMessage } = require('./broadcast');
+const { formatMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { broadcastMessage, LINE_MAX_MESSAGE_LENGTH } = require('./broadcast');
 const { loadStreakData, formatStreakInfo, isStudied, createInitialState, getRequirementForCourse } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
@@ -323,8 +323,10 @@ async function main() {
 
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない
     if (process.env.DRY_RUN === 'true') {
+      // 実送信ではbroadcastが宛先ごとに切り詰めるため、プレビューもLINEの上限で切って表示する
+      // （送信経路には手を入れず、表示だけを実際の文面に合わせる）
       console.log('\n📋 === 通知メッセージプレビュー ===');
-      console.log(message);
+      console.log(truncateToLimit(message, LINE_MAX_MESSAGE_LENGTH));
       console.log('=== プレビュー終了 ===\n');
       console.log('ℹ️ ドライランモード: 通知とデータ保存はスキップしました');
       console.log('🎉 処理が正常に完了しました');

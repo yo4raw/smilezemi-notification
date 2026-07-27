@@ -22,7 +22,7 @@ GitHub Actionsで環境変数を安全に使用するため、リポジトリの
 
 #### 1.2 シークレットを追加
 
-**New repository secret** ボタンをクリックして、以下の4つのシークレットを追加します:
+**New repository secret** ボタンをクリックして、以下のシークレットを追加します（必須4つ＋任意1つ）:
 
 | シークレット名 | 説明 | 例 |
 |--------------|------|-----|
@@ -47,7 +47,10 @@ SMILEZEMI_USERNAME        Updated X minutes ago
 SMILEZEMI_PASSWORD        Updated X minutes ago
 LINE_CHANNEL_ACCESS_TOKEN Updated X minutes ago
 LINE_USER_ID              Updated X minutes ago
+DISCORD_WEBHOOK_URL       Updated X minutes ago
 ```
+
+※ `DISCORD_WEBHOOK_URL` は任意です。未設定でも動作しますが、LINE の月間送信上限に達した場合などに通知が届かなくなります。
 
 ### ステップ2: ワークフローの動作確認
 

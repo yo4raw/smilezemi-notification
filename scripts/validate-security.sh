@@ -95,6 +95,15 @@ else
   echo -e "${RED}❌ 汎用マスキング処理が見つかりません${NC}"
   ((ERRORS++))
 fi
+
+# Discord Webhook URLマスキング（Webhook URLは実質パスワードなのでログに出さない）
+if grep -q "maskWebhookUrl" src/discord.js; then
+  echo -e "${GREEN}✅ Discord Webhook URLマスキング処理が実装されています${NC}"
+  ((SUCCESS++))
+else
+  echo -e "${RED}❌ Discord Webhook URLマスキング処理が見つかりません${NC}"
+  ((ERRORS++))
+fi
 echo ""
 
 # 5. .envファイルの存在確認（警告のみ）

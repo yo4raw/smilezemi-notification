@@ -25,6 +25,9 @@ function clearModuleCache() {
   }
 }
 
+// 切り詰めは本物を使う（DRY_RUNプレビューが実送信と同じ文面になることを担保するため）
+const { truncateToLimit: realTruncateToLimit } = require('../src/notifier');
+
 describe('オーケストレーション (src/index.js)', () => {
   let mainModule;
 
@@ -135,7 +138,9 @@ describe('オーケストレーション (src/index.js)', () => {
       id: resolveModule('../src/notifier'), filename: resolveModule('../src/notifier'), loaded: true,
       exports: {
         formatMessage: overrides.formatMessage || ((changes) => `テスト基本メッセージ(${changes.length}件)`),
-        formatDetailedMessage: overrides.formatDetailedMessage || (() => 'テスト詳細メッセージ')
+        formatDetailedMessage: overrides.formatDetailedMessage || (() => 'テスト詳細メッセージ'),
+        // 切り詰めはDRY_RUNプレビューで使うので本物を使う
+        truncateToLimit: realTruncateToLimit
       }
     };
 
@@ -145,7 +150,8 @@ describe('オーケストレーション (src/index.js)', () => {
         broadcastMessage: overrides.broadcastMessage || (async (...args) => {
           callLog.push({ type: 'broadcastMessage', args });
           return { success: true, results: [{ channel: 'line', success: true }] };
-        })
+        }),
+        LINE_MAX_MESSAGE_LENGTH: 5000
       }
     };
 
