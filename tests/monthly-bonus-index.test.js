@@ -264,6 +264,86 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
     });
   });
 
+  describe('formatMonthlyBonusMessage - 金額表示', () => {
+    it('小学生コースは1ポイント30円で換算する', () => {
+      const message = mainModule.formatMonthlyBonusMessage(
+        [{ userName: 'はなこ (小学生コース)', bonus: 2 }],
+        '7月'
+      );
+
+      assert.match(message, /👤 はなこ \(小学生コース\): 2ポイント → ¥60/);
+    });
+
+    it('中学生コースは1ポイント50円で換算する', () => {
+      const message = mainModule.formatMonthlyBonusMessage(
+        [{ userName: 'たろう (中学生コース)', bonus: 3 }],
+        '7月'
+      );
+
+      assert.match(message, /👤 たろう \(中学生コース\): 3ポイント → ¥150/);
+    });
+
+    it('0ポイントのユーザーも0円として表示する', () => {
+      const message = mainModule.formatMonthlyBonusMessage(
+        [{ userName: 'じろう (小学生コース)', bonus: 0 }],
+        '7月'
+      );
+
+      assert.match(message, /👤 じろう \(小学生コース\): 0ポイント → ¥0/);
+    });
+
+    it('合計行に全ユーザーの金額の合算を出す', () => {
+      const message = mainModule.formatMonthlyBonusMessage(
+        [
+          { userName: 'たろう (中学生コース)', bonus: 3 },
+          { userName: 'はなこ (小学生コース)', bonus: 2 },
+          { userName: 'じろう (小学生コース)', bonus: 0 }
+        ],
+        '7月'
+      );
+
+      // 3×50 + 2×30 + 0×30 = 210
+      assert.match(message, /合計: ¥210/);
+    });
+
+    it('4桁の金額は3桁区切りで表示する', () => {
+      const message = mainModule.formatMonthlyBonusMessage(
+        [{ userName: 'たろう (中学生コース)', bonus: 31 }],
+        '7月'
+      );
+
+      // 31×50 = 1550
+      assert.match(message, /31ポイント → ¥1,550/);
+      assert.match(message, /合計: ¥1,550/);
+    });
+
+    it('コース表記のないユーザーは小学生単価(¥30)で換算する', () => {
+      const message = mainModule.formatMonthlyBonusMessage(
+        [{ userName: 'はなこ', bonus: 2 }],
+        '7月'
+      );
+
+      assert.match(message, /👤 はなこ: 2ポイント → ¥60/);
+    });
+
+    it('対象ユーザーが0人なら合計行を出さない', () => {
+      const message = mainModule.formatMonthlyBonusMessage([], '7月');
+
+      assert.match(message, /対象のユーザーがいませんでした。/);
+      assert.doesNotMatch(message, /合計:/);
+    });
+
+    it('支給の案内文と月ラベルは従来どおり残る', () => {
+      const message = mainModule.formatMonthlyBonusMessage(
+        [{ userName: 'はなこ (小学生コース)', bonus: 2 }],
+        '7月'
+      );
+
+      assert.match(message, /💰 ボーナスポイント清算\(7月分\)/);
+      assert.match(message, /お小遣いとして支給してね!/);
+    });
+  });
+
   describe('getPreviousMonthLabel', () => {
     it('前月の月ラベルを返す(JST基準)', () => {
       // JST 2026-08-01 08:00 = UTC 2026-07-31 23:00
