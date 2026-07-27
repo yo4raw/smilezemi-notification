@@ -726,4 +726,30 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.ok(message.includes('👤 たろう (中学生コース)'));
     });
   });
+
+  describe('truncateToLimit() - 宛先別の文字数制限', () => {
+    it('引数なしなら5000文字を上限として切り詰める', () => {
+      const long = 'あ'.repeat(6000);
+
+      const result = notifier.truncateToLimit(long);
+
+      assert.strictEqual(result.length <= 5000, true, '5000文字以内に収まること');
+      assert.match(result, /省略/, '省略された旨が付くこと');
+    });
+
+    it('上限を明示すればその長さで切り詰める(Discordの2000文字用)', () => {
+      const long = 'あ'.repeat(3000);
+
+      const result = notifier.truncateToLimit(long, 2000);
+
+      assert.strictEqual(result.length <= 2000, true, '2000文字以内に収まること');
+      assert.match(result, /省略/, '省略された旨が付くこと');
+    });
+
+    it('上限以下のメッセージはそのまま返す', () => {
+      const short = 'みじかいメッセージ';
+
+      assert.strictEqual(notifier.truncateToLimit(short, 2000), short);
+    });
+  });
 });

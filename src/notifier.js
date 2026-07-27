@@ -448,21 +448,22 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
 }
 
 /**
- * メッセージを5000文字以内に切り詰める
+ * メッセージを指定文字数以内に切り詰める
+ *
+ * 上限は宛先ごとに異なる（LINE=5000, Discord=2000）ため引数で受け取る。
  * Requirements: 4.5
  *
  * @param {string} message - メッセージ文字列
+ * @param {number} [maxLength=5000] - 上限文字数
  * @returns {string} - 切り詰められたメッセージ
  */
-function truncateToLimit(message) {
-  // 5000文字以下の場合はそのまま返す
-  if (message.length <= MAX_MESSAGE_LENGTH) {
+function truncateToLimit(message, maxLength = MAX_MESSAGE_LENGTH) {
+  if (message.length <= maxLength) {
     return message;
   }
 
-  // 4950文字で切り詰め、省略メッセージを追加（50文字の安全マージン）
-  const truncated = message.substring(0, 4950);
-  return truncated + '\n\n...（メッセージが長すぎるため省略）';
+  const suffix = '\n\n...（メッセージが長すぎるため省略）';
+  return message.substring(0, maxLength - suffix.length) + suffix;
 }
 
 module.exports = {
