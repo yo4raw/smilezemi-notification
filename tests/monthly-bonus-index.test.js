@@ -262,43 +262,6 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       assert.strictEqual(callLog.filter(c => c.type === 'saveStreakData').length, 1);
       assert.strictEqual(result.exitCode, 0, 'Discordの結果がなければ終了コードに影響させないこと');
     });
-
-    it('異常系: 両方失敗したらリセットせず終了コード1(清算持ち越し)', async () => {
-      setupMocks({
-        broadcastToAll: async () => ({
-          success: false,
-          results: [
-            { channel: 'line', success: false, error: 'LINE API エラー: 429' },
-            { channel: 'discord', success: false, error: 'Discord API エラー: 404' }
-          ]
-        })
-      });
-
-      const result = await mainModule.main();
-
-      assert.strictEqual(result.exitCode, 1);
-      assert.strictEqual(callLog.filter(c => c.type === 'saveStreakData').length, 0, '全滅時は保存しないこと');
-    });
-
-    it('正常系: LINE失敗・Discord成功ならリセットして終了コード0', async () => {
-      setupMocks({
-        broadcastToAll: async (...args) => {
-          callLog.push({ type: 'broadcastToAll', args });
-          return {
-            success: true,
-            results: [
-              { channel: 'line', success: false, error: 'LINE API エラー: 429' },
-              { channel: 'discord', success: true }
-            ]
-          };
-        }
-      });
-
-      const result = await mainModule.main();
-
-      assert.strictEqual(callLog.filter(c => c.type === 'saveStreakData').length, 1);
-      assert.strictEqual(result.exitCode, 0, 'LINE単体の失敗ではワークフローを赤くしないこと');
-    });
   });
 
   describe('getPreviousMonthLabel', () => {

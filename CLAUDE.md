@@ -118,7 +118,7 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 `SMILEZEMI_USERNAME`, `SMILEZEMI_PASSWORD`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_USER_ID`
 (GitHub Secretsまたは`.env`ファイルで管理。本番はdocker composeのenv_file経由)
 
-任意: `DISCORD_WEBHOOK_URL`（LINE送信失敗時のフォールバック先。未設定ならフォールバックせず従来どおりLINEのみ）
+任意: `DISCORD_WEBHOOK_URL`（夜通知・朝通知ではLINE送信失敗時のフォールバック先。月次ボーナス清算だけはLINEの成否にかかわらず常に送りWebhook失効の疎通確認を兼ねる。未設定ならいずれもDiscordへ送らず従来どおりLINEのみ）
 
 ### LINE送信数の制約（重要）
 

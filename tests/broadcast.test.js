@@ -237,6 +237,23 @@ describe('送信フォールバック層 (src/broadcast.js)', () => {
       assert.strictEqual(result.results.length, 1);
     });
 
+    it('異常系: sendDiscordMessageが例外を投げても例外を投げず失敗として畳み込む', async () => {
+      setupMocks({
+        sendPushMessage: async () => ({ success: false, error: 'LINE API エラー: 429' }),
+        sendDiscordMessage: async () => {
+          throw new TypeError("Cannot read properties of undefined (reading 'includes')");
+        }
+      });
+
+      const result = await broadcast.broadcastMessage('本文メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, false, '両宛先に届いていないので失敗扱い');
+      assert.strictEqual(result.results.length, 2);
+      assert.strictEqual(result.results[1].channel, 'discord');
+      assert.strictEqual(result.results[1].success, false);
+      assert.match(result.results[1].error, /Cannot read properties of undefined/, '例外メッセージが理由に残ること');
+    });
+
     it('正常系: 絵文字だらけの長文でも孤立サロゲートを含めずDiscordへ渡す', async () => {
       setupMocks({
         sendPushMessage: async () => ({ success: false, error: 'LINE API エラー: 429' })
@@ -359,6 +376,59 @@ describe('送信フォールバック層 (src/broadcast.js)', () => {
       assert.strictEqual(sentMessage.includes('U0000000000'), false, 'ユーザーIDが漏れないこと');
       const lineResult = result.results.find(r => r.channel === 'line');
       assert.strictEqual(lineResult.error.includes('test_token'), false);
+    });
+
+    it('異常系: LINE失敗かつWebhook未設定なら送信先がなく失敗を返す', async () => {
+      setupMocks({
+        sendPushMessage: async (...args) => {
+          callLog.push({ type: 'line', args });
+          return { success: false, error: 'LINE API エラー: 429 Too Many Requests' };
+        }
+      });
+
+      const result = await broadcast.broadcastToAll('清算メッセージ', {
+        ...defaultConfig,
+        DISCORD_WEBHOOK_URL: undefined
+      });
+
+      assert.strictEqual(result.success, false, 'どこにも届いていないので失敗扱い(清算を持ち越す)');
+      assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 0, 'Discordを呼ばないこと');
+      assert.strictEqual(result.results.length, 1, 'LINEの結果だけが残ること');
+      assert.strictEqual(result.results[0].channel, 'line');
+      assert.strictEqual(result.results[0].success, false);
+    });
+
+    it('異常系: sendDiscordMessageが例外を投げても例外を投げずresultsへ失敗として積む', async () => {
+      setupMocks({
+        sendDiscordMessage: async () => {
+          throw new TypeError("Cannot read properties of undefined (reading 'includes')");
+        }
+      });
+
+      const result = await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, true, 'LINEには届いているので成功扱い');
+      assert.strictEqual(result.results.length, 2);
+      const discordResult = result.results.find(r => r.channel === 'discord');
+      assert.strictEqual(discordResult.success, false);
+      assert.match(discordResult.error, /Cannot read properties of undefined/, '例外メッセージが理由に残ること');
+    });
+
+    it('セキュリティ: Discord送信の例外メッセージに含まれるWebhook URLはマスクされる', async () => {
+      setupMocks({
+        sendDiscordMessage: async () => {
+          throw new Error(`request to ${defaultConfig.DISCORD_WEBHOOK_URL} failed`);
+        }
+      });
+
+      const result = await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
+
+      const discordResult = result.results.find(r => r.channel === 'discord');
+      assert.strictEqual(
+        discordResult.error.includes(defaultConfig.DISCORD_WEBHOOK_URL),
+        false,
+        'Webhook URLが生で残らないこと'
+      );
     });
 
     it('正常系: Discordへは2000文字に切り詰めて渡す', async () => {

@@ -85,25 +85,41 @@ async function sendToLine(message, config, options) {
 }
 
 /**
- * Discordへ送信する
+ * Discordへ送信する。想定外の例外も「Discord失敗」として畳み込む
  *
- * lineError が渡された場合は転送であることを示す理由行を先頭に付ける。
- * null の場合（LINEが成功しているケース）は本文をそのまま送る。
+ * LINEが失敗していた場合（lineResult.success === false）だけ、転送であることを示す
+ * 理由行を先頭に付ける。エラー文字列の有無ではなく success で分岐させるのは、
+ * 「失敗しているのに理由行のない本文が届く」状態を契約として起こさないため。
+ *
+ * 例外を畳み込むのは主に broadcastToAll() のため。LINE成功後にDiscordで例外が抜けると
+ * 呼び出し元（月次清算）の後続処理に到達せず、清算メッセージはLINEに届いているのに
+ * ボーナスがリセットされない = 翌月に同じ分が再清算される二重支給になる。
  *
  * @private
  * @param {string} message - 本文
  * @param {object} config - 設定オブジェクト
  * @param {object} options - 送信オプション
- * @param {string|null} lineError - LINE送信のエラー文字列。成功していれば null
+ * @param {{success: boolean, error?: string}} lineResult - LINE送信の結果
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-async function sendToDiscord(message, config, options, lineError) {
-  const body = lineError ? formatFallbackMessage(message, lineError) : message;
-  return sendDiscordMessage(
-    truncateToLimit(body, DISCORD_MAX_MESSAGE_LENGTH),
-    config.DISCORD_WEBHOOK_URL,
-    options
-  );
+async function sendToDiscord(message, config, options, lineResult) {
+  const body = lineResult.success
+    ? message
+    : formatFallbackMessage(message, lineResult.error || '不明なエラー');
+
+  try {
+    return await sendDiscordMessage(
+      truncateToLimit(body, DISCORD_MAX_MESSAGE_LENGTH),
+      config.DISCORD_WEBHOOK_URL,
+      options
+    );
+  } catch (error) {
+    // 例外メッセージはログに残るため、シークレット（Webhook URL・LINEトークン）を落としてから積む
+    return {
+      success: false,
+      error: `Discord送信で予期しない例外が発生しました: ${maskConfigSecrets(error && error.message ? error.message : error, config)}`
+    };
+  }
 }
 
 /**
@@ -135,7 +151,8 @@ async function broadcastMessage(message, config, options = {}) {
   }
 
   console.log('📤 Discordへフォールバック送信しています...');
-  const discordResult = await sendToDiscord(message, config, options, lineResult.error);
+  // ここに来る時点でLINEは失敗しているため、必ず理由行付きで転送される
+  const discordResult = await sendToDiscord(message, config, options, lineResult);
   results.push({ channel: 'discord', success: discordResult.success, error: discordResult.error });
 
   if (discordResult.success) {
@@ -180,12 +197,7 @@ async function broadcastToAll(message, config, options = {}) {
 
   console.log('📤 Discordへ送信しています...');
   // LINEが失敗している場合だけ理由行を付ける（成功時は本文をそのまま送る）
-  const discordResult = await sendToDiscord(
-    message,
-    config,
-    options,
-    lineResult.success ? null : lineResult.error
-  );
+  const discordResult = await sendToDiscord(message, config, options, lineResult);
   results.push({ channel: 'discord', success: discordResult.success, error: discordResult.error });
 
   if (!discordResult.success) {
