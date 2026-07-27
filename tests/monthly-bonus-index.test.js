@@ -60,9 +60,15 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
     require.cache[resolveModule('../src/broadcast')] = {
       id: resolveModule('../src/broadcast'), filename: resolveModule('../src/broadcast'), loaded: true,
       exports: {
-        broadcastMessage: overrides.broadcastMessage || (async (...args) => {
-          callLog.push({ type: 'broadcastMessage', args });
-          return { success: true, results: [{ channel: 'line', success: true }] };
+        broadcastToAll: overrides.broadcastToAll || (async (...args) => {
+          callLog.push({ type: 'broadcastToAll', args });
+          return {
+            success: true,
+            results: [
+              { channel: 'line', success: true },
+              { channel: 'discord', success: true }
+            ]
+          };
         })
       }
     };
@@ -108,7 +114,7 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.exitCode, 0);
 
-      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(pushCalls.length, 1, '通知が1回送られること');
       const [message, passedConfig] = pushCalls[0].args;
       assert.strictEqual(passedConfig.LINE_CHANNEL_ACCESS_TOKEN, 'test_token');
@@ -131,7 +137,7 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
 
     it('異常系: 送信失敗時はリセット保存せず終了コード1(清算持ち越し)', async () => {
       setupMocks({
-        broadcastMessage: async () => ({
+        broadcastToAll: async () => ({
           success: false,
           results: [
             { channel: 'line', success: false, error: 'LINE API エラー: 429' },
@@ -154,7 +160,7 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.exitCode, 0);
-      assert.strictEqual(callLog.filter(c => c.type === 'broadcastMessage').length, 0);
+      assert.strictEqual(callLog.filter(c => c.type === 'broadcastToAll').length, 0);
       assert.strictEqual(callLog.filter(c => c.type === 'saveStreakData').length, 0);
     });
 
@@ -167,7 +173,7 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
 
       assert.strictEqual(result.exitCode, 1);
 
-      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(pushCalls.length, 1, '障害通知が送られること');
       assert.match(pushCalls[0].args[0], /⚠️/, '障害メッセージであること');
 
@@ -183,7 +189,7 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       const result = await mainModule.main();
 
       assert.strictEqual(result.exitCode, 0);
-      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(pushCalls.length, 1);
       assert.match(pushCalls[0].args[0], /対象のユーザーがいません/);
     });
@@ -201,8 +207,8 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
 
     it('正常系: Discordにだけ届いた場合もボーナスをリセットする(二重支給を防ぐ)', async () => {
       setupMocks({
-        broadcastMessage: async (...args) => {
-          callLog.push({ type: 'broadcastMessage', args });
+        broadcastToAll: async (...args) => {
+          callLog.push({ type: 'broadcastToAll', args });
           return {
             success: true,
             results: [
@@ -219,6 +225,42 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       const saveCalls = callLog.filter(c => c.type === 'saveStreakData');
       assert.strictEqual(saveCalls.length, 1, 'Discordに届いていればリセットすること');
       assert.strictEqual(saveCalls[0].users['じろう (小学生コース)'].bonus, 0);
+    });
+
+    it('正常系: LINE成功・Discord失敗のときリセットはするが終了コード1で失効を知らせる', async () => {
+      setupMocks({
+        broadcastToAll: async (...args) => {
+          callLog.push({ type: 'broadcastToAll', args });
+          return {
+            success: true,
+            results: [
+              { channel: 'line', success: true },
+              { channel: 'discord', success: false, error: 'Discord API エラー: 404 Not Found - Unknown Webhook' }
+            ]
+          };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      const saveCalls = callLog.filter(c => c.type === 'saveStreakData');
+      assert.strictEqual(saveCalls.length, 1, 'LINEに届いているのでリセットすること(二重支給防止)');
+      assert.strictEqual(saveCalls[0].users['じろう (小学生コース)'].bonus, 0);
+      assert.strictEqual(result.exitCode, 1, 'Webhook失効に気づけるよう終了コード1にすること');
+    });
+
+    it('正常系: Webhook未設定のときはリセットして終了コード0(任意項目のため失敗にしない)', async () => {
+      setupMocks({
+        broadcastToAll: async (...args) => {
+          callLog.push({ type: 'broadcastToAll', args });
+          return { success: true, results: [{ channel: 'line', success: true }] };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(callLog.filter(c => c.type === 'saveStreakData').length, 1);
+      assert.strictEqual(result.exitCode, 0, 'Discordの結果がなければ終了コードに影響させないこと');
     });
   });
 

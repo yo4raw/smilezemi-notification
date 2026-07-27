@@ -6,7 +6,7 @@
  */
 
 const { loadConfig } = require('./config');
-const { broadcastMessage } = require('./broadcast');
+const { broadcastToAll } = require('./broadcast');
 const { loadStreakData, saveStreakData, settleBonuses } = require('./streak');
 
 /**
@@ -82,7 +82,7 @@ async function main() {
         '月次ボーナス清算のデータ読み込みに失敗したため、今月の清算をお届けできません。',
         'GitHub Actions のログを確認してください。'
       ].join('\n');
-      const errorNotifyResult = await broadcastMessage(errorMessage, config);
+      const errorNotifyResult = await broadcastToAll(errorMessage, config);
       if (!errorNotifyResult.success) {
         console.error('❌ エラー通知の送信に全宛先で失敗しました');
       }
@@ -108,9 +108,9 @@ async function main() {
     return { success: true, exitCode: 0 };
   }
 
-  // 5. 通知送信（LINE→失敗時のみDiscordへ転送）
+  // 5. 通知送信（LINEとDiscordの両方へ。Discordは年12回の疎通確認を兼ねる）
   console.log('📤 通知を送信しています...');
-  const notifyResult = await broadcastMessage(message, config);
+  const notifyResult = await broadcastToAll(message, config);
 
   if (!notifyResult.success) {
     // 全宛先で失敗したときはリセットせず持ち越す(次回実行で再清算できる)
@@ -129,6 +129,16 @@ async function main() {
   } else {
     console.error('❌ ボーナスのリセット保存に失敗しました:', saveResult.error);
     errors.push(saveResult.error);
+  }
+
+  // Discordへ送ったのに失敗した場合は、Webhookが失効している可能性がある。
+  // 清算そのものはLINEに届いているためリセットは済ませたうえで、
+  // 終了コードで知らせる(Discordはフォールバック専用で普段は叩かれないため、
+  // この月次実行が唯一の定期的な疎通確認になっている)
+  const discordResult = notifyResult.results.find(result => result.channel === 'discord');
+  if (discordResult && !discordResult.success) {
+    console.error('❌ Discordへの送信に失敗しました。Webhookが失効している可能性があります:', discordResult.error);
+    errors.push(`Discordへの疎通確認に失敗しました: ${discordResult.error}`);
   }
 
   console.log('🎉 処理が正常に完了しました');
