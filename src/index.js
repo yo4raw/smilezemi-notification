@@ -91,7 +91,7 @@ async function main() {
     context = loginResult.context;
     console.log('✅ ログインが完了しました');
 
-    // 4. ユーザー一覧取得とLINE通知
+    // 4. ユーザー一覧取得と通知
     console.log('👥 ユーザー一覧を取得しています...');
     const userListResult = await getUserList(page);
 
@@ -173,7 +173,7 @@ async function main() {
 
       // ドライラン: DRY_RUN=true の場合は送信・保存しない
       if (process.env.DRY_RUN === 'true') {
-        console.log('ℹ️ ドライランモード: 基本モードのLINE通知とデータ保存はスキップしました');
+        console.log('ℹ️ ドライランモード: 基本モードの通知とデータ保存はスキップしました');
         return {
           success: errors.length === 0,
           exitCode: errors.length === 0 ? 0 : 1,

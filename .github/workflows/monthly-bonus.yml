@@ -50,6 +50,7 @@ jobs:
           echo "SMILEZEMI_PASSWORD=${{ secrets.SMILEZEMI_PASSWORD }}" >> .env
           echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" >> .env
           echo "LINE_USER_ID=${{ secrets.LINE_USER_ID }}" >> .env
+          echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> .env
 
       # 4. Dockerイメージをビルド
       - name: Dockerイメージをビルド
@@ -113,18 +114,35 @@ jobs:
         if: always()
         run: rm -f .env
 
-      # 10. ワークフロー失敗をLINEに通知(最後の砦。この通知自体の失敗はジョブを落とさない)
-      - name: 失敗をLINEに通知
+      # 10. ワークフロー失敗を通知(最後の砦。LINE→失敗時のみDiscord。この通知自体の失敗はジョブを落とさない)
+      - name: 失敗を通知（LINE→失敗時のみDiscord）
         if: failure()
         env:
           WORKFLOW_NAME: ${{ github.workflow }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER: ${{ secrets.LINE_USER_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           message=$(printf '⚠️ GitHub Actions ワークフローが失敗しました\n\nワークフロー: %s\n実行ログ: %s' "$WORKFLOW_NAME" "$RUN_URL")
           payload=$(jq -n --arg to "$LINE_USER" --arg text "$message" '{to: $to, messages: [{type: "text", text: $text}]}')
-          curl -sS --fail-with-body -X POST https://api.line.me/v2/bot/message/push \
+
+          if curl -sS --fail-with-body -X POST https://api.line.me/v2/bot/message/push \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $LINE_TOKEN" \
-            -d "$payload" || echo "::warning::失敗通知の送信に失敗しました"
+            -d "$payload"; then
+            exit 0
+          fi
+
+          echo "::warning::LINEへの失敗通知に失敗しました"
+
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL が未設定のためDiscordへの転送をスキップします"
+            exit 0
+          fi
+
+          discord_message=$(printf '⚠️ LINEへの送信に失敗したためDiscordに転送しました\n\n%s' "$message")
+          discord_payload=$(jq -n --arg content "$discord_message" '{content: $content}')
+          curl -sS --fail-with-body -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$discord_payload" || echo "::warning::Discordへの失敗通知の送信にも失敗しました"

@@ -30,6 +30,7 @@ GitHub Actionsで環境変数を安全に使用するため、リポジトリの
 | `SMILEZEMI_PASSWORD` | みまもるネットのパスワード | `your_password` |
 | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Messaging APIのチャネルアクセストークン | `usCcZM5FnAcLmINfwnZA...` |
 | `LINE_USER_ID` | LINE通知の送信先ユーザーID | `U7210d9e39ebb4a78...` |
+| `DISCORD_WEBHOOK_URL` | 任意: LINE送信失敗時の転送先。Discordのチャンネル設定 → 連携サービス → ウェブフック で作成 | `https://discord.com/api/webhooks/123.../abc...` |
 
 **追加手順（各シークレットごとに繰り返す）:**
 

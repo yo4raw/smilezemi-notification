@@ -19,6 +19,14 @@ const REQUIRED_ENV_VARS = [
   'LINE_USER_ID'
 ];
 
+// 任意環境変数のリスト（未設定でもエラーにしない）
+const OPTIONAL_ENV_VARS = [
+  {
+    name: 'DISCORD_WEBHOOK_URL',
+    note: 'LINE送信失敗時のフォールバック先。未設定だとLINE失敗時に通知が届かない'
+  }
+];
+
 // 環境変数の妥当性チェック
 const VALIDATION_RULES = {
   SMILEZEMI_USERNAME: {
@@ -99,6 +107,17 @@ function main() {
       console.log(`   ${validationMessage}`);
       errors.push(`${varName}の形式が無効です: ${validationMessage}`);
       hasError = true;
+    }
+  });
+
+  console.log('\n📋 任意環境変数のチェック:\n');
+
+  OPTIONAL_ENV_VARS.forEach(({ name, note }) => {
+    if (process.env[name]) {
+      console.log(`✅ ${name}: 設定済み`);
+    } else {
+      console.log(`ℹ️  ${name}: 未設定（${note}）`);
+      warnings.push(`${name}が未設定です`);
     }
   });
 
