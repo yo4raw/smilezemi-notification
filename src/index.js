@@ -8,7 +8,8 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
-const { sendNotification, sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { formatMessage, formatDetailedMessage } = require('./notifier');
+const { broadcastMessage } = require('./broadcast');
 const { loadStreakData, formatStreakInfo, isStudied, createInitialState, getRequirementForCourse } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
@@ -149,13 +150,9 @@ async function main() {
             '夜通知のデータ取得に失敗したため、本日の通知をお届けできません。',
             'GitHub Actions のログを確認してください。'
           ].join('\n');
-          const errorNotifyResult = await sendPushMessage(
-            errorMessage,
-            config.LINE_CHANNEL_ACCESS_TOKEN,
-            config.LINE_USER_ID
-          );
+          const errorNotifyResult = await broadcastMessage(errorMessage, config);
           if (!errorNotifyResult.success) {
-            console.error('❌ エラー通知の送信にも失敗しました:', errorNotifyResult.error);
+            console.error('❌ エラー通知の送信に全宛先で失敗しました');
           }
         }
 
@@ -184,17 +181,16 @@ async function main() {
         };
       }
 
-      const notifyResult = await sendNotification(
-        compareResult.changes,
-        config.LINE_CHANNEL_ACCESS_TOKEN,
-        config.LINE_USER_ID
+      const notifyResult = await broadcastMessage(
+        formatMessage(compareResult.changes),
+        config
       );
 
       if (notifyResult.success) {
-        console.log('✅ 基本モードでのLINE通知が完了しました');
+        console.log('✅ 基本モードでの通知が完了しました');
       } else {
-        console.error('❌ 基本モードでのLINE通知に失敗しました:', notifyResult.error);
-        errors.push(notifyResult.error);
+        console.error('❌ 基本モードでの通知に失敗しました');
+        errors.push('基本モードの通知が全宛先で失敗しました');
       }
 
       // データ保存（v2.0形式、デフォルト値付き）
@@ -312,12 +308,12 @@ async function main() {
       errors.push(compareResult.error);
     }
 
-    // 8. LINE通知送信（詳細データモード）
+    // 8. 通知送信（詳細データモード）
     // Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
-    console.log('📤 LINE通知を送信しています...');
+    console.log('📤 通知を送信しています...');
 
     // 詳細メッセージをフォーマット（ミッション変化情報・コース別しきい値未達警告を含む）
-    let message = formatDetailedMessage(currentData, missionChangesResult, {
+    const message = formatDetailedMessage(currentData, missionChangesResult, {
       streaks,
       missionWarningThresholds: {
         elementary: getRequirementForCourse('elementary', todayDateString),
@@ -325,15 +321,12 @@ async function main() {
       }
     });
 
-    // 文字数制限を適用
-    message = truncateToLimit(message);
-
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない
     if (process.env.DRY_RUN === 'true') {
       console.log('\n📋 === 通知メッセージプレビュー ===');
       console.log(message);
       console.log('=== プレビュー終了 ===\n');
-      console.log('ℹ️ ドライランモード: LINE通知とデータ保存はスキップしました');
+      console.log('ℹ️ ドライランモード: 通知とデータ保存はスキップしました');
       console.log('🎉 処理が正常に完了しました');
       return {
         success: errors.length === 0,
@@ -342,18 +335,14 @@ async function main() {
       };
     }
 
-    // 通知送信（リトライ・タイムアウト・マスキングはsendPushMessageに委譲）
-    const notifyResult = await sendPushMessage(
-      message,
-      config.LINE_CHANNEL_ACCESS_TOKEN,
-      config.LINE_USER_ID
-    );
+    // 通知送信（宛先の切り替え・リトライ・タイムアウト・マスキングはbroadcastMessageに委譲）
+    const notifyResult = await broadcastMessage(message, config);
 
     if (notifyResult.success) {
-      console.log('✅ 詳細モードでのLINE通知が完了しました');
+      console.log('✅ 通知の送信が完了しました');
     } else {
-      console.error('❌ LINE通知の送信に失敗しました:', notifyResult.error);
-      errors.push(notifyResult.error);
+      console.error('❌ 通知の送信に全宛先で失敗しました');
+      errors.push('通知が全宛先で失敗しました');
     }
 
     // 9. 新しいデータの保存
