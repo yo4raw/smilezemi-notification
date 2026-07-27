@@ -9,6 +9,13 @@ const { loadConfig } = require('./config');
 const { broadcastToAll } = require('./broadcast');
 const { loadStreakData, saveStreakData, settleBonuses } = require('./streak');
 
+// ボーナスポイント1点あたりの金額(円)。コース別に単価が違う。
+// 単価を変えるときはここだけを書き換える
+const BONUS_POINT_YEN = {
+  elementary: 30,
+  juniorHigh: 50
+};
+
 /**
  * 前月の月ラベルを返す(JST基準)
  *
@@ -24,7 +31,29 @@ function getPreviousMonthLabel(now = new Date()) {
 }
 
 /**
+ * ボーナスポイントを金額(円)に換算する
+ *
+ * settleBonuses() が返す settlements にはコース情報が含まれず、ストリークデータにも
+ * 保存されていないため、クローラーが組み立てた表示名からコースを判定する。
+ * 判定方法は src/notifier.js と同じ慣例に揃えている(コース表記なしは小学生扱い)。
+ *
+ * @param {string} userName - 表示名(例: "はなこ (小学生コース)")
+ * @param {number} bonus - ボーナスポイント数
+ * @returns {number} 金額(円)
+ */
+function toBonusYen(userName, bonus) {
+  const rate = userName.includes('中学生コース')
+    ? BONUS_POINT_YEN.juniorHigh
+    : BONUS_POINT_YEN.elementary;
+
+  return bonus * rate;
+}
+
+/**
  * 清算リストを通知メッセージに整形する
+ *
+ * ポイント数に加えて、コース別単価で換算した金額と全員分の合計を載せる。
+ * 受け取る側がそのまま現金を渡せる状態にするため。
  *
  * @param {Array<{userName: string, bonus: number}>} settlements
  * @param {string} monthLabel - 例: "7月"
@@ -38,10 +67,16 @@ function formatMonthlyBonusMessage(settlements, monthLabel) {
     return lines.join('\n');
   }
 
+  let totalYen = 0;
+
   settlements.forEach(settlement => {
-    lines.push(`👤 ${settlement.userName}: ${settlement.bonus}ポイント`);
+    const yen = toBonusYen(settlement.userName, settlement.bonus);
+    totalYen += yen;
+    lines.push(`👤 ${settlement.userName}: ${settlement.bonus}ポイント → ¥${yen.toLocaleString('ja-JP')}`);
   });
+
   lines.push('');
+  lines.push(`合計: ¥${totalYen.toLocaleString('ja-JP')}`);
   lines.push('ボーナスポイントはお小遣いとして支給してね!');
 
   return lines.join('\n');
