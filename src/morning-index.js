@@ -1,6 +1,6 @@
 /**
  * 朝通知 - メイン実行フロー
- * 毎朝 JST 7:00 に両コース(小学生・中学生)の前日学習実績を LINE に通知する。
+ * 毎朝 JST 7:00 に両コース(小学生・中学生)の前日学習実績を通知する。
  * 前日は確定データのため差分比較・mission_data.json への保存は行わない。
  */
 
@@ -8,7 +8,8 @@ const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getTargetDates } = require('./crawler');
-const { sendPushMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { formatDetailedMessage, truncateToLimit } = require('./notifier');
+const { broadcastMessage, LINE_MAX_MESSAGE_LENGTH } = require('./broadcast');
 const {
   loadStreakData,
   saveStreakData,
@@ -101,13 +102,9 @@ async function main() {
           '朝通知のデータ取得に失敗したため、昨日分の通知をお届けできません。',
           'GitHub Actions のログを確認してください。'
         ].join('\n');
-        const errorNotifyResult = await sendPushMessage(
-          errorMessage,
-          config.LINE_CHANNEL_ACCESS_TOKEN,
-          config.LINE_USER_ID
-        );
+        const errorNotifyResult = await broadcastMessage(errorMessage, config);
         if (!errorNotifyResult.success) {
-          console.error('❌ エラー通知の送信にも失敗しました:', errorNotifyResult.error);
+          console.error('❌ エラー通知の送信に全宛先で失敗しました');
         }
       }
 
@@ -170,7 +167,7 @@ async function main() {
     }
 
     // 5. メッセージフォーマット（前日は確定データのため差分比較なし。未学習でも必ず通知）
-    let message = formatDetailedMessage(crawlResult.data, null, {
+    const message = formatDetailedMessage(crawlResult.data, null, {
       dateLabel: `昨日(${targetDates.withPadding})`,
       showNoStudyWarning: true,
       streaks,
@@ -179,31 +176,28 @@ async function main() {
         juniorHigh: getJuniorHighRequirement(targetDates.dateString)
       }
     });
-    message = truncateToLimit(message);
 
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信しない
     if (process.env.DRY_RUN === 'true') {
+      // 実送信ではbroadcastが宛先ごとに切り詰めるため、プレビューもLINEの上限で切って表示する
+      // （送信経路には手を入れず、表示だけを実際の文面に合わせる）
       console.log('\n📋 === 通知メッセージプレビュー ===');
-      console.log(message);
+      console.log(truncateToLimit(message, LINE_MAX_MESSAGE_LENGTH));
       console.log('=== プレビュー終了 ===\n');
-      console.log('ℹ️ ドライランモード: LINE通知はスキップしました');
+      console.log('ℹ️ ドライランモード: 通知はスキップしました');
       console.log('🎉 処理が正常に完了しました');
       return { success: true, exitCode: 0 };
     }
 
-    // 6. LINE API 送信（リトライ・タイムアウト・マスキングはsendPushMessageに委譲）
-    console.log('📤 LINE通知を送信しています...');
-    const notifyResult = await sendPushMessage(
-      message,
-      config.LINE_CHANNEL_ACCESS_TOKEN,
-      config.LINE_USER_ID
-    );
+    // 6. 通知送信（宛先の切り替え・リトライ・タイムアウト・マスキングはbroadcastMessageに委譲）
+    console.log('📤 通知を送信しています...');
+    const notifyResult = await broadcastMessage(message, config);
 
     if (notifyResult.success) {
-      console.log('✅ 朝通知のLINE送信が完了しました');
+      console.log('✅ 朝通知の送信が完了しました');
     } else {
-      console.error('❌ LINE通知の送信に失敗しました:', notifyResult.error);
-      errors.push(notifyResult.error);
+      console.error('❌ 朝通知の送信に全宛先で失敗しました');
+      errors.push('朝通知が全宛先で失敗しました');
     }
 
     // 7. 完了

@@ -66,7 +66,9 @@ src/
 ├── crawler.js                # クローリング (getUserList, getAllUsersDetailedData, getTargetDates等)
 ├── data.js                   # ミッションデータ永続化 (loadPreviousData, compareData, saveData)
 ├── streak.js                 # ストリーク管理 (confirmDay, updateStreaks, formatStreakInfo, load/saveStreakData)
-└── notifier.js               # LINE通知 (sendNotification, formatDetailedMessage, truncateToLimit)
+├── notifier.js               # LINE通知 (sendNotification, formatDetailedMessage, truncateToLimit)
+├── discord.js                # Discord Webhook通知 (sendDiscordMessage, maskWebhookUrl)
+└── broadcast.js              # 送信フォールバック層 (broadcastMessage: LINE→失敗時のみDiscord)
 
 tests/                        # Node.js built-in test runner (node --test)
 scripts/                      # validate-env.js, validate-security.sh, test-docker.sh 等
@@ -116,6 +118,8 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 `SMILEZEMI_USERNAME`, `SMILEZEMI_PASSWORD`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_USER_ID`
 (GitHub Secretsまたは`.env`ファイルで管理。本番はdocker composeのenv_file経由)
 
+任意: `DISCORD_WEBHOOK_URL`（LINE送信失敗時のフォールバック先。未設定ならフォールバックせず従来どおりLINEのみ）
+
 ### LINE送信数の制約（重要）
 
 送信先はLINEグループで、グループへのpushは**メッセージ数×グループ人数**でカウントされる（4人グループ=1通知4カウント）。無料プランの月間上限は200カウントで、朝夜とも毎日送ると構造的に超過する。対策として**夜通知は「当日のストリーク要件未達のユーザーが1人でもいる日」だけ送信**し（全員達成の日はスキップ。朝・月次は無条件送信）、週間レポート通知は廃止した。詳細: `docs/superpowers/specs/2026-07-26-line-quota-reduction-design.md`
@@ -123,6 +127,9 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 - 通知を増やす変更をする際は必ず月間カウントを見積もること（固定分≈128=朝124+月次4、夜通知の残枠≈72=月18日分）
 - 1つのLINEグループに公式アカウント(bot)は1つしか入れないため、チャンネル追加で枠を増やす手は使えない
 - 上限超過時はLINE APIが429を返す。notifier.jsは429を非リトライで即失敗させ、レスポンスボディの理由をログに残す
+- LINE送信が失敗した場合（429の枠切れ・401・ネットワーク障害すべて）は `src/broadcast.js` が Discord Webhook へ転送する。転送メッセージには失敗理由の行が付く。Discordには月間送信数の上限がない
+- Discordはフォールバック専用で、LINEが成功している限り一度も呼ばれない。そのため Webhook が失効しても気づけない（`docs/superpowers/specs/2026-07-27-discord-fallback-notification-design.md` の「既知の制約」参照）
+- 通知の成否は「1つ以上の宛先に届いたか」で判定する。LINEだけ失敗してもワークフローは赤くしない
 
 ## Key Design Decisions
 

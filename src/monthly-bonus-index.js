@@ -1,12 +1,12 @@
 /**
  * 月次ボーナス清算エントリポイント
  *
- * 毎月1日の朝に実行し、前月に貯まったボーナスポイントを子供ごとにLINE通知して
+ * 毎月1日の朝に実行し、前月に貯まったボーナスポイントを子供ごとに通知して
  * 0にリセット(清算)する。クロール不要のためブラウザは起動しない。
  */
 
 const { loadConfig } = require('./config');
-const { sendPushMessage } = require('./notifier');
+const { broadcastMessage } = require('./broadcast');
 const { loadStreakData, saveStreakData, settleBonuses } = require('./streak');
 
 /**
@@ -82,13 +82,9 @@ async function main() {
         '月次ボーナス清算のデータ読み込みに失敗したため、今月の清算をお届けできません。',
         'GitHub Actions のログを確認してください。'
       ].join('\n');
-      const errorNotifyResult = await sendPushMessage(
-        errorMessage,
-        config.LINE_CHANNEL_ACCESS_TOKEN,
-        config.LINE_USER_ID
-      );
+      const errorNotifyResult = await broadcastMessage(errorMessage, config);
       if (!errorNotifyResult.success) {
-        console.error('❌ エラー通知の送信にも失敗しました:', errorNotifyResult.error);
+        console.error('❌ エラー通知の送信に全宛先で失敗しました');
       }
     }
 
@@ -107,26 +103,24 @@ async function main() {
     console.log('\n📋 === 通知メッセージプレビュー ===');
     console.log(message);
     console.log('=== プレビュー終了 ===\n');
-    console.log('ℹ️ ドライランモード: LINE通知とボーナスリセットはスキップしました');
+    console.log('ℹ️ ドライランモード: 通知とボーナスリセットはスキップしました');
     console.log('🎉 処理が正常に完了しました');
     return { success: true, exitCode: 0 };
   }
 
-  // 5. LINE通知送信
-  console.log('📤 LINE通知を送信しています...');
-  const notifyResult = await sendPushMessage(
-    message,
-    config.LINE_CHANNEL_ACCESS_TOKEN,
-    config.LINE_USER_ID
-  );
+  // 5. 通知送信（LINE→失敗時のみDiscordへ転送）
+  console.log('📤 通知を送信しています...');
+  const notifyResult = await broadcastMessage(message, config);
 
   if (!notifyResult.success) {
-    // 送信失敗時はリセットせず持ち越す(次回実行で再清算できる)
-    console.error('❌ LINE通知の送信に失敗しました:', notifyResult.error);
-    return { success: false, exitCode: 1, error: notifyResult.error };
+    // 全宛先で失敗したときはリセットせず持ち越す(次回実行で再清算できる)
+    console.error('❌ 通知の送信に全宛先で失敗しました');
+    return { success: false, exitCode: 1, error: '清算通知が全宛先で失敗しました' };
   }
 
-  console.log('✅ 月次ボーナス清算のLINE通知が完了しました');
+  // どこか1つでも届いていればリセットする。届いているのに持ち越すと、
+  // 次回実行で同じ月の清算が再送・再支給されてしまうため
+  console.log('✅ 月次ボーナス清算の通知が完了しました');
 
   // 6. 送信成功後にボーナスをリセットして保存
   const saveResult = await saveStreakData(settledUsers);

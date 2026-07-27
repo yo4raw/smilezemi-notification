@@ -46,6 +46,7 @@
 | `SMILEZEMI_PASSWORD` | みまもるネットのパスワード🔒 |
 | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Messaging APIのチャネルアクセストークン🎫 |
 | `LINE_USER_ID` | LINE通知の送信先ユーザーID👤 |
+| `DISCORD_WEBHOOK_URL` | 任意: LINE送信失敗時のフォールバック先Webhook💬 |
 
 ### LINE Messaging APIの設定💚📲（通知の心臓）
 
@@ -78,6 +79,7 @@ SMILEZEMI_USERNAME=your_email@example.com
 SMILEZEMI_PASSWORD=your_password
 LINE_CHANNEL_ACCESS_TOKEN=your_line_token
 LINE_USER_ID=your_line_user_id
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxxxx/yyyyy
 ```
 
 ### 3. Docker環境でのテスト🐳💙（環境差を消す）

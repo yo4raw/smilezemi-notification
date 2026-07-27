@@ -211,8 +211,12 @@ function maskTokenInError(errorMessage, token) {
   let masked = errorMessage;
 
   // 実際のトークン値を置換
+  // 正規表現を組み立てると、トークンに含まれる特殊文字（+ * [ ( 等）が
+  // メタ文字として解釈されてマスクが空振りしたり、SyntaxError を投げたりする。
+  // このエラー文字列はDiscordへの転送でGitHub Actionsの自動マスクが効かない場所へ出るため、
+  // 正規表現を使わない split/join でリテラル一致の全置換を行う
   if (masked.includes(token)) {
-    masked = masked.replace(new RegExp(token, 'g'), '***');
+    masked = masked.split(token).join('***');
   }
 
   // 一般的なトークンパターンもマスキング
@@ -448,21 +452,40 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
 }
 
 /**
- * メッセージを5000文字以内に切り詰める
+ * メッセージを指定文字数以内に切り詰める
+ *
+ * 上限は宛先ごとに異なる（LINE=5000, Discord=2000）ため引数で受け取る。
  * Requirements: 4.5
  *
  * @param {string} message - メッセージ文字列
+ * @param {number} [maxLength=5000] - 上限文字数
  * @returns {string} - 切り詰められたメッセージ
  */
-function truncateToLimit(message) {
-  // 5000文字以下の場合はそのまま返す
-  if (message.length <= MAX_MESSAGE_LENGTH) {
+function truncateToLimit(message, maxLength = MAX_MESSAGE_LENGTH) {
+  if (message.length <= maxLength) {
     return message;
   }
 
-  // 4950文字で切り詰め、省略メッセージを追加（50文字の安全マージン）
-  const truncated = message.substring(0, 4950);
-  return truncated + '\n\n...（メッセージが長すぎるため省略）';
+  const suffix = '\n\n...（メッセージが長すぎるため省略）';
+  let body = message.substring(0, maxLength - suffix.length);
+
+  // substring は UTF-16 コードユニット単位で切るため、👤 📊 のような BMP 外の絵文字の
+  // 途中で切れると末尾に孤立した高サロゲートが残る。不正なUTF-16を含むJSONは
+  // 転送先(Discord)に400で弾かれ、非リトライ判定でメッセージが丸ごと失われるため、
+  // 末尾が高サロゲートなら1コードユニット削って正しい文字列に整える
+  if (body.length > 0 && isHighSurrogate(body.charCodeAt(body.length - 1))) {
+    body = body.slice(0, -1);
+  }
+
+  return body + suffix;
+}
+
+/**
+ * UTF-16 の高サロゲート（サロゲートペアの前半）かどうか
+ * @private
+ */
+function isHighSurrogate(charCode) {
+  return charCode >= 0xD800 && charCode <= 0xDBFF;
 }
 
 module.exports = {

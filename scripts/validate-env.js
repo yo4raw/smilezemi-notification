@@ -19,6 +19,18 @@ const REQUIRED_ENV_VARS = [
   'LINE_USER_ID'
 ];
 
+// 任意環境変数のリスト（未設定でもエラーにしない）
+const OPTIONAL_ENV_VARS = [
+  {
+    name: 'DISCORD_WEBHOOK_URL',
+    note: 'LINE送信失敗時のフォールバック先。未設定だとLINE失敗時に通知が届かない',
+    // Discordはフォールバック時にしか叩かれないため、タイポは「LINEが落ちた当日」まで表面化しない。
+    // 設定時点で形式を見ておく（任意項目なので不一致でも検証は失敗させず警告のみ）
+    pattern: /^https:\/\/discord(app)?\.com\/api\/webhooks\/\d+\//,
+    description: 'https://discord.com/api/webhooks/{ID}/{トークン} 形式である必要があります'
+  }
+];
+
 // 環境変数の妥当性チェック
 const VALIDATION_RULES = {
   SMILEZEMI_USERNAME: {
@@ -100,6 +112,28 @@ function main() {
       errors.push(`${varName}の形式が無効です: ${validationMessage}`);
       hasError = true;
     }
+  });
+
+  console.log('\n📋 任意環境変数のチェック:\n');
+
+  OPTIONAL_ENV_VARS.forEach(({ name, note, pattern, description }) => {
+    const value = process.env[name];
+
+    if (!value) {
+      console.log(`ℹ️  ${name}: 未設定（${note}）`);
+      warnings.push(`${name}が未設定です`);
+      return;
+    }
+
+    if (pattern && !pattern.test(value)) {
+      // 任意項目のため hasError は立てず、警告に留める
+      console.log(`⚠️  ${name}: 設定されていますが形式が無効です`);
+      console.log(`   ${description}`);
+      warnings.push(`${name}の形式が無効です: ${description}`);
+      return;
+    }
+
+    console.log(`✅ ${name}: 設定済み`);
   });
 
   // 結果サマリー

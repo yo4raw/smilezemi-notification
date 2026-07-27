@@ -16,7 +16,7 @@ function resolveModule(p) {
 
 const MODULE_PATHS = [
   '../src/index', '../src/config', '../src/auth',
-  '../src/crawler', '../src/data', '../src/notifier', '../src/streak', 'playwright'
+  '../src/crawler', '../src/data', '../src/notifier', '../src/broadcast', '../src/streak', 'playwright'
 ];
 
 function clearModuleCache() {
@@ -24,6 +24,9 @@ function clearModuleCache() {
     try { delete require.cache[resolveModule(p)]; } catch {}
   }
 }
+
+// 切り詰めは本物を使う（DRY_RUNプレビューが実送信と同じ文面になることを担保するため）
+const { truncateToLimit: realTruncateToLimit } = require('../src/notifier');
 
 describe('オーケストレーション (src/index.js)', () => {
   let mainModule;
@@ -134,16 +137,21 @@ describe('オーケストレーション (src/index.js)', () => {
     require.cache[resolveModule('../src/notifier')] = {
       id: resolveModule('../src/notifier'), filename: resolveModule('../src/notifier'), loaded: true,
       exports: {
-        sendNotification: overrides.sendNotification || (async (...args) => {
-          callLog.push({ type: 'sendNotification', args });
-          return { success: true };
-        }),
-        sendPushMessage: overrides.sendPushMessage || (async (...args) => {
-          callLog.push({ type: 'sendPushMessage', args });
-          return { success: true };
-        }),
+        formatMessage: overrides.formatMessage || ((changes) => `テスト基本メッセージ(${changes.length}件)`),
         formatDetailedMessage: overrides.formatDetailedMessage || (() => 'テスト詳細メッセージ'),
-        truncateToLimit: overrides.truncateToLimit || ((msg) => msg)
+        // 切り詰めはDRY_RUNプレビューで使うので本物を使う
+        truncateToLimit: realTruncateToLimit
+      }
+    };
+
+    require.cache[resolveModule('../src/broadcast')] = {
+      id: resolveModule('../src/broadcast'), filename: resolveModule('../src/broadcast'), loaded: true,
+      exports: {
+        broadcastMessage: overrides.broadcastMessage || (async (...args) => {
+          callLog.push({ type: 'broadcastMessage', args });
+          return { success: true, results: [{ channel: 'line', success: true }] };
+        }),
+        LINE_MAX_MESSAGE_LENGTH: 5000
       }
     };
 
@@ -190,15 +198,15 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.exitCode, 0, '終了コードが0であること');
     });
 
-    it('正常系: LINE通知がsendPushMessage経由で送信される', async () => {
+    it('正常系: 通知がbroadcastMessage経由で送信される', async () => {
       await mainModule.main();
 
-      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
-      assert.strictEqual(pushCalls.length, 1, 'sendPushMessageが1回呼ばれること');
-      const [message, accessToken, userId] = pushCalls[0].args;
+      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
+      assert.strictEqual(pushCalls.length, 1, 'broadcastMessageが1回呼ばれること');
+      const [message, passedConfig] = pushCalls[0].args;
       assert.strictEqual(typeof message, 'string', '整形済みメッセージが渡されること');
-      assert.strictEqual(accessToken, 'test_token');
-      assert.strictEqual(userId, 'test_user');
+      assert.strictEqual(passedConfig.LINE_CHANNEL_ACCESS_TOKEN, 'test_token');
+      assert.strictEqual(passedConfig.LINE_USER_ID, 'test_user');
 
       const fetchCalls = callLog.filter(c => c.type === 'fetch');
       assert.strictEqual(fetchCalls.length, 0, '素のfetch直書きが使われないこと');
@@ -246,15 +254,16 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.error, '認証失敗');
     });
 
-    it('異常系: クローリング失敗時、基本モードにフォールバックする', async () => {
+    it('正常系: 基本モードにフォールバックした場合も通知はbroadcast経由で送られる', async () => {
       setupMocks({
-        getAllUsersDetailedData: async () => ({ success: false, error: 'クローリング失敗' })
+        crawlDetailedResult: { success: false, error: '詳細取得エラー' }
       });
 
-      const result = await mainModule.main();
+      await mainModule.main();
 
-      const notifyCalls = callLog.filter(c => c.type === 'sendNotification');
-      assert.strictEqual(notifyCalls.length, 1, 'フォールバックで通知が送られること');
+      const calls = callLog.filter(c => c.type === 'broadcastMessage');
+      assert.strictEqual(calls.length, 1, '基本モードでも1回だけ通知すること');
+      assert.match(calls[0].args[0], /テスト基本メッセージ/, 'formatMessageの結果が送られること');
     });
 
     it('異常系: 詳細・基本の両方が失敗した場合、終了コード1', async () => {
@@ -269,46 +278,57 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.exitCode, 1);
     });
 
-    it('異常系: 詳細・基本の両方が失敗した場合、「変更なし」ではなく障害通知を送る', async () => {
+    it('異常系: 詳細も基本も失敗したら「変更なし」ではなく障害通知を送る', async () => {
       setupMocks({
-        getAllUsersDetailedData: async () => ({ success: false, error: '詳細失敗' }),
-        getAllUsersMissionCounts: async () => ({ success: false, error: '基本も失敗' })
+        crawlDetailedResult: { success: false, error: '詳細取得エラー' },
+        crawlBasicResult: { success: false, error: '基本取得エラー' }
       });
 
-      await mainModule.main();
+      const result = await mainModule.main();
 
-      const notifyCalls = callLog.filter(c => c.type === 'sendNotification');
-      assert.strictEqual(notifyCalls.length, 0, '空changesのsendNotification(=変更なし偽装)が呼ばれないこと');
-
-      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
-      assert.strictEqual(pushCalls.length, 1, '障害通知がsendPushMessageで送られること');
-      const [message] = pushCalls[0].args;
-      assert.match(message, /⚠️/, '警告アイコンが含まれること');
-      assert.match(message, /エラー|失敗/, '障害であることが明示されること');
-      assert.doesNotMatch(message, /変更ありませんでした/, '正常を装うメッセージでないこと');
+      assert.strictEqual(result.exitCode, 1);
+      const calls = callLog.filter(c => c.type === 'broadcastMessage');
+      assert.strictEqual(calls.length, 1, '障害通知が送られること');
+      assert.match(calls[0].args[0], /⚠️/, '障害メッセージであること');
+      assert.doesNotMatch(calls[0].args[0], /変更ありませんでした/, '正常を装うメッセージでないこと');
     });
 
-    it('異常系: LINE API失敗時、errorsに記録される', async () => {
+    it('異常系: 全宛先で送信失敗した場合、errorsに記録される', async () => {
       setupMocks({
-        sendPushMessage: async () => ({ success: false, error: 'LINE API エラー: 500 Internal Server Error' })
+        broadcastMessage: async () => ({
+          success: false,
+          results: [
+            { channel: 'line', success: false, error: 'LINE API エラー: 500 Internal Server Error' },
+            { channel: 'discord', success: false, error: 'Discord API エラー: 404' }
+          ]
+        })
       });
 
       const result = await mainModule.main();
 
       assert.strictEqual(result.exitCode, 1);
       assert.strictEqual(Array.isArray(result.errors), true);
-      assert.strictEqual(result.errors.some(e => e.includes('LINE API')), true);
+      assert.strictEqual(result.errors.some(e => e.includes('全宛先')), true);
     });
 
-    it('異常系: LINE送信のネットワークエラー時、errorsに記録', async () => {
+    it('正常系: LINEが失敗してもDiscordに届いていれば成功扱いになる', async () => {
       setupMocks({
-        sendPushMessage: async () => ({ success: false, error: 'ネットワークエラー: Network error' })
+        broadcastMessage: async (...args) => {
+          callLog.push({ type: 'broadcastMessage', args });
+          return {
+            success: true,
+            results: [
+              { channel: 'line', success: false, error: 'LINE API エラー: 429' },
+              { channel: 'discord', success: true }
+            ]
+          };
+        }
       });
 
       const result = await mainModule.main();
 
-      assert.strictEqual(result.exitCode, 1);
-      assert.strictEqual(Array.isArray(result.errors), true);
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.exitCode, 0);
     });
 
     it('正常系: 夜通知は確定処理(updateStreaks/saveStreakData)を行わない', async () => {
@@ -356,8 +376,8 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.success, true, '送信スキップでも正常終了すること');
       assert.strictEqual(result.exitCode, 0);
 
-      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
-      assert.strictEqual(pushCalls.length, 0, '全員達成の日はsendPushMessageが呼ばれないこと');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
+      assert.strictEqual(pushCalls.length, 0, '全員達成の日はbroadcastMessageが呼ばれないこと');
 
       const saveCalls = callLog.filter(c => c.type === 'saveData');
       assert.strictEqual(saveCalls.length, 1, '通知しない日もデータは保存されること');
@@ -379,7 +399,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
       await mainModule.main();
 
-      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
       assert.strictEqual(pushCalls.length, 1, '未達ユーザーがいる日は送信されること');
     });
 
@@ -395,7 +415,7 @@ describe('オーケストレーション (src/index.js)', () => {
         const result = await mainModule.main();
 
         assert.strictEqual(result.success, true);
-        assert.strictEqual(callLog.filter(c => c.type === 'sendPushMessage').length, 0);
+        assert.strictEqual(callLog.filter(c => c.type === 'broadcastMessage').length, 0);
         assert.strictEqual(callLog.filter(c => c.type === 'saveData').length, 0, 'ドライランではデータ保存しないこと');
       } finally {
         if (originalDryRun === undefined) {
@@ -424,8 +444,8 @@ describe('オーケストレーション (src/index.js)', () => {
         assert.strictEqual(result.success, true, 'ドライランが成功すること');
         assert.strictEqual(result.exitCode, 0);
 
-        const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
-        assert.strictEqual(pushCalls.length, 0, 'sendPushMessageが呼ばれないこと');
+        const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
+        assert.strictEqual(pushCalls.length, 0, 'broadcastMessageが呼ばれないこと');
 
         const saveCalls = callLog.filter(c => c.type === 'saveData');
         assert.strictEqual(saveCalls.length, 0, 'saveDataが呼ばれないこと');
@@ -509,7 +529,7 @@ describe('オーケストレーション (src/index.js)', () => {
       const saveStreakCalls = callLog.filter(c => c.type === 'saveStreakData');
       assert.strictEqual(saveStreakCalls.length, 0, '夜通知は保存しないこと');
 
-      const pushCalls = callLog.filter(c => c.type === 'sendPushMessage');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
       assert.strictEqual(pushCalls.length, 1, '通知は送信されること');
       assert.ok(capturedFormatOptions.streaks, 'streaksマップは渡されること(空状態ベース)');
     });
