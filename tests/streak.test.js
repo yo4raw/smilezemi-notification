@@ -11,6 +11,7 @@ const {
   createInitialState,
   isStudied,
   countCompletedMissions,
+  countStudyItems,
   confirmDay,
   updateStreaks,
   formatStreakInfo,
@@ -708,5 +709,55 @@ describe('updateStreaksByCourse', () => {
     const elemUser = { userName: '太郎 (小学生コース)', course: 'elementary', missionCount: 4, missions: [] };
     updateStreaksByCourse(input, [elemUser], '2026-07-13');
     assert.deepStrictEqual(input, {}, '入力マップは変更されない');
+  });
+});
+
+// ─── countStudyItems テスト ───
+
+describe('countStudyItems() - 学習件数の算出', () => {
+  it('studyItemCount があればそれを返す', () => {
+    const user = { studyItemCount: 5, missionCount: 4 };
+
+    assert.strictEqual(countStudyItems(user), 5);
+  });
+
+  it('studyItemCount がなければ missionCount にフォールバックする', () => {
+    const user = { missionCount: 4 };
+
+    assert.strictEqual(countStudyItems(user), 4);
+  });
+
+  it('どちらもなければ missions の completed 件数を使う', () => {
+    const user = { missions: [{ completed: true }, { completed: true }, { completed: false }] };
+
+    assert.strictEqual(countStudyItems(user), 2);
+  });
+
+  it('studyItemCount が 0 でも missionCount にフォールバックしない', () => {
+    const user = { studyItemCount: 0, missionCount: 4 };
+
+    assert.strictEqual(countStudyItems(user), 0);
+  });
+});
+
+// ─── 自主学習を含めた達成判定テスト ───
+
+describe('isStudied() - 自主学習を含めた判定', () => {
+  it('ミッション2件+自主2件の計4件でしきい値4を満たす', () => {
+    const user = { studyItemCount: 4, missionCount: 2 };
+
+    assert.strictEqual(isStudied(user, { minCompletedMissions: 4 }), true);
+  });
+
+  it('ミッション3件のみ(自主0件)ではしきい値4を満たさない', () => {
+    const user = { studyItemCount: 3, missionCount: 3 };
+
+    assert.strictEqual(isStudied(user, { minCompletedMissions: 4 }), false);
+  });
+
+  it('studyItemCount のない旧データは missionCount で判定する', () => {
+    const user = { missionCount: 4 };
+
+    assert.strictEqual(isStudied(user, { minCompletedMissions: 4 }), true);
   });
 });

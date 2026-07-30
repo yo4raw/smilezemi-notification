@@ -69,21 +69,39 @@ function countCompletedMissions(user) {
 }
 
 /**
+ * その日の学習件数を数える(ミッション+自主学習)
+ *
+ * 小学生コースのタイムラインにはミッションバッジのない自主学習も並ぶ。
+ * ストリークの達成判定はこの合計件数で行う。
+ * studyItemCount を持たない旧データ(actions/cache に残る過去分)は
+ * missionCount にフォールバックし、従来と同じ結果になるようにする。
+ *
+ * @param {{studyItemCount?: number, missionCount?: number, missions?: Array<{completed: boolean}>}} user
+ * @returns {number}
+ */
+function countStudyItems(user) {
+  if (typeof user.studyItemCount === 'number') {
+    return user.studyItemCount;
+  }
+  return countCompletedMissions(user);
+}
+
+/**
  * その日に学習したかを判定(notifier.js の未学習判定と同一基準)
  *
- * minCompletedMissions を1以上指定した場合(小学生コースの5個ルール)は
- * 「完了ミッション数 >= 指定値」のみで判定し、勉強時間は見ない。
+ * minCompletedMissions を1以上指定した場合(コース別のしきい値)は
+ * 「学習件数(ミッション+自主学習) >= 指定値」のみで判定し、勉強時間は見ない。
  *
- * @param {{studyTime?: {hours: number, minutes: number}, missionCount?: number, missions?: Array}} user - v2.0形式のユーザーデータ
+ * @param {{studyTime?: {hours: number, minutes: number}, studyItemCount?: number, missionCount?: number, missions?: Array}} user - v2.0形式のユーザーデータ
  * @param {object} [options]
- * @param {number} [options.minCompletedMissions=0] - ストリークに必要な完了ミッション数
+ * @param {number} [options.minCompletedMissions=0] - ストリークに必要な学習件数
  * @returns {boolean}
  */
 function isStudied(user, options = {}) {
   const { minCompletedMissions = 0 } = options;
 
   if (minCompletedMissions > 0) {
-    return countCompletedMissions(user) >= minCompletedMissions;
+    return countStudyItems(user) >= minCompletedMissions;
   }
 
   const hours = user.studyTime?.hours ?? 0;
@@ -375,6 +393,7 @@ module.exports = {
   createInitialState,
   isStudied,
   countCompletedMissions,
+  countStudyItems,
   confirmDay,
   STREAK_REQUIREMENTS,
   getJuniorHighRequirement,
