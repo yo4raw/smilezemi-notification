@@ -707,7 +707,7 @@ async function getTodayMissionCountForJuniorHigh(page, dateOffset = 0) {
 
     if (!todayRoot) {
       console.log(`  ℹ️ [中学生] 今日(${todayDates.withPadding})のデータはまだありません（0件として扱います）`);
-      return { success: true, count: 0 };
+      return { success: true, count: 0, missionCount: 0 };
     }
 
     // subject__bWHro 内の course__KrAEA をカウント
@@ -715,7 +715,7 @@ async function getTodayMissionCountForJuniorHigh(page, dateOffset = 0) {
     const count = courses.length;
 
     console.log(`📊 [中学生] 今日(${todayDates.withPadding})の講座数: ${count}件`);
-    return { success: true, count };
+    return { success: true, count, missionCount: count };
   } catch (error) {
     return { success: false, error: `[中学生] 講座数取得エラー: ${error.message}`, count: 0 };
   }
@@ -736,7 +736,7 @@ async function getMissionDetailsForJuniorHigh(page, dateOffset = 0) {
     }
 
     const { juniorHighTimeline } = selectors;
-    const missions = [];
+    const rows = [];
 
     // 各教科グループを取得
     const subjectGroups = await todayRoot.locator(juniorHighTimeline.subjectGroup).all();
@@ -764,20 +764,19 @@ async function getMissionDetailsForJuniorHigh(page, dateOffset = 0) {
           ? `${subjectName.trim()}: ${courseName.trim()}`
           : courseName.trim() || subjectName.trim() || 'ミッション';
 
-        missions.push({
+        // 中学生コースにミッション概念はなく、載っている行は全て学習実績
+        rows.push({
           name,
           score,
-          completed: true
+          isMission: true
         });
-
-        if (missions.length >= 10) break;
       }
-
-      if (missions.length >= 10) break;
     }
 
-    console.log(`📋 [中学生] 今日(${todayDates.withPadding})の講座詳細: ${missions.length}件`);
-    return { success: true, missions };
+    const summary = summarizeStudyRows(rows);
+
+    console.log(`📋 [中学生] 今日(${todayDates.withPadding})の講座詳細: ${summary.missions.length}件`);
+    return { success: true, missions: summary.missions };
   } catch (error) {
     return { success: false, error: `[中学生] 講座詳細取得エラー: ${error.message}`, missions: [] };
   }
