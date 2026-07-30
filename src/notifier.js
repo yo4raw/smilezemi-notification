@@ -4,13 +4,17 @@
  */
 
 const { maskSensitiveData } = require('./config');
-const { countCompletedMissions } = require('./streak');
+const { countStudyItems } = require('./streak');
 
 // LINE Push Message APIエンドポイント
 const LINE_API_ENDPOINT = 'https://api.line.me/v2/bot/message/push';
 
 // メッセージの最大長（LINE APIの制限）
 const MAX_MESSAGE_LENGTH = 5000;
+
+// 通知に並べる講座の最大件数。超過分は「ほか◯件」にまとめる。
+// クローラー側では全件取得しており、合計点や学習件数は全件から計算される。
+const MAX_LISTED_COURSES = 10;
 
 /**
  * LINE通知を送信する
@@ -351,6 +355,17 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     const missions = user.missions ?? [];
     const isNoStudy = hours === 0 && minutes === 0 && missions.length === 0;
 
+    // 学習件数(ミッション+自主)。自主学習があるときだけ内訳を出す
+    const studyItemCount = countStudyItems(user);
+    const missionOnlyCount = user.missionCount ?? studyItemCount;
+    const selfStudyCount = Math.max(0, studyItemCount - missionOnlyCount);
+
+    if (!(showNoStudyWarning && isNoStudy) && studyItemCount > 0) {
+      message += selfStudyCount > 0
+        ? `✅ 学習${studyItemCount}件（ミッション${missionOnlyCount}・自主${selfStudyCount}）\n`
+        : `✅ 学習${studyItemCount}件\n`;
+    }
+
     // 完了数未達の警告。コース別しきい値(missionWarningThresholds)を優先し、
     // なければ単一の missionWarningThreshold を使う(後方互換)。
     const warnThreshold = missionWarningThresholds
@@ -358,10 +373,11 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
       : missionWarningThreshold;
 
     if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
-      const completedCount = countCompletedMissions(user);
+      const completedCount = countStudyItems(user);
       if (completedCount < warnThreshold) {
-        const unitLabel = isJuniorHigh ? '講座' : 'ミッション';
-        message += `⚠️ ${unitLabel}完了 ${completedCount}/${warnThreshold}個 — ${warnThreshold}個完了しないと連続学習にカウントされないよ!\n`;
+        // 小学生コースはミッション以外の自主学習も件数に含めるため「学習」表記にする
+        const unitLabel = isJuniorHigh ? '講座' : '学習';
+        message += `⚠️ ${unitLabel}完了 ${completedCount}/${warnThreshold}件 — ${warnThreshold}件完了しないと連続学習にカウントされないよ!\n`;
       }
     }
 
@@ -384,12 +400,21 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
         missionGroups.get(mission.name).push(mission);
       });
 
-      // 集約したミッションを表示
-      missionGroups.forEach((group, missionName) => {
+      // 表示は先頭 MAX_LISTED_COURSES 件まで。超過分は「ほか◯件」にまとめる
+      const groupEntries = Array.from(missionGroups.entries());
+      const listedEntries = groupEntries.slice(0, MAX_LISTED_COURSES);
+      const omittedCount = groupEntries.length - listedEntries.length;
+
+      listedEntries.forEach(([missionName, group]) => {
         let scoreDisplay;
         let changeIcon = '';
 
-        if (group.length === 1) {
+        const lastEntry = group[group.length - 1];
+
+        // 正答数タイプ(9/10 等)は点数ではないので、そのまま分数表記で出す
+        if (lastEntry.questionCount != null) {
+          scoreDisplay = `${lastEntry.correctAnswers ?? 0}/${lastEntry.questionCount}`;
+        } else if (group.length === 1) {
           // 1回のみ実施
           const mission = group[0];
 
@@ -436,8 +461,15 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
           }
         }
 
-        message += `  ・${missionName}: ${scoreDisplay}${changeIcon}\n`;
+        // 同名グループが全て自主学習のときだけ（自主）を付ける
+        const selfStudyMark = group.every(mission => mission.isMission === false) ? '（自主）' : '';
+
+        message += `  ・${missionName}: ${scoreDisplay}${selfStudyMark}${changeIcon}\n`;
       });
+
+      if (omittedCount > 0) {
+        message += `  ・ほか${omittedCount}件\n`;
+      }
     } else {
       message += `\n📋 ${detailLabel}なし\n`;
     }
