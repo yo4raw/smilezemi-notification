@@ -151,7 +151,7 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 
 - DOMセレクタは `src/config/selectors.js` に集約管理
 - 日付は JST 基準の `getTargetDates(dateOffset)` を使う（GitHub ActionsはUTCのため明示補正済み）。MM/DD形式はゼロパディング必須、`dateString`(YYYY-MM-DD)がストリーク等のキー
-- 座標ベースフィルタリング: X座標 < 250 で左側UI要素識別。タイムラインの日付見出しは左側(x≈171)、スコア表示(「4/5」等)は右側(x≈1015)にあり、日付検索は必ずこのフィルタを通すこと
+- 座標ベースフィルタリング: `getCurrentUserName`/`switchToUser`/`returnToCourseSelection` は右上のユーザー名エリアを `boundingBox()` の位置（画面右半分かつ上部20%）で識別し、`checkCourseSelection` はコース選択ボタンの中心座標がviewport内に収まっているかで実体表示を判定する。タイムラインの日付検索には使わない（次項の日ブロック単位での構造分離を使う）
 - 小学生コースのタイムラインは `[class*="dailyTimeline__"]` の日ブロック単位で構造分離されているため、日付の切り分けに座標計算は不要（中学生コースは `dailyRoot__`）。DOM構造の詳細は `docs/DOM_STRUCTURE.md` を参照する
 - タイムラインに掲載されているミッション = 実施済み(完了)。NEWラベルは未読バッジであり完了/未完了とは無関係
 - 位置ベース範囲計算: boundingBox()でY座標範囲を計算しセクション分離
