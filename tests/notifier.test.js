@@ -835,6 +835,45 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.ok(!message.includes('・こそあど言葉: 93点（自主）'), message);
     });
 
+    it('同名の講座にミッションと自主が混在する場合、（自主）を付けない', () => {
+      const userData = [{
+        userName: 'たろう (小学生コース)',
+        course: 'elementary',
+        studyItemCount: 2,
+        missionCount: 1,
+        studyTime: { hours: 0, minutes: 15 },
+        totalScore: 175,
+        missions: [
+          { name: '漢字', score: 80, completed: true, isMission: true },
+          { name: '漢字', score: 95, completed: true, isMission: false }
+        ]
+      }];
+
+      const message = notifier.formatDetailedMessage(userData);
+
+      assert.ok(message.includes('・漢字: 80→95点'), message);
+      assert.ok(!message.includes('・漢字: 80→95点（自主）'), message);
+    });
+
+    it('isMission フィールドがない旧データの講座行には（自主）を付けない', () => {
+      const userData = [{
+        userName: 'たろう (小学生コース)',
+        course: 'elementary',
+        studyItemCount: 1,
+        missionCount: 1,
+        studyTime: { hours: 0, minutes: 15 },
+        totalScore: 70,
+        missions: [
+          { name: '英語', score: 70, completed: true }
+        ]
+      }];
+
+      const message = notifier.formatDetailedMessage(userData);
+
+      assert.ok(message.includes('・英語: 70点'), message);
+      assert.ok(!message.includes('（自主）'), message);
+    });
+
     it('正答数タイプの結果は 9/10 形式で表示する', () => {
       const userData = [{
         userName: 'たろう (小学生コース)',
