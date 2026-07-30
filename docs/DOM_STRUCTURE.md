@@ -258,7 +258,8 @@ await page.keyboard.press('Escape');               // サイドバーが開い�
 
 | 現行コード | 本ドキュメントとの関係 |
 | --- | --- |
-| `src/config/selectors.js` の `missionDetails.missionIcon` | §2.3 のミッション判定に対応 |
+| `src/config/selectors.js` の `elementaryTimeline` | §2 の構造に対応。すべて前方一致セレクタ |
 | `src/config/selectors.js` の `juniorHighTimeline` | §3 の構造と一致（確認済み） |
-| `src/crawler.js` の Y座標による日付セクション分割 | §2.1 の `dailyTimeline__` 単位に置換可能 |
-| `getTodayMissionCount()` | ミッションバッジのみ数える。§2.3 の非ミッション行は未計上 |
+| `src/crawler.js` の `extractElementaryDay()` | §2.1〜2.4。`dailyTimeline__` 単位で日を切り分け、行を分類する |
+| `src/crawler.js` の `summarizeStudyRows()` | §2.3 のミッション/自主の分類を集計する純粋関数 |
+| `src/streak.js` の `countStudyItems()` | 学習件数（ミッション＋自主）でストリークを判定する |
