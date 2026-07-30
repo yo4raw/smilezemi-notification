@@ -351,6 +351,9 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     const isJuniorHigh = course === 'juniorHigh';
     const scoreUnit = isJuniorHigh ? '%' : '点';
     const detailLabel = isJuniorHigh ? '学習詳細' : 'ミッション詳細';
+    // 中学生コースはミッション以外の自主学習概念がないため件数行も「講座」表記にする。
+    // 小学生コースはミッション以外の自主学習も件数に含めるため「学習」表記のまま
+    const unitLabel = isJuniorHigh ? '講座' : '学習';
 
     const missions = user.missions ?? [];
     const isNoStudy = hours === 0 && minutes === 0 && missions.length === 0;
@@ -362,8 +365,8 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
 
     if (!(showNoStudyWarning && isNoStudy) && studyItemCount > 0) {
       message += selfStudyCount > 0
-        ? `✅ 学習${studyItemCount}件（ミッション${missionOnlyCount}・自主${selfStudyCount}）\n`
-        : `✅ 学習${studyItemCount}件\n`;
+        ? `✅ ${unitLabel}${studyItemCount}件（ミッション${missionOnlyCount}・自主${selfStudyCount}）\n`
+        : `✅ ${unitLabel}${studyItemCount}件\n`;
     }
 
     // 完了数未達の警告。コース別しきい値(missionWarningThresholds)を優先し、
@@ -375,8 +378,6 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
       const completedCount = countStudyItems(user);
       if (completedCount < warnThreshold) {
-        // 小学生コースはミッション以外の自主学習も件数に含めるため「学習」表記にする
-        const unitLabel = isJuniorHigh ? '講座' : '学習';
         message += `⚠️ ${unitLabel}完了 ${completedCount}/${warnThreshold}件 — ${warnThreshold}件完了しないと連続学習にカウントされないよ!\n`;
       }
     }

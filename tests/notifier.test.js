@@ -815,6 +815,24 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.ok(!message.includes('自主'), message);
     });
 
+    it('中学生コースの学習件数行は「講座」表記になる', () => {
+      const userData = [{
+        userName: 'じろう (中学生コース)',
+        course: 'juniorHigh',
+        studyItemCount: 4,
+        missionCount: 4,
+        studyTime: { hours: 0, minutes: 15 },
+        totalScore: 300,
+        missions: [{ name: '数学: 四則の混じった計算', score: 75, completed: true, isMission: true }]
+      }];
+
+      const message = notifier.formatDetailedMessage(userData);
+
+      assert.ok(message.includes('✅ 講座4件'), message);
+      assert.ok(!message.includes('学習4件'), message);
+      assert.ok(!message.includes('自主'), message);
+    });
+
     it('自主学習の講座行に（自主）を付ける', () => {
       const userData = [{
         userName: 'たろう (小学生コース)',
