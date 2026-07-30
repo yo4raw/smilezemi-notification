@@ -149,6 +149,23 @@ module.exports = {
     newLabel: 'text="NEW"'
   },
 
+  // 小学生コース タイムラインのセレクタ
+  // DOM調査日: 2026-07-30 (docs/DOM_STRUCTURE.md 参照)
+  // 日ブロックが構造として分離されているため、Y座標計算は不要
+  // クラス名は CSS Modules のハッシュ付きのため、すべて前方一致で指定する
+  elementaryTimeline: {
+    dayBlock: '[class*="dailyTimeline__"]',       // 1日分のブロック
+    dateLabel: '[class*="date__"]',               // 日ブロック内の日付 "07/30(木)"
+    totalStudyTime: '[class*="totalStudyTime__"] [class*="minute__"]', // "15分"
+    courseList: '[class*="courseList__"]',        // 学習行リスト
+    accordion: '[class*="accordionRoot__"]',      // スターアプリ行(カウント対象外)
+    missionBadge: '[class*="missionIcon__"]',     // ミッションバッジ
+    courseTitle: '[class*="title__"]',            // 講座名
+    scoreNumber: '[class*="scoreNumber__"]',      // 点数タイプ "93"
+    correctAnswerCount: '[class*="correctAnswerCount__"]', // 正答数タイプ "9"
+    questionCount: '[class*="questionCount__"]'   // 正答数タイプ "/10"
+  },
+
   // 中学生コース タイムラインのセレクタ
   // DOM調査日: 2026-04-02 (Playwrightで実サイト調査)
   // 中学生コースのURL: /study/c/timeline（小学生コースの /study/s/timeline とは別UI）

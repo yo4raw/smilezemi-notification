@@ -784,6 +784,74 @@ async function getMissionDetailsForJuniorHigh(page, dateOffset = 0) {
 }
 
 /**
+ * 小学生コース: 対象日の日ブロックから学習時間と全行データを1回のevaluateで抽出する
+ *
+ * 日ブロック([class*="dailyTimeline__"])が構造として分離されているため、
+ * 旧実装のような boundingBox のY座標計算は不要。
+ * スターアプリのアコーディオン行は学習として扱わないため読み飛ばす。
+ *
+ * @private
+ * @param {import('playwright').Page} page
+ * @param {number} dateOffset - 0=今日、-1=昨日
+ * @returns {Promise<{found: boolean, minuteText: string, rows: Array<{name: string, isMission: boolean, score: number, correctAnswers: number|null, questionCount: number|null}>}>}
+ */
+async function extractElementaryDay(page, dateOffset = 0) {
+  const targetDates = getTargetDates(dateOffset);
+  const { elementaryTimeline } = selectors;
+
+  return page.evaluate(({ padded, unpadded, sel }) => {
+    // oxlint-disable-next-line unicorn/consistent-function-scoping -- page.evaluate()内は丸ごとブラウザへシリアライズされるため、外側スコープの関数を参照できない
+    const parseIntOrNull = (text) => {
+      const digits = (text || '').replace(/\D/g, '');
+      return digits ? parseInt(digits, 10) : null;
+    };
+
+    const dayBlocks = Array.from(document.querySelectorAll(sel.dayBlock));
+
+    for (const dayBlock of dayBlocks) {
+      const dateEl = dayBlock.querySelector(sel.dateLabel);
+      const dateText = (dateEl ? dateEl.textContent : '').trim();
+
+      if (!dateText.includes(padded) && !dateText.includes(unpadded)) continue;
+
+      const minuteEl = dayBlock.querySelector(sel.totalStudyTime);
+      const minuteText = (minuteEl ? minuteEl.textContent : '').trim();
+
+      const list = dayBlock.querySelector(sel.courseList);
+      const rows = [];
+
+      if (list) {
+        for (const row of Array.from(list.children)) {
+          // スターアプリ(アコーディオン行)は学習として扱わない
+          if (row.querySelector(sel.accordion)) continue;
+
+          const titleEl = row.querySelector(sel.courseTitle);
+          const scoreEl = row.querySelector(sel.scoreNumber);
+          const correctEl = row.querySelector(sel.correctAnswerCount);
+          const questionEl = row.querySelector(sel.questionCount);
+
+          rows.push({
+            name: (titleEl ? titleEl.textContent : '').trim(),
+            isMission: !!row.querySelector(sel.missionBadge),
+            score: parseIntOrNull(scoreEl ? scoreEl.textContent : '') ?? 0,
+            correctAnswers: parseIntOrNull(correctEl ? correctEl.textContent : ''),
+            questionCount: parseIntOrNull(questionEl ? questionEl.textContent : '')
+          });
+        }
+      }
+
+      return { found: true, minuteText, rows };
+    }
+
+    return { found: false, minuteText: '', rows: [] };
+  }, {
+    padded: targetDates.withPadding,
+    unpadded: targetDates.withoutPadding,
+    sel: elementaryTimeline
+  }).then(result => result ?? { found: false, minuteText: '', rows: [] });
+}
+
+/**
  * 今日の完了したミッション数を取得
  * @private
  */
@@ -795,99 +863,21 @@ async function getTodayMissionCount(page, courseName = null, dateOffset = 0) {
 
   try {
     const todayDates = getTargetDates(dateOffset);
+    const day = await extractElementaryDay(page, dateOffset);
 
-    // 両方のパターンで検索（ゼロパディングあり・なし）
-    const patterns = [todayDates.withPadding, todayDates.withoutPadding];
-    let today = null;
-    let todayHeader = null;
-
-    for (const pattern of patterns) {
-      const datePattern = new RegExp(`${pattern.replace('/', '\\/')}.*?[月火水木金土日]`);
-      const header = page.locator(`text=${datePattern}`).first();
-
-      if (await header.isVisible().catch(() => false)) {
-        today = pattern;
-        todayHeader = header;
-        break;
-      }
+    if (!day.found) {
+      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータはまだありません（0件として扱います）`);
+      return { success: true, count: 0 };
     }
 
-    if (!todayHeader || !today) {
-      console.log(`  ℹ️ 今日(${todayDates.withPadding}または${todayDates.withoutPadding})のデータはまだありません（0件として扱います）`);
-      return {
-        success: true,
-        count: 0
-      };
-    }
+    const summary = summarizeStudyRows(day.rows);
 
-    // 全ての日付要素を取得（左側の日付ラベルのみ、X座標 < 250）。
-    // 右側(x≈1015)には「4/5」等のスコア表示があり、日付と誤認すると
-    // セクション境界が途中で切れてミッションを取りこぼす。
-    const allDateElements = await page.locator('text=/\\d+\\/\\d+/').all();
-    const allDates = [];
-    for (const el of allDateElements) {
-      const box = await el.boundingBox();
-      if (box && box.x < 250) {
-        const text = await el.textContent();
-        allDates.push({ text, box });
-      }
-    }
-
-    // 今日の日付のインデックスを見つける
-    let todayIndex = -1;
-    for (let i = 0; i < allDates.length; i++) {
-      if (allDates[i].text.includes(today)) {
-        todayIndex = i;
-        break;
-      }
-    }
-
-    if (todayIndex === -1) {
-      console.log(`  ℹ️ 今日(${today})のデータインデックスが見つかりません（0件として扱います）`);
-      return {
-        success: true,
-        count: 0
-      };
-    }
-
-    // 今日の日付要素のbounding boxを取得
-    const todayBox = await todayHeader.boundingBox();
-
-    if (!todayBox) {
-      console.log(`  ℹ️ 今日(${today})の日付要素の位置情報が取得できません（0件として扱います）`);
-      return {
-        success: true,
-        count: 0
-      };
-    }
-
-    // 次の日付の位置を取得（左側の日付ラベルのみ）
-    let nextDateY = Infinity;
-    const nextDateIndex = todayIndex + 1;
-
-    if (nextDateIndex < allDates.length) {
-      nextDateY = allDates[nextDateIndex].box.y;
-    }
-
-    // 今日の日付セクション内のミッション要素を取得
-    // class="missionIcon__i6nW8"を持つ<span>ミッション</span>のみを対象。
-    // タイムラインは実施済み学習の記録のため、セクション内のアイコン数=完了ミッション数。
-    // (NEWラベルは未読バッジであり完了/未完了とは無関係)
-    const allMissionIcons = await page.locator('.missionIcon__i6nW8').all();
-    let completedMissionCount = 0;
-
-    for (const missionIcon of allMissionIcons) {
-      const box = await missionIcon.boundingBox();
-      if (box && box.y > todayBox.y && box.y < nextDateY) {
-        completedMissionCount++;
-      }
-    }
-
-    console.log(`📊 今日(${today})の完了ミッション数: ${completedMissionCount}件`);
+    console.log(`📊 今日(${todayDates.withPadding})の学習件数: ${summary.studyItemCount}件（ミッション${summary.missionCount}件）`);
 
     return {
       success: true,
-      count: completedMissionCount
+      count: summary.studyItemCount,
+      missionCount: summary.missionCount
     };
   } catch (error) {
     return {
@@ -956,84 +946,24 @@ async function getStudyTime(page, courseName = null, dateOffset = 0) {
 
   try {
     const todayDates = getTargetDates(dateOffset);
-    const { studyTime } = selectors.missionDetails;
+    const day = await extractElementaryDay(page, dateOffset);
 
-    // まず今日の日付があるかチェック
-    let isTodayVisible = false;
-    for (const pattern of [todayDates.withPadding, todayDates.withoutPadding]) {
-      const datePattern = new RegExp(`${pattern.replace('/', '\\/')}.*?[月火水木金土日]`);
-      const header = page.locator(`text=${datePattern}`).first();
-
-      if (await header.isVisible({ timeout: 2000 }).catch(() => false)) {
-        isTodayVisible = true;
-        break;
-      }
-    }
-
-    // 今日の日付がない場合、0時間0分を返す
-    if (!isTodayVisible) {
+    if (!day.found) {
       console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（勉強時間: 0時間0分）`);
-      return {
-        success: true,
-        hours: 0,
-        minutes: 0
-      };
+      return { success: true, hours: 0, minutes: 0 };
     }
 
-    // 勉強時間要素を探す（タイムアウト5秒）
-    const timeElement = page.locator(studyTime.selector).first();
-    const isVisible = await timeElement.isVisible({ timeout: 5000 }).catch(() => false);
-
-    if (!isVisible) {
-      // セレクタで見つからない場合、代替セレクタを試行
-      for (const altSelector of studyTime.alternativeSelectors) {
-        const altElement = page.locator(altSelector).first();
-        const altVisible = await altElement.isVisible({ timeout: 2000 }).catch(() => false);
-
-        if (altVisible) {
-          const text = await altElement.textContent();
-          const parsed = parseStudyTime(text);
-
-          if (parsed) {
-            console.log(`📚 勉強時間: ${parsed.hours}時間${parsed.minutes}分`);
-            return {
-              success: true,
-              hours: parsed.hours,
-              minutes: parsed.minutes
-            };
-          }
-        }
-      }
-
-      // 全て失敗した場合はデフォルト値
-      console.log(`  ℹ️ 勉強時間要素が見つかりません（0時間0分として扱います）`);
-      return {
-        success: true,
-        hours: 0,
-        minutes: 0
-      };
-    }
-
-    // テキストを取得してパース
-    const text = await timeElement.textContent();
-    const parsed = parseStudyTime(text);
+    // 左カラムの学習時間。スターアプリの時間は含まれない(サイト側の仕様)
+    const parsed = parseStudyTime(day.minuteText);
 
     if (!parsed) {
-      console.log(`  ℹ️ 勉強時間のパースに失敗: "${text}"（0時間0分として扱います）`);
-      return {
-        success: true,
-        hours: 0,
-        minutes: 0
-      };
+      console.log(`  ℹ️ 勉強時間のパースに失敗: "${day.minuteText}"（0時間0分として扱います）`);
+      return { success: true, hours: 0, minutes: 0 };
     }
 
     console.log(`📚 勉強時間: ${parsed.hours}時間${parsed.minutes}分`);
 
-    return {
-      success: true,
-      hours: parsed.hours,
-      minutes: parsed.minutes
-    };
+    return { success: true, hours: parsed.hours, minutes: parsed.minutes };
   } catch (error) {
     return {
       success: false,
@@ -1059,202 +989,18 @@ async function getMissionDetails(page, courseName = null, dateOffset = 0) {
 
   try {
     const todayDates = getTargetDates(dateOffset);
+    const day = await extractElementaryDay(page, dateOffset);
 
-    // ページを上部にスクロールして最新のデータを表示
-    await page.evaluate(() => window.scrollTo(0, 0));
-    // スクロール完了と日付要素の描画を待つ
-    await page.waitForFunction(() => window.scrollY === 0, {
-      timeout: selectors.waitStrategies.scrollStabilizeTimeout
-    }).catch(() => {});
-    await page.waitForSelector('text=/\\d+\\/\\d+/', {
-      state: 'visible',
-      timeout: selectors.waitStrategies.timelineDateTimeout
-    }).catch(() => {});
-
-    // デバッグ用スクリーンショット
-    await page.screenshot({ path: 'screenshots/mission-details-debug.png', fullPage: true });
-    console.log(`  📸 スクリーンショット保存: screenshots/mission-details-debug.png`);
-
-    // ページ内の全ての日付テキストを取得してログ出力
-    const allDateElements = await page.locator('text=/\\d+\\/\\d+/').all();
-    const allDatesText = [];
-    for (const el of allDateElements) {
-      const text = await el.textContent();
-      allDatesText.push(text);
-    }
-    console.log(`  📅 検出された日付: ${allDatesText.join(', ')}`);
-    console.log(`  🔍 検索中の日付: ${todayDates.withPadding} または ${todayDates.withoutPadding}`);
-
-    // 今日の日付要素を探す（両方のパターンで検索）
-    let targetDate = null;
-    let todayHeader = null;
-    let isTodayVisible = false;
-
-    for (const pattern of [todayDates.withPadding, todayDates.withoutPadding]) {
-      const datePattern = new RegExp(`${pattern.replace('/', '\\/')}.*?[月火水木金土日]`);
-      const header = page.locator(`text=${datePattern}`).first();
-
-      if (await header.isVisible({ timeout: 2000 }).catch(() => false)) {
-        targetDate = pattern;
-        todayHeader = header;
-        isTodayVisible = true;
-        console.log(`  ✅ 今日(${pattern})のデータが見つかりました`);
-        break;
-      }
-    }
-
-    // 今日の日付が見つからない場合、空の配列を返す
-    if (!isTodayVisible) {
+    if (!day.found) {
       console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（空配列として扱います）`);
-      return {
-        success: true,
-        missions: []
-      };
+      return { success: true, missions: [] };
     }
 
-    // 全ての日付要素を取得（左側のラベルのみ、X座標 < 250）
-    const allDates = [];
+    const summary = summarizeStudyRows(day.rows);
 
-    // 日付ラベル（左側）のみをフィルタリング
-    for (const el of allDateElements) {
-      const box = await el.boundingBox();
-      if (box && box.x < 250) {
-        const text = await el.textContent();
-        allDates.push({ element: el, text, box });
-      }
-    }
+    console.log(`📋 今日(${todayDates.withPadding})の学習詳細: ${summary.missions.length}件（自主学習${summary.studyItemCount - summary.missionCount}件）`);
 
-    // 対象日付のインデックスを見つける
-    let todayIndex = -1;
-    for (let i = 0; i < allDates.length; i++) {
-      if (allDates[i].text.includes(targetDate)) {
-        todayIndex = i;
-        break;
-      }
-    }
-
-    if (todayIndex === -1) {
-      console.log(`  ℹ️ 対象日付(${targetDate})のデータインデックスが見つかりません（空配列として扱います）`);
-      return {
-        success: true,
-        missions: []
-      };
-    }
-
-    // 対象日付要素の位置を取得
-    const todayBox = await todayHeader.boundingBox();
-    if (!todayBox) {
-      console.log(`  ℹ️ 対象日付(${targetDate})の日付要素の位置情報が取得できません（空配列として扱います）`);
-      return {
-        success: true,
-        missions: []
-      };
-    }
-
-    // 次の日付の位置を取得（左側の日付ラベルのみ）
-    let nextDateY = Infinity;
-    const nextDateIndex = todayIndex + 1;
-    if (nextDateIndex < allDates.length) {
-      nextDateY = allDates[nextDateIndex].box.y;
-    }
-
-    // 今日のセクション内のミッションアイコンを取得
-    const allMissionIcons = await page.locator('.missionIcon__i6nW8').all();
-    const missions = [];
-
-    for (const missionIcon of allMissionIcons) {
-      const box = await missionIcon.boundingBox();
-
-      // 今日のセクション内のミッションのみ処理
-      if (box && box.y > todayBox.y && box.y < nextDateY) {
-        // 親要素を取得
-        const parent = missionIcon.locator('..');
-
-        // タイムラインに載っている=実施済みのため常に完了扱い
-        // (NEWラベルは未読バッジであり完了/未完了とは無関係)
-        const completed = true;
-
-        // ミッション名を取得（親要素の兄弟として.title__C3bzFを探す）
-        let missionName = selectors.missionDetails.missionName.defaultName;
-
-        // 親要素の兄弟要素を取得（grandparent > children）
-        const grandparent = parent.locator('..');
-        const titleElements = await grandparent.locator('.title__C3bzF').all();
-
-        if (titleElements.length > 0) {
-          const titleText = await titleElements[0].textContent().catch(() => '');
-          if (titleText && titleText.trim().length > 0) {
-            missionName = titleText.trim();
-          }
-        } else {
-          // fallback: 親要素のテキストから抽出
-          const parentText = await parent.textContent().catch(() => '');
-          const cleanText = parentText.replace(/NEW/g, '').replace(/\d+点/g, '').replace(/前回/g, '').trim();
-          if (cleanText.length > 0 && cleanText.length < 100) {
-            missionName = cleanText;
-          }
-        }
-
-        // 点数を取得（学習結果エリアから現在の点数を取得）
-        // 点数は右側の「学習結果」カラムにあり、ミッションアイコンから離れた場所にあるため、
-        // より広い範囲（行全体レベル）で検索する
-        let score = selectors.missionDetails.missionScore.defaultScore;
-
-        // 複数の階層レベルで点数を検索
-        const searchLevels = [
-          grandparent,                           // 親の親
-          grandparent.locator('..'),              // 親の親の親（great-grandparent）
-          grandparent.locator('..').locator('..') // さらに上の階層
-        ];
-
-        for (const level of searchLevels) {
-          const scoreElements = await level.locator('text=/\\d+点/').all();
-
-          if (scoreElements.length > 0) {
-            const scores = [];
-
-            for (const scoreElement of scoreElements) {
-              const scoreText = await scoreElement.textContent().catch(() => '');
-
-              // 「前回」を含むテキストは除外（前回の点数ではなく現在の点数を取得）
-              if (scoreText.includes('前回')) {
-                continue;
-              }
-
-              // 数値を抽出
-              const scoreMatch = scoreText.match(/(\d+)点/);
-              if (scoreMatch) {
-                scores.push(parseInt(scoreMatch[1], 10));
-              }
-            }
-
-            // 点数が見つかった場合、最大値を使用（現在の点数）
-            if (scores.length > 0) {
-              score = Math.max(...scores);
-              break; // 点数が見つかったので検索終了
-            }
-          }
-        }
-
-        missions.push({
-          name: missionName,
-          score,
-          completed
-        });
-
-        // 最大10件に制限
-        if (missions.length >= 10) {
-          break;
-        }
-      }
-    }
-
-    console.log(`📋 今日(${targetDate})のミッション詳細: ${missions.length}件`);
-
-    return {
-      success: true,
-      missions
-    };
+    return { success: true, missions: summary.missions };
   } catch (error) {
     return {
       success: false,
@@ -1369,6 +1115,11 @@ async function getCourseData(page, userName, courseName, dateString, dateOffset 
     const missionCountResult = await getTodayMissionCount(page, courseName, dateOffset);
     const missionCount = missionCountResult.success ? missionCountResult.count : 0;
 
+    // 学習件数(ミッション+自主)。ミッション数は内訳表示のために別に持つ。
+    // 中学生コースはミッション概念がないため両者が一致する。
+    const studyItemCount = missionCount;
+    const missionOnlyCount = missionCountResult.missionCount ?? missionCount;
+
     if (!missionCountResult.success) {
       console.warn(`      ⚠️ ミッション数取得失敗: ${missionCountResult.error}`);
     }
@@ -1403,7 +1154,8 @@ async function getCourseData(page, userName, courseName, dateString, dateOffset 
       data: {
         userName: displayName,
         course,
-        missionCount,
+        studyItemCount,
+        missionCount: missionOnlyCount,
         date: dateString,
         studyTime,
         totalScore,
@@ -1651,6 +1403,7 @@ module.exports = {
   getAllUsersDetailedData,
   getStudyTime,
   getMissionDetails,
+  getTodayMissionCount,
   getTotalScore,
   summarizeStudyRows,
   getTargetDates,

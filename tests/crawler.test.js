@@ -151,7 +151,7 @@ describe('クローラーモジュール (src/crawler.js)', () => {
       waitForFunction: mock.fn(async () => {}),
       keyboard: { press: mock.fn(async () => {}) },
       viewportSize: mock.fn(() => ({ width: vpWidth, height: vpHeight })),
-      evaluate: mock.fn(async () => {}),
+      evaluate: mock.fn(async () => config.elementaryDay ?? { found: false, minuteText: '', rows: [] }),
       screenshot: mock.fn(async () => {}),
       goBack: mock.fn(async () => {}),
     };
@@ -510,6 +510,88 @@ describe('クローラーモジュール (src/crawler.js)', () => {
 
       assert.strictEqual(result.studyItemCount, 0);
       assert.deepStrictEqual(result.missions, []);
+    });
+  });
+
+  // ─── 小学生タイムライン抽出テスト ───
+
+  describe('小学生コースのタイムライン抽出', () => {
+    const elementaryDay = {
+      found: true,
+      minuteText: '15分',
+      rows: [
+        { name: 'こそあど言葉', isMission: true, score: 93, correctAnswers: null, questionCount: null },
+        { name: '小数のひき算', isMission: true, score: 80, correctAnswers: null, questionCount: null },
+        { name: '小数のたし算', isMission: true, score: 80, correctAnswers: null, questionCount: null },
+        { name: '8級 同じ漢字の読み', isMission: true, score: 90, correctAnswers: null, questionCount: null },
+        { name: '漢字のミニテスト', isMission: false, score: 0, correctAnswers: 9, questionCount: 10 }
+      ]
+    };
+
+    it('getTodayMissionCount() は自主学習を含めた学習件数を返す', async () => {
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDay });
+
+      const result = await crawler.getTodayMissionCount(page, '小学生コース', 0);
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.count, 5);
+      assert.strictEqual(result.missionCount, 4);
+    });
+
+    it('getMissionDetails() は自主学習の行も isMission: false で返す', async () => {
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDay });
+
+      const result = await crawler.getMissionDetails(page, '小学生コース', 0);
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.missions.length, 5);
+      assert.strictEqual(result.missions[4].isMission, false);
+      assert.strictEqual(result.missions[4].correctAnswers, 9);
+      assert.strictEqual(result.missions[4].questionCount, 10);
+    });
+
+    it('getStudyTime() は左カラムの分数をパースする', async () => {
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDay });
+
+      const result = await crawler.getStudyTime(page, '小学生コース', 0);
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.hours, 0);
+      assert.strictEqual(result.minutes, 15);
+    });
+
+    it('日ブロックが見つからない日は0件・0分を success で返す', async () => {
+      const page = createMockPage({
+        userNames: ['太郎さん'],
+        elementaryDay: { found: false, minuteText: '', rows: [] }
+      });
+
+      const count = await crawler.getTodayMissionCount(page, '小学生コース', 0);
+      const details = await crawler.getMissionDetails(page, '小学生コース', 0);
+      const time = await crawler.getStudyTime(page, '小学生コース', 0);
+
+      assert.strictEqual(count.success, true);
+      assert.strictEqual(count.count, 0);
+      assert.strictEqual(details.success, true);
+      assert.deepStrictEqual(details.missions, []);
+      assert.strictEqual(time.success, true);
+      assert.strictEqual(time.minutes, 0);
+    });
+
+    it('スターアプリのぶんは行に含まれないため件数に入らない', async () => {
+      // extractElementaryDay がアコーディオン行を読み飛ばした結果を模す
+      const page = createMockPage({
+        userNames: ['太郎さん'],
+        elementaryDay: {
+          found: true,
+          minuteText: '15分',
+          rows: [{ name: 'こそあど言葉', isMission: true, score: 93, correctAnswers: null, questionCount: null }]
+        }
+      });
+
+      const result = await crawler.getTodayMissionCount(page, '小学生コース', 0);
+
+      assert.strictEqual(result.count, 1);
     });
   });
 
