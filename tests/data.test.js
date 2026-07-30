@@ -243,6 +243,29 @@ describe('データ管理モジュール (src/data.js)', () => {
       assert.strictEqual(result.changes.length, 1);
       assert.strictEqual(result.changes[0].diff, 2);
     });
+
+    it('studyItemCount が 0 のとき missionCount にフォールバックしない', () => {
+      const previous = [{ userName: 'たろう', studyItemCount: 3, missionCount: 3 }];
+      const current = [{ userName: 'たろう', studyItemCount: 0, missionCount: 3 }];
+
+      const result = data.compareData(previous, current);
+
+      assert.strictEqual(result.changes.length, 1);
+      assert.strictEqual(result.changes[0].type, 'decrease');
+      assert.strictEqual(result.changes[0].currentCount, 0);
+    });
+
+    it('前回が studyItemCount: 0 でも新規ユーザーと誤判定しない', () => {
+      const previous = [{ userName: 'たろう', studyItemCount: 0, missionCount: 0 }];
+      const current = [{ userName: 'たろう', studyItemCount: 2, missionCount: 2 }];
+
+      const result = data.compareData(previous, current);
+
+      assert.strictEqual(result.changes.length, 1);
+      assert.strictEqual(result.changes[0].type, 'increase');
+      assert.strictEqual(result.changes[0].previousCount, 0);
+      assert.strictEqual(result.changes[0].diff, 2);
+    });
   });
 
   describe('saveData() - 新データ保存', () => {
