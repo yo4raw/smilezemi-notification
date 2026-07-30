@@ -623,7 +623,7 @@ function getTargetDates(dateOffset = 0) {
 }
 
 /**
- * 中学生コース: 今日の日付セクション（dailyRoot）を取得
+ * 中学生コース: 対象日の日付セクション（dailyRoot）を取得
  * @private
  * @param {import('playwright').Page} page
  * @returns {Promise<{element: import('playwright').Locator|null, dateText: string|null}>}
@@ -658,7 +658,7 @@ async function getStudyTimeForJuniorHigh(page, dateOffset = 0) {
     const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page, dateOffset);
 
     if (!todayRoot) {
-      console.log(`  ℹ️ [中学生] 今日(${todayDates.withPadding})のデータが見つかりません（勉強時間: 0時間0分）`);
+      console.log(`  ℹ️ [中学生] 対象日(${todayDates.withPadding})のデータが見つかりません（勉強時間: 0時間0分）`);
       return { success: true, hours: 0, minutes: 0 };
     }
 
@@ -697,7 +697,7 @@ async function getStudyTimeForJuniorHigh(page, dateOffset = 0) {
 }
 
 /**
- * 中学生コース: 今日の講座数を取得
+ * 中学生コース: 対象日の講座数を取得
  * @private
  */
 async function getTodayMissionCountForJuniorHigh(page, dateOffset = 0) {
@@ -706,7 +706,7 @@ async function getTodayMissionCountForJuniorHigh(page, dateOffset = 0) {
     const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page, dateOffset);
 
     if (!todayRoot) {
-      console.log(`  ℹ️ [中学生] 今日(${todayDates.withPadding})のデータはまだありません（0件として扱います）`);
+      console.log(`  ℹ️ [中学生] 対象日(${todayDates.withPadding})のデータはまだありません（0件として扱います）`);
       return { success: true, count: 0, missionCount: 0 };
     }
 
@@ -714,7 +714,7 @@ async function getTodayMissionCountForJuniorHigh(page, dateOffset = 0) {
     const courses = await todayRoot.locator('.course__KrAEA').all();
     const count = courses.length;
 
-    console.log(`📊 [中学生] 今日(${todayDates.withPadding})の講座数: ${count}件`);
+    console.log(`📊 [中学生] 対象日(${todayDates.withPadding})の講座数: ${count}件`);
     return { success: true, count, missionCount: count };
   } catch (error) {
     return { success: false, error: `[中学生] 講座数取得エラー: ${error.message}`, count: 0 };
@@ -722,7 +722,7 @@ async function getTodayMissionCountForJuniorHigh(page, dateOffset = 0) {
 }
 
 /**
- * 中学生コース: 今日の講座詳細を取得
+ * 中学生コース: 対象日の講座詳細を取得
  * @private
  */
 async function getMissionDetailsForJuniorHigh(page, dateOffset = 0) {
@@ -731,7 +731,7 @@ async function getMissionDetailsForJuniorHigh(page, dateOffset = 0) {
     const { element: todayRoot } = await findTodayDailyRootForJuniorHigh(page, dateOffset);
 
     if (!todayRoot) {
-      console.log(`  ℹ️ [中学生] 今日(${todayDates.withPadding})のデータが見つかりません（空配列として扱います）`);
+      console.log(`  ℹ️ [中学生] 対象日(${todayDates.withPadding})のデータが見つかりません（空配列として扱います）`);
       return { success: true, missions: [] };
     }
 
@@ -775,7 +775,7 @@ async function getMissionDetailsForJuniorHigh(page, dateOffset = 0) {
 
     const summary = summarizeStudyRows(rows);
 
-    console.log(`📋 [中学生] 今日(${todayDates.withPadding})の講座詳細: ${summary.missions.length}件`);
+    console.log(`📋 [中学生] 対象日(${todayDates.withPadding})の講座詳細: ${summary.missions.length}件`);
     return { success: true, missions: summary.missions };
   } catch (error) {
     return { success: false, error: `[中学生] 講座詳細取得エラー: ${error.message}`, missions: [] };
@@ -862,7 +862,7 @@ async function extractElementaryDay(page, dateOffset = 0) {
 }
 
 /**
- * 今日の完了したミッション数を取得
+ * 対象日の学習件数(ミッション+自主学習)を取得
  * @private
  */
 async function getTodayMissionCount(page, courseName = null, dateOffset = 0) {
@@ -884,13 +884,13 @@ async function getTodayMissionCount(page, courseName = null, dateOffset = 0) {
           count: 0
         };
       }
-      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータはまだありません（日ブロック${day.dayBlockCount}件中に該当なし、0件として扱います）`);
+      console.log(`  ℹ️ 対象日(${todayDates.withPadding})のデータはまだありません（日ブロック${day.dayBlockCount}件中に該当なし、0件として扱います）`);
       return { success: true, count: 0 };
     }
 
     const summary = summarizeStudyRows(day.rows);
 
-    console.log(`📊 今日(${todayDates.withPadding})の学習件数: ${summary.studyItemCount}件（ミッション${summary.missionCount}件）`);
+    console.log(`📊 対象日(${todayDates.withPadding})の学習件数: ${summary.studyItemCount}件（ミッション${summary.missionCount}件）`);
 
     return {
       success: true,
@@ -976,7 +976,7 @@ async function getStudyTime(page, courseName = null, dateOffset = 0) {
           minutes: 0
         };
       }
-      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（日ブロック${day.dayBlockCount}件中に該当なし、勉強時間: 0時間0分）`);
+      console.log(`  ℹ️ 対象日(${todayDates.withPadding})のデータが見つかりません（日ブロック${day.dayBlockCount}件中に該当なし、勉強時間: 0時間0分）`);
       return { success: true, hours: 0, minutes: 0 };
     }
 
@@ -1002,11 +1002,11 @@ async function getStudyTime(page, courseName = null, dateOffset = 0) {
 }
 
 /**
- * 今日のミッション詳細を取得（名前と点数）
+ * 対象日の学習詳細を取得（ミッション・自主学習それぞれの名前と学習結果）
  * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.3, 6.2
  * @private
  * @param {import('playwright').Page} page - Playwrightページインスタンス
- * @returns {Promise<{success: boolean, missions?: Array<{name: string, score: number, completed: boolean}>, error?: string}>}
+ * @returns {Promise<{success: boolean, missions?: Array<{name: string, score: number, completed: boolean, isMission: boolean, correctAnswers: number|null, questionCount: number|null}>, error?: string}>}
  */
 async function getMissionDetails(page, courseName = null, dateOffset = 0) {
   // 中学生コースの場合は専用ロジックを使用
@@ -1027,13 +1027,13 @@ async function getMissionDetails(page, courseName = null, dateOffset = 0) {
           missions: []
         };
       }
-      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（日ブロック${day.dayBlockCount}件中に該当なし、空配列として扱います）`);
+      console.log(`  ℹ️ 対象日(${todayDates.withPadding})のデータが見つかりません（日ブロック${day.dayBlockCount}件中に該当なし、空配列として扱います）`);
       return { success: true, missions: [] };
     }
 
     const summary = summarizeStudyRows(day.rows);
 
-    console.log(`📋 今日(${todayDates.withPadding})の学習詳細: ${summary.missions.length}件（自主学習${summary.studyItemCount - summary.missionCount}件）`);
+    console.log(`📋 対象日(${todayDates.withPadding})の学習詳細: ${summary.missions.length}件（自主学習${summary.studyItemCount - summary.missionCount}件）`);
 
     return { success: true, missions: summary.missions };
   } catch (error) {
@@ -1148,12 +1148,11 @@ async function getCourseData(page, userName, courseName, dateString, dateOffset 
 
     // ミッション数を取得
     const missionCountResult = await getTodayMissionCount(page, courseName, dateOffset);
-    const missionCount = missionCountResult.success ? missionCountResult.count : 0;
 
     // 学習件数(ミッション+自主)。ミッション数は内訳表示のために別に持つ。
     // 中学生コースはミッション概念がないため両者が一致する。
-    const studyItemCount = missionCount;
-    const missionOnlyCount = missionCountResult.missionCount ?? missionCount;
+    const studyItemCount = missionCountResult.success ? missionCountResult.count : 0;
+    const missionOnlyCount = missionCountResult.missionCount ?? studyItemCount;
 
     if (!missionCountResult.success) {
       console.warn(`      ⚠️ ミッション数取得失敗: ${missionCountResult.error}`);
