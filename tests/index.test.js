@@ -60,13 +60,13 @@ describe('オーケストレーション (src/index.js)', () => {
     };
     const crawlDetailedResult = overrides.crawlDetailedResult || {
       success: true,
-      data: [{ userName: '太郎', missionCount: 5, date: '2025-12-25', studyTime: '1時間30分', missions: [], totalScore: 100 }],
+      data: [{ userName: '太郎', studyItemCount: 5, missionCount: 5, date: '2025-12-25', studyTime: '1時間30分', missions: [], totalScore: 100 }],
       detailsAvailable: true,
       partialFailure: false
     };
     const crawlBasicResult = overrides.crawlBasicResult || {
       success: true,
-      data: [{ userName: '太郎', missionCount: 5, date: '2025-12-25' }]
+      data: [{ userName: '太郎', studyItemCount: 5, missionCount: 5, date: '2025-12-25' }]
     };
     const previousDataResult = overrides.previousDataResult || { success: true, data: [] };
     const compareResult = overrides.compareResult || {
@@ -390,8 +390,8 @@ describe('オーケストレーション (src/index.js)', () => {
           success: true,
           detailsAvailable: true,
           data: [
-            { userName: '太郎', missionCount: 5, missions: [] },
-            { userName: '次郎', missionCount: 1, missions: [] }
+            { userName: '太郎', studyItemCount: 5, missionCount: 5, missions: [] },
+            { userName: '次郎', studyItemCount: 1, missionCount: 1, missions: [] }
           ]
         }),
         isStudied: (user) => user.userName === '太郎'
@@ -498,7 +498,7 @@ describe('オーケストレーション (src/index.js)', () => {
           detailedCalls.push(options);
           return {
             success: true,
-            data: [{ userName: '太郎', course: 'elementary', missionCount: 5, date: '2025-12-25', studyTime: { hours: 1, minutes: 30 }, missions: [], totalScore: 100 }],
+            data: [{ userName: '太郎', course: 'elementary', studyItemCount: 5, missionCount: 5, date: '2025-12-25', studyTime: { hours: 1, minutes: 30 }, missions: [], totalScore: 100 }],
             detailsAvailable: true,
             partialFailure: false
           };
