@@ -83,8 +83,22 @@
 タイムラインは直近7日分を保持し、スクロールしても8日目以降は読み込まれない。
 朝通知が見る前日分は常に含まれる。
 
-対象日のブロックが存在しない場合は「その日は未学習」として、
-件数0・時間0・空配列を `success: true` で返す（現行の挙動を踏襲）。
+`extractElementaryDay` は `page.evaluate` の前に `waitForSelector` で日ブロック
+（`[class*="dailyTimeline__"]`）の描画を待つ。戻り値には `dayBlockCount`
+（ページ上の日ブロック総数）を持たせ、以下の2つを区別する。
+
+- `dayBlockCount === 0`（タイムライン自体が1日分も描画されていない。セレクタ破損や
+  未描画の可能性）→ 3関数（`getStudyTime` / `getTodayMissionCount` /
+  `getMissionDetails`）とも `success: false` ＋ ゼロ値（時間0・件数0・空配列）を返す。
+  `getCourseData` はこれを `dataReliable: false` に伝搬し、ストリークの誤リセットを防ぐ
+- `found: false` かつ `dayBlockCount > 0`（タイムラインは描画されているが対象日の
+  ブロックがない＝正当な未学習）→ 従来どおり件数0・時間0・空配列を `success: true` で返す
+
+この区別は**小学生コースのみ**に適用する。中学生コースの
+`findTodayDailyRootForJuniorHigh` は日ブロックが1件も無い場合と対象日が無い場合を
+区別せず、従来どおり「日ブロックなし＝0件（`success: true`）」を返す
+（コース間の非対称。中学生コースの日ブロックは学習した日にしか存在しないため
+「0件」自体が高頻度に起こりうる正常系であり、小学生コースほど区別の必要性が高くない）。
 
 ### 1.2 行の分類
 
@@ -236,9 +250,16 @@ actions/cache に残る既存のユーザーデータには `studyItemCount` が
 
 ## 5. エラー処理
 
-現行のグレースフルデグラデーション方針を維持する。
+現行のグレースフルデグラデーション方針を維持する。ただし小学生コースについては
+レビュー指摘を受けて「未学習」と「取得失敗」を区別するよう安全側に倒した（§1.1参照）。
 
-- 日ブロックが見つからない → 未学習として件数0で `success: true`
+- 小学生コース、対象日のブロックが無いが `dayBlockCount > 0`（タイムラインは描画
+  されている）→ 未学習として件数0で `success: true`
+- 小学生コース、`dayBlockCount === 0`（タイムライン自体が1日分も描画されていない）
+  → `success: false` ＋ ゼロ値。`getCourseData` を通じて `dataReliable: false` に
+  伝搬し、ストリークの誤リセットを防ぐ
+- 中学生コース、対象日の `dailyRoot` が見つからない → 従来どおり未学習として
+  件数0で `success: true`（`dayBlockCount` による区別はしない）
 - 行の走査中に個別要素が取れない → その項目だけデフォルト値（名前は「ミッション」、
   点数0、時間0）にして継続
 - 走査自体が例外を投げた → `success: false`。`getCourseData` がこれを
