@@ -419,6 +419,100 @@ describe('クローラーモジュール (src/crawler.js)', () => {
     });
   });
 
+  // ─── summarizeStudyRows テスト ───
+
+  describe('summarizeStudyRows() - 行データの集計', () => {
+    it('全てミッションの場合、studyItemCount と missionCount が一致する', () => {
+      const rows = [
+        { name: 'こそあど言葉', isMission: true, score: 93 },
+        { name: '小数のひき算', isMission: true, score: 80 }
+      ];
+
+      const result = crawler.summarizeStudyRows(rows);
+
+      assert.strictEqual(result.studyItemCount, 2);
+      assert.strictEqual(result.missionCount, 2);
+      assert.strictEqual(result.totalScore, 173);
+      assert.strictEqual(result.missions.length, 2);
+      assert.strictEqual(result.missions[0].isMission, true);
+      assert.strictEqual(result.missions[0].completed, true);
+    });
+
+    it('ミッションと自主学習が混在する場合、missionCount はミッションのみを数える', () => {
+      const rows = [
+        { name: 'こそあど言葉', isMission: true, score: 93 },
+        { name: '漢字のミニテスト', isMission: false, correctAnswers: 9, questionCount: 10 }
+      ];
+
+      const result = crawler.summarizeStudyRows(rows);
+
+      assert.strictEqual(result.studyItemCount, 2);
+      assert.strictEqual(result.missionCount, 1);
+      assert.strictEqual(result.missions[1].isMission, false);
+    });
+
+    it('全て自主学習の場合、missionCount は0になる', () => {
+      const rows = [
+        { name: 'ふしぎ探検 世界遺産', isMission: false },
+        { name: '漢字のミニテスト', isMission: false, correctAnswers: 9, questionCount: 10 }
+      ];
+
+      const result = crawler.summarizeStudyRows(rows);
+
+      assert.strictEqual(result.studyItemCount, 2);
+      assert.strictEqual(result.missionCount, 0);
+    });
+
+    it('空配列の場合、全て0と空配列を返す', () => {
+      const result = crawler.summarizeStudyRows([]);
+
+      assert.strictEqual(result.studyItemCount, 0);
+      assert.strictEqual(result.missionCount, 0);
+      assert.strictEqual(result.totalScore, 0);
+      assert.deepStrictEqual(result.missions, []);
+    });
+
+    it('正答数タイプの行は score 0 で合計点に寄与しない', () => {
+      const rows = [
+        { name: '漢字のミニテスト', isMission: false, correctAnswers: 9, questionCount: 10 }
+      ];
+
+      const result = crawler.summarizeStudyRows(rows);
+
+      assert.strictEqual(result.totalScore, 0);
+      assert.strictEqual(result.missions[0].score, 0);
+      assert.strictEqual(result.missions[0].correctAnswers, 9);
+      assert.strictEqual(result.missions[0].questionCount, 10);
+    });
+
+    it('点数タイプと正答数タイプが混在しても合計点は点数タイプのみ', () => {
+      const rows = [
+        { name: 'こそあど言葉', isMission: true, score: 93 },
+        { name: '漢字のミニテスト', isMission: false, correctAnswers: 9, questionCount: 10 },
+        { name: '小数のひき算', isMission: true, score: 80 }
+      ];
+
+      const result = crawler.summarizeStudyRows(rows);
+
+      assert.strictEqual(result.totalScore, 173);
+      assert.strictEqual(result.missions[0].questionCount, null);
+      assert.strictEqual(result.missions[1].score, 0);
+    });
+
+    it('名前が空の行はデフォルト名になる', () => {
+      const result = crawler.summarizeStudyRows([{ name: '', isMission: true, score: 50 }]);
+
+      assert.strictEqual(result.missions[0].name, 'ミッション');
+    });
+
+    it('rows が配列でない場合も0件として扱う', () => {
+      const result = crawler.summarizeStudyRows(null);
+
+      assert.strictEqual(result.studyItemCount, 0);
+      assert.deepStrictEqual(result.missions, []);
+    });
+  });
+
   describe('getTargetDates', () => {
     it('UTC 22:00 (JST 翌日7:00) のとき dateOffset=0 で JST の今日を返す', () => {
       mock.timers.enable({ apis: ['Date'], now: new Date('2026-07-09T22:00:00Z').getTime() });

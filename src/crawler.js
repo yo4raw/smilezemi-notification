@@ -1279,6 +1279,36 @@ function getTotalScore(missions) {
 }
 
 /**
+ * タイムラインから抽出した行データを集計する(純粋関数)
+ *
+ * 行データはDOM抽出の結果で、ミッション/自主学習の区別と学習結果を持つ。
+ * これをユーザーデータの missions 配列と各カウントに変換する。
+ *
+ * @param {Array<{name?: string, isMission?: boolean, score?: number, correctAnswers?: number|null, questionCount?: number|null}>} rows
+ * @returns {{studyItemCount: number, missionCount: number, missions: Array, totalScore: number}}
+ */
+function summarizeStudyRows(rows) {
+  const source = Array.isArray(rows) ? rows : [];
+
+  const missions = source.map(row => ({
+    name: (row.name || '').trim() || selectors.missionDetails.missionName.defaultName,
+    score: row.score ?? 0,
+    // タイムラインに載っている = 実施済みのため常に完了扱い
+    completed: true,
+    isMission: row.isMission === true,
+    correctAnswers: row.correctAnswers ?? null,
+    questionCount: row.questionCount ?? null
+  }));
+
+  return {
+    studyItemCount: missions.length,
+    missionCount: missions.filter(mission => mission.isMission).length,
+    missions,
+    totalScore: getTotalScore(missions)
+  };
+}
+
+/**
  * 指定ユーザーのミッション数を取得
  *
  * @param {import('playwright').Page} page - Playwrightページインスタンス
@@ -1622,6 +1652,7 @@ module.exports = {
   getStudyTime,
   getMissionDetails,
   getTotalScore,
+  summarizeStudyRows,
   getTargetDates,
   resolveTargetCourses,
   shouldProcessSingleCourseUser,
