@@ -210,6 +210,39 @@ describe('データ管理モジュール (src/data.js)', () => {
       assert.strictEqual(result.changes.length, 1);
       assert.strictEqual(result.changes[0].type, 'new');
     });
+
+    it('studyItemCount の増加を検出する', () => {
+      const previous = [{ userName: 'たろう', studyItemCount: 3, missionCount: 3 }];
+      const current = [{ userName: 'たろう', studyItemCount: 5, missionCount: 3 }];
+
+      const result = data.compareData(previous, current);
+
+      assert.strictEqual(result.changes.length, 1);
+      assert.strictEqual(result.changes[0].type, 'increase');
+      assert.strictEqual(result.changes[0].previousCount, 3);
+      assert.strictEqual(result.changes[0].currentCount, 5);
+      assert.strictEqual(result.changes[0].diff, 2);
+    });
+
+    it('自主学習だけ増えた日も差分として検出する', () => {
+      const previous = [{ userName: 'たろう', studyItemCount: 4, missionCount: 4 }];
+      const current = [{ userName: 'たろう', studyItemCount: 6, missionCount: 4 }];
+
+      const result = data.compareData(previous, current);
+
+      assert.strictEqual(result.changes.length, 1);
+      assert.strictEqual(result.changes[0].diff, 2);
+    });
+
+    it('studyItemCount のない旧データは missionCount で比較する', () => {
+      const previous = [{ userName: 'たろう', missionCount: 2 }];
+      const current = [{ userName: 'たろう', missionCount: 4 }];
+
+      const result = data.compareData(previous, current);
+
+      assert.strictEqual(result.changes.length, 1);
+      assert.strictEqual(result.changes[0].diff, 2);
+    });
   });
 
   describe('saveData() - 新データ保存', () => {

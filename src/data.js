@@ -9,7 +9,8 @@
  *   users: [
  *     {
  *       userName: "string",
- *       missionCount: number,
+ *       studyItemCount: number,  // 学習件数(ミッション+自主学習)
+ *       missionCount: number,    // うちミッションバッジ付きの件数
  *       date: "YYYY-MM-DD",
  *       studyTime: { hours: number, minutes: number },
  *       totalScore: number,
@@ -104,6 +105,17 @@ async function loadPreviousData() {
 }
 
 /**
+ * 比較に使う学習件数を取り出す。
+ * studyItemCount を持たない旧データは missionCount にフォールバックする。
+ *
+ * @param {{studyItemCount?: number, missionCount?: number}} user - ユーザーデータ
+ * @returns {number} 比較対象の件数
+ */
+function countOf(user) {
+  return typeof user.studyItemCount === 'number' ? user.studyItemCount : user.missionCount;
+}
+
+/**
  * 新旧データを比較して変更を検出
  *
  * @param {Array} previousData - 前回のユーザーデータ
@@ -116,13 +128,13 @@ function compareData(previousData, currentData) {
   // 前回データをユーザー名でマッピング
   const previousMap = new Map();
   previousData.forEach(user => {
-    previousMap.set(user.userName, user.missionCount);
+    previousMap.set(user.userName, countOf(user));
   });
 
   // 現在データを走査して変更を検出
   currentData.forEach(current => {
     const userName = current.userName;
-    const currentCount = current.missionCount;
+    const currentCount = countOf(current);
     const previousCount = previousMap.get(userName);
 
     if (previousCount === undefined) {
