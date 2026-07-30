@@ -72,7 +72,7 @@
 ```
 
 **日ブロックが構造として分離されている**ため、日付ごとの切り分けに boundingBox の Y座標計算は不要。
-（現行 `src/crawler.js` は Y座標範囲で日を切り分けているが、`dailyTimeline__` 単位で置き換え可能）
+`src/crawler.js` の `extractElementaryDay()` はこの日ブロック単位で切り分けている。
 
 タイムラインは**直近7日分**を保持する。スクロールしても8日目以降は読み込まれない。
 
@@ -115,8 +115,9 @@
 同じ講座名でも、ミッションとして配信されればバッジが付き、子どもが自主的に選べば付かない
 （例: 「漢字のミニテスト」はユーザーによってバッジ有無が分かれた）。
 
-現行の `src/crawler.js` は `.missionIcon__i6nW8` の個数を数えているため、
-**バッジなしの自主学習は完全に検出できていない。**
+`src/crawler.js` の `extractElementaryDay()` は行ごとにこのバッジの有無を見て `isMission` を立て、
+`summarizeStudyRows()` がミッションと自主学習の両方を `studyItemCount` として数える。
+ストリーク判定はこの `studyItemCount` を使う。
 
 ### 2.4 スターアプリ行 `.root__OF9o7`（アコーディオン）
 
