@@ -790,14 +790,25 @@ async function getMissionDetailsForJuniorHigh(page, dateOffset = 0) {
  * 旧実装のような boundingBox のY座標計算は不要。
  * スターアプリのアコーディオン行は学習として扱わないため読み飛ばす。
  *
+ * `dayBlockCount` はページ上の日ブロック総数。`found: false` のとき、
+ * これが0なら「タイムライン自体が未描画/セレクタ破損」、1以上なら
+ * 「タイムラインは出ているが対象日の学習がない(正当な0)」を区別するために使う。
+ *
  * @private
  * @param {import('playwright').Page} page
  * @param {number} dateOffset - 0=今日、-1=昨日
- * @returns {Promise<{found: boolean, minuteText: string, rows: Array<{name: string, isMission: boolean, score: number, correctAnswers: number|null, questionCount: number|null}>}>}
+ * @returns {Promise<{found: boolean, minuteText: string, rows: Array<{name: string, isMission: boolean, score: number, correctAnswers: number|null, questionCount: number|null}>, dayBlockCount: number}>}
  */
 async function extractElementaryDay(page, dateOffset = 0) {
   const targetDates = getTargetDates(dateOffset);
   const { elementaryTimeline } = selectors;
+
+  // タイムラインの日ブロックが描画されるまで待つ。待てなくても
+  // (SPAの初期表示遅延等) 後続の判定(dayBlockCount)に委ねる。
+  await page.waitForSelector(elementaryTimeline.dayBlock, {
+    state: 'visible',
+    timeout: selectors.waitStrategies.timelineDateTimeout
+  }).catch(() => {});
 
   return page.evaluate(({ padded, unpadded, sel }) => {
     // oxlint-disable-next-line unicorn/consistent-function-scoping -- page.evaluate()内は丸ごとブラウザへシリアライズされるため、外側スコープの関数を参照できない
@@ -840,15 +851,15 @@ async function extractElementaryDay(page, dateOffset = 0) {
         }
       }
 
-      return { found: true, minuteText, rows };
+      return { found: true, minuteText, rows, dayBlockCount: dayBlocks.length };
     }
 
-    return { found: false, minuteText: '', rows: [] };
+    return { found: false, minuteText: '', rows: [], dayBlockCount: dayBlocks.length };
   }, {
     padded: targetDates.withPadding,
     unpadded: targetDates.withoutPadding,
     sel: elementaryTimeline
-  }).then(result => result ?? { found: false, minuteText: '', rows: [] });
+  }).then(result => result ?? { found: false, minuteText: '', rows: [], dayBlockCount: 0 });
 }
 
 /**
@@ -866,7 +877,15 @@ async function getTodayMissionCount(page, courseName = null, dateOffset = 0) {
     const day = await extractElementaryDay(page, dateOffset);
 
     if (!day.found) {
-      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータはまだありません（0件として扱います）`);
+      if (day.dayBlockCount === 0) {
+        console.log(`  ⚠️ タイムラインの日ブロックが1件も見つかりません（未描画の可能性）`);
+        return {
+          success: false,
+          error: '学習件数取得エラー: タイムラインの日ブロックが1件も見つかりません',
+          count: 0
+        };
+      }
+      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータはまだありません（日ブロック${day.dayBlockCount}件中に該当なし、0件として扱います）`);
       return { success: true, count: 0 };
     }
 
@@ -949,7 +968,16 @@ async function getStudyTime(page, courseName = null, dateOffset = 0) {
     const day = await extractElementaryDay(page, dateOffset);
 
     if (!day.found) {
-      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（勉強時間: 0時間0分）`);
+      if (day.dayBlockCount === 0) {
+        console.log(`  ⚠️ タイムラインの日ブロックが1件も見つかりません（未描画の可能性）`);
+        return {
+          success: false,
+          error: '勉強時間取得エラー: タイムラインの日ブロックが1件も見つかりません',
+          hours: 0,
+          minutes: 0
+        };
+      }
+      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（日ブロック${day.dayBlockCount}件中に該当なし、勉強時間: 0時間0分）`);
       return { success: true, hours: 0, minutes: 0 };
     }
 
@@ -992,7 +1020,15 @@ async function getMissionDetails(page, courseName = null, dateOffset = 0) {
     const day = await extractElementaryDay(page, dateOffset);
 
     if (!day.found) {
-      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（空配列として扱います）`);
+      if (day.dayBlockCount === 0) {
+        console.log(`  ⚠️ タイムラインの日ブロックが1件も見つかりません（未描画の可能性）`);
+        return {
+          success: false,
+          error: '学習詳細取得エラー: タイムラインの日ブロックが1件も見つかりません',
+          missions: []
+        };
+      }
+      console.log(`  ℹ️ 今日(${todayDates.withPadding})のデータが見つかりません（日ブロック${day.dayBlockCount}件中に該当なし、空配列として扱います）`);
       return { success: true, missions: [] };
     }
 

@@ -56,6 +56,107 @@ describe('クローラーモジュール (src/crawler.js)', () => {
   }
 
   /**
+   * extractElementaryDay の page.evaluate コールバックが使うDOM APIだけを持つ最小のfake要素
+   * 使うのは querySelectorAll / querySelector / children / textContent の4つのみ
+   */
+  function createFakeElement({ classes = [], text = '', children = [] } = {}) {
+    const el = {
+      classes,
+      textContent: text,
+      children,
+      // 自分自身を含まない子孫の平坦なリスト
+      descendants() {
+        return children.flatMap(child => [child, ...child.descendants()]);
+      },
+      querySelector(selector) {
+        return el.querySelectorAll(selector)[0] ?? null;
+      },
+      querySelectorAll(selector) {
+        // 子孫セレクタ(スペース区切り、例: '[class*="totalStudyTime__"] [class*="minute__"]')を
+        // 左から順に絞り込むことで模す。実装側のセレクタ文字列はそのまま通す。
+        const needles = selector
+          .trim()
+          .split(/\s+/)
+          .map(part => part.match(/\[class\*="(.+?)"\]/)?.[1] ?? part);
+
+        let candidates = [el];
+        for (const needle of needles) {
+          const matched = [];
+          for (const ctx of candidates) {
+            for (const node of ctx.descendants()) {
+              if (node.classes.some(cls => cls.includes(needle))) {
+                matched.push(node);
+              }
+            }
+          }
+          candidates = matched;
+        }
+        return candidates;
+      }
+    };
+    return el;
+  }
+
+  /**
+   * extractElementaryDay 用の fake document を組み立てる。
+   *
+   * @param {Array<{dateText: string, minuteText?: string, rows?: Array<object>}>} dayBlocks
+   *   rows の各要素は { type: 'accordion' }(スターアプリ行、除外対象) か
+   *   { name, isMission, score?, correctAnswers?, questionCount? }(学習行)
+   */
+  function buildElementaryDocument(dayBlocks) {
+    const dayBlockEls = dayBlocks.map(({ dateText, minuteText = '', rows = [] }) => {
+      const dateEl = createFakeElement({ classes: ['date__hash1'], text: dateText });
+      const minuteEl = createFakeElement({ classes: ['minute__hash2'], text: minuteText });
+      const totalStudyTimeEl = createFakeElement({ classes: ['totalStudyTime__hash3'], children: [minuteEl] });
+
+      const rowEls = rows.map((row) => {
+        if (row.type === 'accordion') {
+          // スターアプリ行: accordionRoot__ を持つ子要素を含むだけの行
+          return createFakeElement({
+            classes: ['rowItem__hash4'],
+            children: [createFakeElement({ classes: ['accordionRoot__hash5'] })]
+          });
+        }
+
+        const children = [createFakeElement({ classes: ['title__hash6'], text: row.name ?? '' })];
+
+        if (row.isMission) {
+          children.push(createFakeElement({ classes: ['missionIcon__hash7'] }));
+        }
+        if (row.score !== undefined) {
+          children.push(createFakeElement({ classes: ['scoreNumber__hash8'], text: String(row.score) }));
+        }
+        if (row.correctAnswers !== undefined) {
+          children.push(createFakeElement({ classes: ['correctAnswerCount__hash9'], text: String(row.correctAnswers) }));
+        }
+        if (row.questionCount !== undefined) {
+          children.push(createFakeElement({ classes: ['questionCount__hash10'], text: `/${row.questionCount}` }));
+        }
+
+        return createFakeElement({ classes: ['rowItem__hash11'], children });
+      });
+
+      const courseListEl = createFakeElement({ classes: ['courseList__hash12'], children: rowEls });
+
+      return createFakeElement({
+        classes: ['dailyTimeline__hash13'],
+        children: [dateEl, totalStudyTimeEl, courseListEl]
+      });
+    });
+
+    const root = createFakeElement({ classes: ['root'], children: dayBlockEls });
+    return { querySelectorAll: (selector) => root.querySelectorAll(selector) };
+  }
+
+  // extractElementaryDay のデフォルトfake document。日ブロックを1件だけ持つが、
+  // 現実にありえない日付("13/40")にしてあるため、courseName未指定/小学生コースの
+  // 既存テストで「対象日は見つからないが日ブロック自体は存在する」(dayBlockCount>0の
+  // 正当な0件)という現行互換の挙動を保つ。個別に検証したいテストは
+  // config.elementaryDocument で差し替える。
+  const defaultElementaryDocument = buildElementaryDocument([{ dateText: '13/40(月)', minuteText: '0分', rows: [] }]);
+
+  /**
    * Playwright Pageオブジェクトのモック
    *
    * @param {object} config
@@ -64,6 +165,8 @@ describe('クローラーモジュール (src/crawler.js)', () => {
    * @param {Error|null} config.throwOnFirstLocator - 最初のlocatorでスローするエラー
    * @param {number} config.vpWidth - ビューポート幅
    * @param {number} config.vpHeight - ビューポート高さ
+   * @param {object} [config.elementaryDocument] - extractElementaryDay 用 fake document
+   *   （buildElementaryDocument の戻り値。省略時は defaultElementaryDocument）
    */
   function createMockPage(config = {}) {
     const {
@@ -151,7 +254,22 @@ describe('クローラーモジュール (src/crawler.js)', () => {
       waitForFunction: mock.fn(async () => {}),
       keyboard: { press: mock.fn(async () => {}) },
       viewportSize: mock.fn(() => ({ width: vpWidth, height: vpHeight })),
-      evaluate: mock.fn(async () => config.elementaryDay ?? { found: false, minuteText: '', rows: [] }),
+      // page.evaluate(fn, arg) を実際に fn(arg) 実行する形でモックする。
+      // fn(extractElementaryDayのコールバック)はブラウザのグローバル document を参照するため、
+      // 呼び出し中だけ global.document を fake document に差し替えて元に戻す。
+      evaluate: mock.fn(async (fn, arg) => {
+        const previousDocument = global.document;
+        global.document = config.elementaryDocument ?? defaultElementaryDocument;
+        try {
+          return await fn(arg);
+        } finally {
+          if (previousDocument === undefined) {
+            delete global.document;
+          } else {
+            global.document = previousDocument;
+          }
+        }
+      }),
       screenshot: mock.fn(async () => {}),
       goBack: mock.fn(async () => {}),
     };
@@ -516,30 +634,48 @@ describe('クローラーモジュール (src/crawler.js)', () => {
   // ─── 小学生タイムライン抽出テスト ───
 
   describe('小学生コースのタイムライン抽出', () => {
-    const elementaryDay = {
-      found: true,
-      minuteText: '15分',
-      rows: [
-        { name: 'こそあど言葉', isMission: true, score: 93, correctAnswers: null, questionCount: null },
-        { name: '小数のひき算', isMission: true, score: 80, correctAnswers: null, questionCount: null },
-        { name: '小数のたし算', isMission: true, score: 80, correctAnswers: null, questionCount: null },
-        { name: '8級 同じ漢字の読み', isMission: true, score: 90, correctAnswers: null, questionCount: null },
-        { name: '漢字のミニテスト', isMission: false, score: 0, correctAnswers: 9, questionCount: 10 }
-      ]
-    };
+    // getTargetDates(0) が withPadding: '07/10', withoutPadding: '7/10',
+    // dateString: '2026-07-10' を返す基準時刻(既存のgetTargetDatesテストと同じ)。
+    // 日付マッチングを含む実際のDOM抽出ロジックを通すため、実時刻に依存しないよう固定する。
+    const FIXED_NOW = new Date('2026-07-09T22:00:00Z').getTime();
 
-    it('getTodayMissionCount() は自主学習を含めた学習件数を返す', async () => {
-      const page = createMockPage({ userNames: ['太郎さん'], elementaryDay });
+    function withFixedNow(fn) {
+      return async () => {
+        mock.timers.enable({ apis: ['Date'], now: FIXED_NOW });
+        try {
+          await fn();
+        } finally {
+          mock.timers.reset();
+        }
+      };
+    }
+
+    const missionAndIndependentRows = [
+      { name: 'こそあど言葉', isMission: true, score: 93 },
+      { name: '小数のひき算', isMission: true, score: 80 },
+      { name: '小数のたし算', isMission: true, score: 80 },
+      { name: '8級 同じ漢字の読み', isMission: true, score: 90 },
+      { name: '漢字のミニテスト', isMission: false, correctAnswers: 9, questionCount: 10 }
+    ];
+
+    it('getTodayMissionCount() は自主学習を含めた学習件数を返す', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([
+        { dateText: '07/10(金)', minuteText: '15分', rows: missionAndIndependentRows }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
 
       const result = await crawler.getTodayMissionCount(page, '小学生コース', 0);
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.count, 5);
       assert.strictEqual(result.missionCount, 4);
-    });
+    }));
 
-    it('getMissionDetails() は自主学習の行も isMission: false で返す', async () => {
-      const page = createMockPage({ userNames: ['太郎さん'], elementaryDay });
+    it('getMissionDetails() は自主学習の行も isMission: false で返す', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([
+        { dateText: '07/10(金)', minuteText: '15分', rows: missionAndIndependentRows }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
 
       const result = await crawler.getMissionDetails(page, '小学生コース', 0);
 
@@ -548,23 +684,77 @@ describe('クローラーモジュール (src/crawler.js)', () => {
       assert.strictEqual(result.missions[4].isMission, false);
       assert.strictEqual(result.missions[4].correctAnswers, 9);
       assert.strictEqual(result.missions[4].questionCount, 10);
-    });
+    }));
 
-    it('getStudyTime() は左カラムの分数をパースする', async () => {
-      const page = createMockPage({ userNames: ['太郎さん'], elementaryDay });
+    it('getMissionDetails() は questionCount の "/10" 表記から数値10を取り出す', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([
+        { dateText: '07/10(金)', minuteText: '15分', rows: [
+          { name: '漢字のミニテスト', isMission: false, correctAnswers: 9, questionCount: 10 }
+        ] }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
+
+      const result = await crawler.getMissionDetails(page, '小学生コース', 0);
+
+      assert.strictEqual(result.missions[0].questionCount, 10);
+    }));
+
+    it('getMissionDetails() は講座名の前後の空白をtrimする', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([
+        { dateText: '07/10(金)', minuteText: '15分', rows: [
+          { name: '  こそあど言葉  ', isMission: true, score: 93 }
+        ] }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
+
+      const result = await crawler.getMissionDetails(page, '小学生コース', 0);
+
+      assert.strictEqual(result.missions[0].name, 'こそあど言葉');
+    }));
+
+    it('getStudyTime() は左カラムの分数をパースする', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([
+        { dateText: '07/10(金)', minuteText: '15分', rows: missionAndIndependentRows }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
 
       const result = await crawler.getStudyTime(page, '小学生コース', 0);
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.hours, 0);
       assert.strictEqual(result.minutes, 15);
-    });
+    }));
 
-    it('日ブロックが見つからない日は0件・0分を success で返す', async () => {
-      const page = createMockPage({
-        userNames: ['太郎さん'],
-        elementaryDay: { found: false, minuteText: '', rows: [] }
-      });
+    it('日付マッチはゼロパディングあり("07/10")で一致する', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([
+        { dateText: '07/10(金)', minuteText: '15分', rows: [{ name: 'こそあど言葉', isMission: true, score: 93 }] }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
+
+      const result = await crawler.getTodayMissionCount(page, '小学生コース', 0);
+
+      assert.strictEqual(result.count, 1, 'ゼロパディングありの日付表記でマッチすること');
+    }));
+
+    it('日付マッチはゼロパディングなし("7/10")でも一致する', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([
+        { dateText: '7/10(金)', minuteText: '15分', rows: [{ name: 'こそあど言葉', isMission: true, score: 93 }] }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
+
+      const result = await crawler.getTodayMissionCount(page, '小学生コース', 0);
+
+      assert.strictEqual(result.count, 1, 'ゼロパディングなしの日付表記でもマッチすること');
+    }));
+
+    it('日ブロックはあるが対象日が見つからない場合は0件・0分を success で返す(正当な0)', withFixedNow(async () => {
+      // 対象日(07/10)ではない日ブロックのみを用意する。dayBlockCount > 0 のため
+      // 「タイムライン未描画」ではなく「対象日の学習なし」として success:true を返す。
+      const elementaryDocument = buildElementaryDocument([
+        { dateText: '07/09(木)', minuteText: '10分', rows: [{ name: '前日の学習', isMission: true, score: 50 }] },
+        { dateText: '07/08(水)', minuteText: '5分', rows: [] }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
 
       const count = await crawler.getTodayMissionCount(page, '小学生コース', 0);
       const details = await crawler.getMissionDetails(page, '小学生コース', 0);
@@ -576,23 +766,69 @@ describe('クローラーモジュール (src/crawler.js)', () => {
       assert.deepStrictEqual(details.missions, []);
       assert.strictEqual(time.success, true);
       assert.strictEqual(time.minutes, 0);
-    });
+    }));
 
-    it('スターアプリのぶんは行に含まれないため件数に入らない', async () => {
-      // extractElementaryDay がアコーディオン行を読み飛ばした結果を模す
-      const page = createMockPage({
-        userNames: ['太郎さん'],
-        elementaryDay: {
-          found: true,
+    it('日ブロックが1件も見つからない場合は success:false を返す(タイムライン未描画と区別)', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
+
+      const count = await crawler.getTodayMissionCount(page, '小学生コース', 0);
+      const time = await crawler.getStudyTime(page, '小学生コース', 0);
+      const details = await crawler.getMissionDetails(page, '小学生コース', 0);
+
+      assert.strictEqual(count.success, false);
+      assert.strictEqual(count.error, '学習件数取得エラー: タイムラインの日ブロックが1件も見つかりません');
+      assert.strictEqual(count.count, 0);
+
+      assert.strictEqual(time.success, false);
+      assert.strictEqual(time.error, '勉強時間取得エラー: タイムラインの日ブロックが1件も見つかりません');
+      assert.strictEqual(time.hours, 0);
+      assert.strictEqual(time.minutes, 0);
+
+      assert.strictEqual(details.success, false);
+      assert.strictEqual(details.error, '学習詳細取得エラー: タイムラインの日ブロックが1件も見つかりません');
+      assert.deepStrictEqual(details.missions, []);
+    }));
+
+    it('スターアプリ(アコーディオン)行は rows から除外され件数に入らない', withFixedNow(async () => {
+      // ミッション1件 + スターアプリ(アコーディオン)行1件を含む日ブロックを組み立て、
+      // extractElementaryDay 自身がアコーディオン行を読み飛ばすことを検証する
+      // (モックが結果を差し替えているのではなく、実際の抽出ロジックを通す)
+      const elementaryDocument = buildElementaryDocument([
+        {
+          dateText: '07/10(金)',
           minuteText: '15分',
-          rows: [{ name: 'こそあど言葉', isMission: true, score: 93, correctAnswers: null, questionCount: null }]
+          rows: [
+            { name: 'こそあど言葉', isMission: true, score: 93 },
+            { type: 'accordion' }
+          ]
         }
-      });
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
 
       const result = await crawler.getTodayMissionCount(page, '小学生コース', 0);
 
-      assert.strictEqual(result.count, 1);
-    });
+      assert.strictEqual(result.count, 1, 'アコーディオン行を除いた件数になること');
+    }));
+
+    it('ミッションバッジの有無で isMission が正しく分かれる', withFixedNow(async () => {
+      const elementaryDocument = buildElementaryDocument([
+        {
+          dateText: '07/10(金)',
+          minuteText: '15分',
+          rows: [
+            { name: 'ミッション講座', isMission: true, score: 93 },
+            { name: '自主学習講座', isMission: false, correctAnswers: 3, questionCount: 5 }
+          ]
+        }
+      ]);
+      const page = createMockPage({ userNames: ['太郎さん'], elementaryDocument });
+
+      const result = await crawler.getMissionDetails(page, '小学生コース', 0);
+
+      assert.strictEqual(result.missions[0].isMission, true);
+      assert.strictEqual(result.missions[1].isMission, false);
+    }));
   });
 
   describe('getTargetDates', () => {
