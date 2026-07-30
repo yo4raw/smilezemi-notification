@@ -1438,6 +1438,7 @@ module.exports = {
   getStudyTime,
   getMissionDetails,
   getTodayMissionCount,
+  getCourseData,
   getTotalScore,
   summarizeStudyRows,
   getTargetDates,
