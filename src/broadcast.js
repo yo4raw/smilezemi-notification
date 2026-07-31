@@ -4,9 +4,11 @@
  * 1本のメッセージをどの宛先へどの順序で送るかだけを担う。
  * - broadcastMessage: LINEに送り、失敗したときだけDiscordへ転送する（日次の通知が使う）
  * - broadcastToAll:   LINEの成否にかかわらずDiscordへも送る（月次清算だけが使う）
+ * - broadcastToDiscordOnly: Discordだけへ送る（夜通知の全員達成日だけが使う）
  *
  * 設計: docs/superpowers/specs/2026-07-27-discord-fallback-notification-design.md
  *       docs/superpowers/specs/2026-07-27-monthly-discord-healthcheck-design.md
+ *       docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
  */
 
 const { sendPushMessage, truncateToLimit } = require('./notifier');
@@ -209,9 +211,53 @@ async function broadcastToAll(message, config, options = {}) {
   return { success: lineResult.success || discordResult.success, results };
 }
 
+/**
+ * メッセージをDiscordだけへ送る（LINEには送らない）
+ *
+ * 夜通知で全ユーザーが当日のストリーク要件を達成した日に使う。LINEグループへのpushは
+ * 人数分カウントされ無料枠(月200)が逼迫しているため、この日はLINEを消費しない。
+ * 一方Discordには月間送信数の上限がないので、記録としては必ず残す。
+ *
+ * success の意味は broadcastMessage() と同じく「1つ以上の宛先に届いたか」。
+ * DISCORD_WEBHOOK_URL 未設定のときは「宛先がないから送らなかった」ことを skipped で示す。
+ * この設定は任意扱いのため、未設定環境で毎晩ワークフローが赤くなるのを避けたい呼び出し側が
+ * 「送って失敗した(success:false)」と区別できるようにしている。
+ *
+ * 本文に転送の理由行は付けない。LINEを試していないので「失敗して転送した」わけではなく、
+ * 送らなかった理由を知っているのは呼び出し側（src/index.js）だからである。
+ *
+ * 設計: docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
+ *
+ * @param {string} message - 送信するメッセージ（切り詰めは本関数が行う）
+ * @param {{DISCORD_WEBHOOK_URL?: string}} config
+ * @param {object} [options] - 送信オプション（maxRetries / retryDelay / timeoutMs）
+ * @returns {Promise<{success: boolean, skipped?: boolean, results: Array<{channel: string, success: boolean, error?: string}>}>}
+ */
+async function broadcastToDiscordOnly(message, config, options = {}) {
+  if (!config.DISCORD_WEBHOOK_URL) {
+    console.warn('⚠️ DISCORD_WEBHOOK_URL が未設定のため、Discordへの送信をスキップします');
+    return { success: false, skipped: true, results: [] };
+  }
+
+  console.log('📤 Discordへ送信しています...');
+  const discordResult = await postToDiscord(message, config, options);
+
+  if (!discordResult.success) {
+    console.error('❌ Discordへの送信に失敗しました:', discordResult.error);
+  }
+
+  return {
+    success: discordResult.success,
+    results: [{ channel: 'discord', success: discordResult.success, error: discordResult.error }]
+  };
+}
+
 module.exports = {
   broadcastMessage,
   broadcastToAll,
+  broadcastToDiscordOnly,
   formatFallbackMessage,
-  LINE_MAX_MESSAGE_LENGTH
+  LINE_MAX_MESSAGE_LENGTH,
+  // 呼び出し側（DRY_RUNプレビュー）が宛先ごとの上限で切り詰められるよう再エクスポートする
+  DISCORD_MAX_MESSAGE_LENGTH
 };
