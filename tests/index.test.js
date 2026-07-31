@@ -151,7 +151,12 @@ describe('オーケストレーション (src/index.js)', () => {
           callLog.push({ type: 'broadcastMessage', args });
           return { success: true, results: [{ channel: 'line', success: true }] };
         }),
-        LINE_MAX_MESSAGE_LENGTH: 5000
+        broadcastToDiscordOnly: overrides.broadcastToDiscordOnly || (async (...args) => {
+          callLog.push({ type: 'broadcastToDiscordOnly', args });
+          return { success: true, results: [{ channel: 'discord', success: true }] };
+        }),
+        LINE_MAX_MESSAGE_LENGTH: 5000,
+        DISCORD_MAX_MESSAGE_LENGTH: 2000
       }
     };
 
@@ -366,21 +371,75 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(capturedFormatOptions.missionWarningThresholds.juniorHigh, 3);
     });
 
-    it('正常系: 全ユーザーがストリーク要件達成済みの日は夜通知を送信しない(送信数節約)', async () => {
+    it('正常系: 全ユーザーがストリーク要件達成済みの日はDiscordのみに送る(LINE送信数節約)', async () => {
       setupMocks({
         isStudied: () => true
       });
 
       const result = await mainModule.main();
 
-      assert.strictEqual(result.success, true, '送信スキップでも正常終了すること');
+      assert.strictEqual(result.success, true);
       assert.strictEqual(result.exitCode, 0);
 
-      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
-      assert.strictEqual(pushCalls.length, 0, '全員達成の日はbroadcastMessageが呼ばれないこと');
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastMessage').length, 0,
+        '全員達成の日はLINE経路(broadcastMessage)を使わないこと'
+      );
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToDiscordOnly').length, 1,
+        '全員達成の日はDiscordのみに1回送ること'
+      );
 
       const saveCalls = callLog.filter(c => c.type === 'saveData');
-      assert.strictEqual(saveCalls.length, 1, '通知しない日もデータは保存されること');
+      assert.strictEqual(saveCalls.length, 1, 'データは保存されること');
+    });
+
+    it('正常系: 全員達成の日のDiscord本文には断り行が先頭に付く', async () => {
+      setupMocks({
+        isStudied: () => true,
+        formatDetailedMessage: () => 'テスト詳細メッセージ'
+      });
+
+      await mainModule.main();
+
+      const [sentMessage] = callLog.find(c => c.type === 'broadcastToDiscordOnly').args;
+      assert.match(
+        sentMessage,
+        /^ℹ️ 全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します\(送信数節約\)\n\n/,
+        '断り行と空行が先頭に付くこと'
+      );
+      assert.match(sentMessage, /テスト詳細メッセージ/, '本文が保持されること');
+    });
+
+    it('異常系: 全員達成の日にDiscord送信が失敗したら終了コード1になる', async () => {
+      setupMocks({
+        isStudied: () => true,
+        broadcastToDiscordOnly: async (...args) => {
+          callLog.push({ type: 'broadcastToDiscordOnly', args });
+          return { success: false, results: [{ channel: 'discord', success: false, error: 'Discord API エラー: 404' }] };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.exitCode, 1, 'どこにも届かないので赤くすること');
+    });
+
+    it('正常系: Webhook未設定(skipped)なら赤くせず正常終了する', async () => {
+      setupMocks({
+        isStudied: () => true,
+        broadcastToDiscordOnly: async (...args) => {
+          callLog.push({ type: 'broadcastToDiscordOnly', args });
+          return { success: false, skipped: true, results: [] };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.success, true, '宛先がないだけなので赤くしないこと');
+      assert.strictEqual(result.exitCode, 0);
+      assert.strictEqual(callLog.filter(c => c.type === 'saveData').length, 1, 'データは保存されること');
     });
 
     it('正常系: 未達ユーザーが1人でもいる日は夜通知を送信する', async () => {
@@ -401,6 +460,13 @@ describe('オーケストレーション (src/index.js)', () => {
 
       const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
       assert.strictEqual(pushCalls.length, 1, '未達ユーザーがいる日は送信されること');
+
+      const [sentMessage] = pushCalls[0].args;
+      assert.doesNotMatch(
+        sentMessage,
+        /全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します/,
+        'LINE経路には全員達成の断り行が付かないこと'
+      );
     });
 
     it('正常系: ドライラン+全員達成の日は送信もデータ保存も行わない', async () => {
@@ -416,6 +482,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
         assert.strictEqual(result.success, true);
         assert.strictEqual(callLog.filter(c => c.type === 'broadcastMessage').length, 0);
+        assert.strictEqual(callLog.filter(c => c.type === 'broadcastToDiscordOnly').length, 0, 'ドライランではDiscordにも送らないこと');
         assert.strictEqual(callLog.filter(c => c.type === 'saveData').length, 0, 'ドライランではデータ保存しないこと');
       } finally {
         if (originalDryRun === undefined) {
@@ -424,6 +491,80 @@ describe('オーケストレーション (src/index.js)', () => {
           process.env.DRY_RUN = originalDryRun;
         }
       }
+    });
+
+    it('正常系: ドライラン+全員達成の日はプレビューがDiscordの上限(2000文字)に切り詰められる', async () => {
+      const originalDryRun = process.env.DRY_RUN;
+      process.env.DRY_RUN = 'true';
+      const longMessage = 'あ'.repeat(5000);
+
+      setupMocks({
+        isStudied: () => true,
+        formatDetailedMessage: () => longMessage
+      });
+
+      const logs = [];
+      const originalConsoleLog = console.log;
+      console.log = (...args) => { logs.push(args); };
+
+      try {
+        await mainModule.main();
+      } finally {
+        console.log = originalConsoleLog;
+        if (originalDryRun === undefined) {
+          delete process.env.DRY_RUN;
+        } else {
+          process.env.DRY_RUN = originalDryRun;
+        }
+      }
+
+      const previewLog = logs.find(args =>
+        typeof args[0] === 'string' && args[0].includes(longMessage.slice(0, 50))
+      );
+      assert.ok(previewLog, 'プレビューが出力されること');
+      assert.ok(
+        previewLog[0].length <= 2000,
+        `プレビューがDiscordの上限(2000)以内に収まること(実測${previewLog[0].length}文字)`
+      );
+    });
+
+    it('正常系: ドライラン+未達ユーザーがいる日はプレビューがLINEの上限(5000文字)まで収まる', async () => {
+      const originalDryRun = process.env.DRY_RUN;
+      process.env.DRY_RUN = 'true';
+      const longMessage = 'あ'.repeat(5000);
+
+      setupMocks({
+        isStudied: () => false,
+        formatDetailedMessage: () => longMessage
+      });
+
+      const logs = [];
+      const originalConsoleLog = console.log;
+      console.log = (...args) => { logs.push(args); };
+
+      try {
+        await mainModule.main();
+      } finally {
+        console.log = originalConsoleLog;
+        if (originalDryRun === undefined) {
+          delete process.env.DRY_RUN;
+        } else {
+          process.env.DRY_RUN = originalDryRun;
+        }
+      }
+
+      const previewLog = logs.find(args =>
+        typeof args[0] === 'string' && args[0].includes(longMessage.slice(0, 50))
+      );
+      assert.ok(previewLog, 'プレビューが出力されること');
+      assert.ok(
+        previewLog[0].length > 2000,
+        `プレビューがDiscordの上限(2000)より長く切り詰められること(実測${previewLog[0].length}文字)`
+      );
+      assert.ok(
+        previewLog[0].length <= 5000,
+        `プレビューがLINEの上限(5000)以内に収まること(実測${previewLog[0].length}文字)`
+      );
     });
 
     it('正常系: ドライランモードでは送信・保存を行わない', async () => {

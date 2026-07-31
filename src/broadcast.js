@@ -4,9 +4,11 @@
  * 1本のメッセージをどの宛先へどの順序で送るかだけを担う。
  * - broadcastMessage: LINEに送り、失敗したときだけDiscordへ転送する（日次の通知が使う）
  * - broadcastToAll:   LINEの成否にかかわらずDiscordへも送る（月次清算だけが使う）
+ * - broadcastToDiscordOnly: Discordだけへ送る（夜通知の全員達成日だけが使う）
  *
  * 設計: docs/superpowers/specs/2026-07-27-discord-fallback-notification-design.md
  *       docs/superpowers/specs/2026-07-27-monthly-discord-healthcheck-design.md
+ *       docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
  */
 
 const { sendPushMessage, truncateToLimit } = require('./notifier');
@@ -87,26 +89,20 @@ async function sendToLine(message, config, options) {
 /**
  * Discordへ送信する。想定外の例外も「Discord失敗」として畳み込む
  *
- * LINEが失敗していた場合（lineResult.success === false）だけ、転送であることを示す
- * 理由行を先頭に付ける。エラー文字列の有無ではなく success で分岐させるのは、
- * 「失敗しているのに理由行のない本文が届く」状態を契約として起こさないため。
+ * 本文はすでに完成した状態で渡される。理由行を付けるかどうかは
+ * 呼び出し側の宛先ポリシーが決めることで、この関数はLINEの結果を知らない。
  *
  * 例外を畳み込むのは主に broadcastToAll() のため。LINE成功後にDiscordで例外が抜けると
  * 呼び出し元（月次清算）の後続処理に到達せず、清算メッセージはLINEに届いているのに
  * ボーナスがリセットされない = 翌月に同じ分が再清算される二重支給になる。
  *
  * @private
- * @param {string} message - 本文
+ * @param {string} body - 送信する本文（理由行の付加は呼び出し側で済ませておく）
  * @param {object} config - 設定オブジェクト
  * @param {object} options - 送信オプション
- * @param {{success: boolean, error?: string}} lineResult - LINE送信の結果
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-async function sendToDiscord(message, config, options, lineResult) {
-  const body = lineResult.success
-    ? message
-    : formatFallbackMessage(message, lineResult.error || '不明なエラー');
-
+async function postToDiscord(body, config, options) {
   try {
     return await sendDiscordMessage(
       truncateToLimit(body, DISCORD_MAX_MESSAGE_LENGTH),
@@ -152,7 +148,11 @@ async function broadcastMessage(message, config, options = {}) {
 
   console.log('📤 Discordへフォールバック送信しています...');
   // ここに来る時点でLINEは失敗しているため、必ず理由行付きで転送される
-  const discordResult = await sendToDiscord(message, config, options, lineResult);
+  const discordResult = await postToDiscord(
+    formatFallbackMessage(message, lineResult.error || '不明なエラー'),
+    config,
+    options
+  );
   results.push({ channel: 'discord', success: discordResult.success, error: discordResult.error });
 
   if (discordResult.success) {
@@ -197,7 +197,11 @@ async function broadcastToAll(message, config, options = {}) {
 
   console.log('📤 Discordへ送信しています...');
   // LINEが失敗している場合だけ理由行を付ける（成功時は本文をそのまま送る）
-  const discordResult = await sendToDiscord(message, config, options, lineResult);
+  const discordResult = await postToDiscord(
+    lineResult.success ? message : formatFallbackMessage(message, lineResult.error || '不明なエラー'),
+    config,
+    options
+  );
   results.push({ channel: 'discord', success: discordResult.success, error: discordResult.error });
 
   if (!discordResult.success) {
@@ -207,9 +211,53 @@ async function broadcastToAll(message, config, options = {}) {
   return { success: lineResult.success || discordResult.success, results };
 }
 
+/**
+ * メッセージをDiscordだけへ送る（LINEには送らない）
+ *
+ * 夜通知で全ユーザーが当日のストリーク要件を達成した日に使う。LINEグループへのpushは
+ * 人数分カウントされ無料枠(月200)が逼迫しているため、この日はLINEを消費しない。
+ * 一方Discordには月間送信数の上限がないので、記録としては必ず残す。
+ *
+ * success の意味は broadcastMessage() と同じく「1つ以上の宛先に届いたか」。
+ * DISCORD_WEBHOOK_URL 未設定のときは「宛先がないから送らなかった」ことを skipped で示す。
+ * この設定は任意扱いのため、未設定環境で毎晩ワークフローが赤くなるのを避けたい呼び出し側が
+ * 「送って失敗した(success:false)」と区別できるようにしている。
+ *
+ * 本文に転送の理由行は付けない。LINEを試していないので「失敗して転送した」わけではなく、
+ * 送らなかった理由を知っているのは呼び出し側（src/index.js）だからである。
+ *
+ * 設計: docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
+ *
+ * @param {string} message - 送信するメッセージ（切り詰めは本関数が行う）
+ * @param {{DISCORD_WEBHOOK_URL?: string}} config
+ * @param {object} [options] - 送信オプション（maxRetries / retryDelay / timeoutMs）
+ * @returns {Promise<{success: boolean, skipped?: boolean, results: Array<{channel: string, success: boolean, error?: string}>}>}
+ */
+async function broadcastToDiscordOnly(message, config, options = {}) {
+  if (!config.DISCORD_WEBHOOK_URL) {
+    console.warn('⚠️ DISCORD_WEBHOOK_URL が未設定のため、Discordへの送信をスキップします');
+    return { success: false, skipped: true, results: [] };
+  }
+
+  console.log('📤 Discordへ送信しています...');
+  const discordResult = await postToDiscord(message, config, options);
+
+  if (!discordResult.success) {
+    console.error('❌ Discordへの送信に失敗しました:', discordResult.error);
+  }
+
+  return {
+    success: discordResult.success,
+    results: [{ channel: 'discord', success: discordResult.success, error: discordResult.error }]
+  };
+}
+
 module.exports = {
   broadcastMessage,
   broadcastToAll,
+  broadcastToDiscordOnly,
   formatFallbackMessage,
-  LINE_MAX_MESSAGE_LENGTH
+  LINE_MAX_MESSAGE_LENGTH,
+  // 呼び出し側（DRY_RUNプレビュー）が宛先ごとの上限で切り詰められるよう再エクスポートする
+  DISCORD_MAX_MESSAGE_LENGTH
 };

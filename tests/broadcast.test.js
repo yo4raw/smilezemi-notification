@@ -446,6 +446,79 @@ describe('送信フォールバック層 (src/broadcast.js)', () => {
     });
   });
 
+  describe('broadcastToDiscordOnly() - Discord単独送信（夜通知の全員達成日用）', () => {
+    it('正常系: LINEを呼ばずDiscordだけに送る', async () => {
+      const result = await broadcast.broadcastToDiscordOnly('記録メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(callLog.filter(c => c.type === 'line').length, 0, 'LINEを呼ばないこと');
+      assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 1);
+      assert.strictEqual(result.results.length, 1);
+      assert.strictEqual(result.results[0].channel, 'discord');
+      assert.strictEqual(result.skipped, undefined, '送信した場合はskippedを付けないこと');
+    });
+
+    it('正常系: 本文に転送の理由行を付けずそのまま送る', async () => {
+      await broadcast.broadcastToDiscordOnly('記録メッセージ', defaultConfig);
+
+      const [sentMessage, webhookUrl] = callLog.find(c => c.type === 'discord').args;
+      assert.strictEqual(sentMessage, '記録メッセージ', '転送ヘッダを付けないこと');
+      assert.strictEqual(webhookUrl, 'https://discord.com/api/webhooks/123/abc');
+    });
+
+    it('正常系: Discordへは2000文字に切り詰めて渡す', async () => {
+      await broadcast.broadcastToDiscordOnly('あ'.repeat(5000), defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.strictEqual(sentMessage.length <= 2000, true, 'Discordの上限に収めること');
+    });
+
+    it('異常系: Discord送信が失敗したらsuccessはfalse（skippedは付かない）', async () => {
+      setupMocks({
+        sendDiscordMessage: async (...args) => {
+          callLog.push({ type: 'discord', args });
+          return { success: false, error: 'Discord API エラー: 404 Not Found - Unknown Webhook' };
+        }
+      });
+
+      const result = await broadcast.broadcastToDiscordOnly('記録メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(result.skipped, undefined, '送信を試みた失敗はskippedにしないこと');
+      assert.strictEqual(result.results.length, 1);
+      assert.match(result.results[0].error, /Unknown Webhook/);
+    });
+
+    it('異常系: sendDiscordMessageが例外を投げても失敗として畳み込む', async () => {
+      setupMocks({
+        sendDiscordMessage: async () => {
+          throw new Error('想定外の例外');
+        }
+      });
+
+      const result = await broadcast.broadcastToDiscordOnly('記録メッセージ', defaultConfig);
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.results[0].error, /想定外の例外/);
+    });
+
+    it('正常系: Webhook未設定なら送信せずskipped:trueを返す', async () => {
+      const result = await broadcast.broadcastToDiscordOnly('記録メッセージ', {
+        ...defaultConfig,
+        DISCORD_WEBHOOK_URL: undefined
+      });
+
+      assert.strictEqual(result.success, false, '届いていないのでsuccessはfalse');
+      assert.strictEqual(result.skipped, true, '宛先がないことをskippedで示すこと');
+      assert.strictEqual(callLog.filter(c => c.type === 'discord').length, 0, 'Discordを呼ばないこと');
+      assert.deepStrictEqual(result.results, []);
+    });
+
+    it('正常系: DISCORD_MAX_MESSAGE_LENGTHをエクスポートする', () => {
+      assert.strictEqual(broadcast.DISCORD_MAX_MESSAGE_LENGTH, 2000);
+    });
+  });
+
   describe('formatFallbackMessage()', () => {
     it('理由行と本文を空行で区切って返す', () => {
       const result = broadcast.formatFallbackMessage('本文', 'LINE API エラー: 429');

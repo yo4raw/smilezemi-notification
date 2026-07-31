@@ -9,10 +9,18 @@ const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
 const { formatMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
-const { broadcastMessage, LINE_MAX_MESSAGE_LENGTH } = require('./broadcast');
+const { broadcastMessage, broadcastToDiscordOnly, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
 const { loadStreakData, formatStreakInfo, isStudied, createInitialState, getRequirementForCourse } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
+
+/**
+ * 全員がストリーク要件を達成した日にDiscordへ付ける断り行
+ *
+ * DiscordにはLINE失敗時のフォールバック転送（先頭が「⚠️ LINEへの送信に失敗した…」）も
+ * 届くため、受信側が両者を区別できるよう、送らなかった理由を明示する。
+ */
+const DISCORD_ONLY_NOTICE = 'ℹ️ 全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します(送信数節約)';
 
 /**
  * メイン実行関数
@@ -255,43 +263,6 @@ async function main() {
       streaks[user.userName] = formatStreakInfo({ state, event: 'none' }, { todayStudied });
     });
 
-    // 6.6 送信要否の判定
-    // 夜通知は速報のため、全員が当日のストリーク要件を達成済みの日は送信しない。
-    // 送信先グループへのpushは人数分カウントされ無料枠(月200)が逼迫しているため、
-    // 「このままだと記録更新できないユーザーがいる」= 夜のうちに促す価値がある日だけ通知する。
-    // 確定通知は翌朝の朝通知が毎日必ず送る。
-    // 詳細: docs/superpowers/specs/2026-07-26-line-quota-reduction-design.md
-    if (!hasUnqualifiedUser) {
-      console.log('ℹ️ 全ユーザーが本日のストリーク要件を達成済みのため、夜通知をスキップします(送信数節約)');
-
-      if (process.env.DRY_RUN === 'true') {
-        console.log('ℹ️ ドライランモード: データ保存はスキップしました');
-        console.log('🎉 処理が正常に完了しました');
-        return {
-          success: errors.length === 0,
-          exitCode: errors.length === 0 ? 0 : 1,
-          errors: errors.length > 0 ? errors : undefined
-        };
-      }
-
-      // 通知しない日もデータは保存し、翌日の差分比較の基準を保つ
-      console.log('💾 データを保存しています...');
-      const saveResult = await saveData(currentData);
-      if (saveResult.success) {
-        console.log('✅ データの保存が完了しました');
-      } else {
-        console.error('❌ データの保存に失敗しました:', saveResult.error);
-        errors.push(saveResult.error);
-      }
-
-      console.log('🎉 処理が正常に完了しました');
-      return {
-        success: errors.length === 0,
-        exitCode: errors.length === 0 ? 0 : 1,
-        errors: errors.length > 0 ? errors : undefined
-      };
-    }
-
     // 7. データ比較（変更検出）
     console.log('🔄 データを比較しています...');
 
@@ -321,13 +292,26 @@ async function main() {
       }
     });
 
+    // 送信先の決定
+    // 夜通知は速報のため、全員が当日のストリーク要件を達成済みの日はLINEに送らない。
+    // 送信先グループへのpushは人数分カウントされ無料枠(月200)が逼迫しているため、
+    // 「このままだと記録更新できないユーザーがいる」= 夜のうちに促す価値がある日だけLINEに送る。
+    // ただしDiscordには月間送信数の上限がないため、全員達成の日も記録として必ず送る。
+    // 確定通知は翌朝の朝通知が毎日必ず送る。
+    // 詳細: docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
+    const discordOnly = !hasUnqualifiedUser;
+    const outgoingMessage = discordOnly ? `${DISCORD_ONLY_NOTICE}\n\n${message}` : message;
+
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない
     if (process.env.DRY_RUN === 'true') {
-      // 実送信ではbroadcastが宛先ごとに切り詰めるため、プレビューもLINEの上限で切って表示する
+      // 実送信ではbroadcastが宛先ごとに切り詰めるため、プレビューも実際の宛先の上限で切って表示する
       // （送信経路には手を入れず、表示だけを実際の文面に合わせる）
       console.log('\n📋 === 通知メッセージプレビュー ===');
-      console.log(truncateToLimit(message, LINE_MAX_MESSAGE_LENGTH));
+      console.log(truncateToLimit(outgoingMessage, discordOnly ? DISCORD_MAX_MESSAGE_LENGTH : LINE_MAX_MESSAGE_LENGTH));
       console.log('=== プレビュー終了 ===\n');
+      console.log(discordOnly
+        ? 'ℹ️ 全員達成のため、実行時はDiscordのみに送信します'
+        : 'ℹ️ 実行時はLINEに送信します(失敗時はDiscordへ転送)');
       console.log('ℹ️ ドライランモード: 通知とデータ保存はスキップしました');
       console.log('🎉 処理が正常に完了しました');
       return {
@@ -337,11 +321,19 @@ async function main() {
       };
     }
 
-    // 通知送信（宛先の切り替え・リトライ・タイムアウト・マスキングはbroadcastMessageに委譲）
-    const notifyResult = await broadcastMessage(message, config);
+    // 通知送信（リトライ・タイムアウト・切り詰め・マスキングは送信層に委譲）
+    if (discordOnly) {
+      console.log('ℹ️ 全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します');
+    }
+    const notifyResult = discordOnly
+      ? await broadcastToDiscordOnly(outgoingMessage, config)
+      : await broadcastMessage(outgoingMessage, config);
 
     if (notifyResult.success) {
       console.log('✅ 通知の送信が完了しました');
+    } else if (notifyResult.skipped) {
+      // 宛先が1つも設定されていないだけなので、ワークフローは赤くしない
+      console.warn('⚠️ DISCORD_WEBHOOK_URL が未設定のため、全員達成日の記録を送信しませんでした');
     } else {
       console.error('❌ 通知の送信に全宛先で失敗しました');
       errors.push('通知が全宛先で失敗しました');
