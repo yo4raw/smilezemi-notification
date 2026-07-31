@@ -87,26 +87,20 @@ async function sendToLine(message, config, options) {
 /**
  * Discordへ送信する。想定外の例外も「Discord失敗」として畳み込む
  *
- * LINEが失敗していた場合（lineResult.success === false）だけ、転送であることを示す
- * 理由行を先頭に付ける。エラー文字列の有無ではなく success で分岐させるのは、
- * 「失敗しているのに理由行のない本文が届く」状態を契約として起こさないため。
+ * 本文はすでに完成した状態で渡される。理由行を付けるかどうかは
+ * 呼び出し側の宛先ポリシーが決めることで、この関数はLINEの結果を知らない。
  *
  * 例外を畳み込むのは主に broadcastToAll() のため。LINE成功後にDiscordで例外が抜けると
  * 呼び出し元（月次清算）の後続処理に到達せず、清算メッセージはLINEに届いているのに
  * ボーナスがリセットされない = 翌月に同じ分が再清算される二重支給になる。
  *
  * @private
- * @param {string} message - 本文
+ * @param {string} body - 送信する本文（理由行の付加は呼び出し側で済ませておく）
  * @param {object} config - 設定オブジェクト
  * @param {object} options - 送信オプション
- * @param {{success: boolean, error?: string}} lineResult - LINE送信の結果
  * @returns {Promise<{success: boolean, error?: string}>}
  */
-async function sendToDiscord(message, config, options, lineResult) {
-  const body = lineResult.success
-    ? message
-    : formatFallbackMessage(message, lineResult.error || '不明なエラー');
-
+async function postToDiscord(body, config, options) {
   try {
     return await sendDiscordMessage(
       truncateToLimit(body, DISCORD_MAX_MESSAGE_LENGTH),
@@ -152,7 +146,11 @@ async function broadcastMessage(message, config, options = {}) {
 
   console.log('📤 Discordへフォールバック送信しています...');
   // ここに来る時点でLINEは失敗しているため、必ず理由行付きで転送される
-  const discordResult = await sendToDiscord(message, config, options, lineResult);
+  const discordResult = await postToDiscord(
+    formatFallbackMessage(message, lineResult.error || '不明なエラー'),
+    config,
+    options
+  );
   results.push({ channel: 'discord', success: discordResult.success, error: discordResult.error });
 
   if (discordResult.success) {
@@ -197,7 +195,11 @@ async function broadcastToAll(message, config, options = {}) {
 
   console.log('📤 Discordへ送信しています...');
   // LINEが失敗している場合だけ理由行を付ける（成功時は本文をそのまま送る）
-  const discordResult = await sendToDiscord(message, config, options, lineResult);
+  const discordResult = await postToDiscord(
+    lineResult.success ? message : formatFallbackMessage(message, lineResult.error || '不明なエラー'),
+    config,
+    options
+  );
   results.push({ channel: 'discord', success: discordResult.success, error: discordResult.error });
 
   if (!discordResult.success) {
