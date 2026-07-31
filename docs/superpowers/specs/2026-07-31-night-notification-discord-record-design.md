@@ -72,7 +72,7 @@
 ### 2. `src/index.js` — 全員達成の日を Discord 送信に置き換える
 
 - 条件送信の早期 return（現行 `:264-293`）を削除する。`hasUnqualifiedUser` の算出（現行 `:247-256`）はそのまま残す
-- 差分比較（`compareData` / `compareMissionDetails`）とメッセージ整形（`formatDetailedMessage`）は全員達成の日も通す。いずれも純粋関数で副作用はない
+- 差分比較（`compareData` / `compareMissionDetails`）とメッセージ整形（`formatDetailedMessage`）は全員達成の日も通す。いずれも純粋関数で副作用はない。ただし早期 return の削除により `compareResult.success === false` の日は全員達成でも errors に積まれ終了コード1になる（従来は早期 return で0のまま終わっていた。未達者がいる日と同じ扱いになり一貫性は向上する）
 - データ保存は通常経路の `saveData`（現行 `:352`）に合流する。削除する早期 return 内の保存処理と同一のため挙動は変わらない
 - DRY_RUN も早期 return 内の専用分岐（現行 `:267-275`）を削除し、通常経路のプレビュー（現行 `:325-338`）に合流する。全員達成の日は断り行付きの本文を、宛先が Discord のみである旨のログとともに `DISCORD_MAX_MESSAGE_LENGTH`（2000）で切り詰めて表示する
 - 送信箇所（現行 `:341`）を宛先の切り替えにする:

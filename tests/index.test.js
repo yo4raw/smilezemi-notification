@@ -460,6 +460,13 @@ describe('オーケストレーション (src/index.js)', () => {
 
       const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
       assert.strictEqual(pushCalls.length, 1, '未達ユーザーがいる日は送信されること');
+
+      const [sentMessage] = pushCalls[0].args;
+      assert.doesNotMatch(
+        sentMessage,
+        /全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します/,
+        'LINE経路には全員達成の断り行が付かないこと'
+      );
     });
 
     it('正常系: ドライラン+全員達成の日は送信もデータ保存も行わない', async () => {
@@ -484,6 +491,80 @@ describe('オーケストレーション (src/index.js)', () => {
           process.env.DRY_RUN = originalDryRun;
         }
       }
+    });
+
+    it('正常系: ドライラン+全員達成の日はプレビューがDiscordの上限(2000文字)に切り詰められる', async () => {
+      const originalDryRun = process.env.DRY_RUN;
+      process.env.DRY_RUN = 'true';
+      const longMessage = 'あ'.repeat(5000);
+
+      setupMocks({
+        isStudied: () => true,
+        formatDetailedMessage: () => longMessage
+      });
+
+      const logs = [];
+      const originalConsoleLog = console.log;
+      console.log = (...args) => { logs.push(args); };
+
+      try {
+        await mainModule.main();
+      } finally {
+        console.log = originalConsoleLog;
+        if (originalDryRun === undefined) {
+          delete process.env.DRY_RUN;
+        } else {
+          process.env.DRY_RUN = originalDryRun;
+        }
+      }
+
+      const previewLog = logs.find(args =>
+        typeof args[0] === 'string' && args[0].includes(longMessage.slice(0, 50))
+      );
+      assert.ok(previewLog, 'プレビューが出力されること');
+      assert.ok(
+        previewLog[0].length <= 2000,
+        `プレビューがDiscordの上限(2000)以内に収まること(実測${previewLog[0].length}文字)`
+      );
+    });
+
+    it('正常系: ドライラン+未達ユーザーがいる日はプレビューがLINEの上限(5000文字)まで収まる', async () => {
+      const originalDryRun = process.env.DRY_RUN;
+      process.env.DRY_RUN = 'true';
+      const longMessage = 'あ'.repeat(5000);
+
+      setupMocks({
+        isStudied: () => false,
+        formatDetailedMessage: () => longMessage
+      });
+
+      const logs = [];
+      const originalConsoleLog = console.log;
+      console.log = (...args) => { logs.push(args); };
+
+      try {
+        await mainModule.main();
+      } finally {
+        console.log = originalConsoleLog;
+        if (originalDryRun === undefined) {
+          delete process.env.DRY_RUN;
+        } else {
+          process.env.DRY_RUN = originalDryRun;
+        }
+      }
+
+      const previewLog = logs.find(args =>
+        typeof args[0] === 'string' && args[0].includes(longMessage.slice(0, 50))
+      );
+      assert.ok(previewLog, 'プレビューが出力されること');
+      assert.ok(
+        previewLog[0].length > 2000,
+        `プレビューがDiscordの上限(2000)より長く切り詰められること(実測${previewLog[0].length}文字)`
+      );
+      assert.ok(
+        previewLog[0].length <= 5000,
+        `プレビューがLINEの上限(5000)以内に収まること(実測${previewLog[0].length}文字)`
+      );
     });
 
     it('正常系: ドライランモードでは送信・保存を行わない', async () => {

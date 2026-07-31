@@ -322,6 +322,9 @@ async function main() {
     }
 
     // 通知送信（リトライ・タイムアウト・切り詰め・マスキングは送信層に委譲）
+    if (discordOnly) {
+      console.log('ℹ️ 全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します');
+    }
     const notifyResult = discordOnly
       ? await broadcastToDiscordOnly(outgoingMessage, config)
       : await broadcastMessage(outgoingMessage, config);
