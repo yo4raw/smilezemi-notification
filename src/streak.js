@@ -6,9 +6,11 @@
  *   version: "1.3",  // 1.3未満の読み込み時は全ユーザーのおたすけを3にする移行を適用(一度きり)
  *   timestamp: "ISO 8601",
  *   users: {
- *     "ユーザー名 (コース名)": {
+ *     "ユーザー名": {                    // クローラーの表示名。コース選択画面を経由した場合のみ "名前 (コース名)" になる
  *       streak: number,                 // 確定済み連続学習日数
  *       grace: number,                  // おたすけ残数 (0〜3)
+ *       bonus: number,                  // ボーナスポイント (月次清算で0にリセット)
+ *       course: string|undefined,       // 'elementary' | 'juniorHigh'。月次清算の単価判定に使う。未設定は elementary 扱い
  *       lastConfirmedDate: string|null  // 最後に確定判定した日 (YYYY-MM-DD, JST)
  *     }
  *   }

@@ -2,8 +2,10 @@
 /**
  * ストリークデータの現在値を読み取り専用で表示する運用スクリプト。
  *
- * 手動変更(set-streak-field.js)の前に、正確なユーザーキー "名前 (コース名)" と
- * 現在の grace / streak / bonus を確認するために使う。データは書き換えない。
+ * 手動変更(set-streak-field.js)の前に、正確なユーザーキーと現在の
+ * grace / streak / bonus / course を確認するために使う。データは書き換えない。
+ * ユーザーキーはクローラーの表示名で、コース選択画面を経由しないユーザーは
+ * コース名が付かない素の名前になる(本番は全員この形式)。
  *
  * 使い方:
  *   node scripts/show-streak-data.js
@@ -31,7 +33,7 @@ async function main() {
   keys.forEach(key => {
     const s = users[key];
     console.log(
-      `  - "${key}": streak=${s.streak} grace=${s.grace} bonus=${s.bonus ?? 0} lastConfirmedDate=${s.lastConfirmedDate ?? 'null'}`
+      `  - "${key}": streak=${s.streak} grace=${s.grace} bonus=${s.bonus ?? 0} course=${s.course ?? '(未設定)'} lastConfirmedDate=${s.lastConfirmedDate ?? 'null'}`
     );
   });
 }
