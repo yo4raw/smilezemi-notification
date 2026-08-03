@@ -9,7 +9,7 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getTargetDates } = require('./crawler');
 const { formatDetailedMessage, truncateToLimit } = require('./notifier');
-const { broadcastToAll, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH } = require('./broadcast');
+const { broadcastToAll, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
 const {
   loadStreakData,
   saveStreakData,
@@ -185,6 +185,7 @@ async function main() {
       console.log(truncateToLimit(message, LINE_MAX_MESSAGE_LENGTH));
       console.log('=== プレビュー終了 ===\n');
       console.log('ℹ️ 実行時はLINEとDiscordの両方に送信します');
+      console.log(`ℹ️ Discordへは${DISCORD_MAX_MESSAGE_LENGTH}文字ごとに分割して送信します`);
       console.log('ℹ️ ドライランモード: 通知はスキップしました');
       console.log('🎉 処理が正常に完了しました');
       return { success: true, exitCode: 0 };

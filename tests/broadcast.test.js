@@ -235,11 +235,11 @@ describe('送信層 (src/broadcast.js)', () => {
       );
     });
 
-    it('正常系: Discordへは2000文字に切り詰めて渡す', async () => {
+    it('正常系: Discordへは切り詰めず全文を渡す（分割はdiscord.jsが行う）', async () => {
       await broadcast.broadcastToAll('あ'.repeat(5000), defaultConfig);
 
       const [sentMessage] = callLog.find(c => c.type === 'discord').args;
-      assert.strictEqual(sentMessage.length <= 2000, true);
+      assert.strictEqual(sentMessage, 'あ'.repeat(5000), '本文が欠けないこと');
     });
 
     it('正常系: LINEへは5000文字に切り詰めて渡す', async () => {
@@ -270,11 +270,11 @@ describe('送信層 (src/broadcast.js)', () => {
       assert.strictEqual(webhookUrl, 'https://discord.com/api/webhooks/123/abc');
     });
 
-    it('正常系: Discordへは2000文字に切り詰めて渡す', async () => {
+    it('正常系: Discordへは切り詰めず全文を渡す（分割はdiscord.jsが行う）', async () => {
       await broadcast.broadcastToDiscordOnly('あ'.repeat(5000), defaultConfig);
 
       const [sentMessage] = callLog.find(c => c.type === 'discord').args;
-      assert.strictEqual(sentMessage.length <= 2000, true, 'Discordの上限に収めること');
+      assert.strictEqual(sentMessage, 'あ'.repeat(5000), '本文が欠けないこと');
     });
 
     it('異常系: Discord送信が失敗したらsuccessはfalse（skippedは付かない）', async () => {

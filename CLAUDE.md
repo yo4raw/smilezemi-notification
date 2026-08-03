@@ -67,7 +67,7 @@ src/
 ├── data.js                   # ミッションデータ永続化 (loadPreviousData, compareData, saveData)
 ├── streak.js                 # ストリーク管理 (confirmDay, updateStreaks, formatStreakInfo, load/saveStreakData)
 ├── notifier.js               # LINE通知 (sendNotification, formatDetailedMessage, truncateToLimit)
-├── discord.js                # Discord Webhook通知 (sendDiscordMessage, maskWebhookUrl)
+├── discord.js                # Discord Webhook通知 (sendDiscordMessage, splitIntoChunks, maskWebhookUrl)
 └── broadcast.js              # 送信層 (broadcastToAll: 常に両方 / broadcastToDiscordOnly: Discordのみ / getDiscordFailure: Discord失敗の抽出)
 
 tests/                        # Node.js built-in test runner (node --test)
@@ -129,6 +129,7 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 - 上限超過時はLINE APIが429を返す。notifier.jsは429を非リトライで即失敗させ、レスポンスボディの理由をログに残す
 - **全通知をLINEとDiscordの両方へ送る**（`src/broadcast.js` の `broadcastToAll`）。LINEの成否にかかわらずDiscordへも送るため、Discordが常時の記録先になる。唯一の例外は夜通知の全員達成日で、この日はLINEを使わずDiscordのみに記録する（`broadcastToDiscordOnly`）。Discordには月間送信数の上限がない。詳細: `docs/superpowers/specs/2026-08-03-always-dual-notification-design.md`
 - LINE送信が失敗した場合（429の枠切れ・401・ネットワーク障害すべて）、Discordへ送る本文の先頭に失敗理由の行が付く。LINEが成功した回は本文だけを送る
+- **Discordは2000文字を超える本文を分割して複数通で送る**（`src/discord.js` の `splitIntoChunks`）。行の境界で詰め、2通以上になる場合は各通の先頭に `(1/3)` を付ける。途中の通が失敗しても残りは送り、1つでも失敗すればDiscord送信全体を失敗として扱う。LINEは分割せず5000文字で切り詰める（分割するとメッセージ数×人数で枠を圧迫するため）。詳細: `docs/superpowers/specs/2026-08-03-discord-message-split-design.md`
 - 通知の成否は「1つ以上の宛先に届いたか」で判定する。LINEだけ失敗してもワークフローは赤くしない。一方**Discordだけの失敗は全エントリポイントで終了コード1にする**（Webhook失効を翌日に検知するため）。判定は `getDiscordFailure()` に集約されており、`DISCORD_WEBHOOK_URL` 未設定の環境は「宛先がない」だけなので赤くしない
 
 ## Key Design Decisions
