@@ -9,6 +9,8 @@ const assert = require('node:assert');
 
 const MODULE_PATHS = ['../src/config', '../src/broadcast', '../src/streak'];
 
+const { getDiscordFailure: realGetDiscordFailure } = require('../src/broadcast');
+
 function resolveModule(p) {
   return require.resolve(p);
 }
@@ -69,7 +71,9 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
               { channel: 'discord', success: true }
             ]
           };
-        })
+        }),
+        // 判定は純粋関数なのでモックせず本物を使う（resultsの形と終了コードの連動を検証したいため）
+        getDiscordFailure: realGetDiscordFailure
       }
     };
 

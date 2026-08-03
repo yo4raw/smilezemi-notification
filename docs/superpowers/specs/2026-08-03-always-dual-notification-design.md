@@ -88,9 +88,14 @@ Discordの送信数は月約63件（朝31 + 夜31 + 月次1）に増えるが、
 
 - `tests/broadcast.test.js`: `broadcastMessage` のテスト群を削除。`getDiscordFailure` のテスト
   （Discord失敗あり／成功／エントリなし）を追加。
-- `tests/index.test.js` / `tests/morning-index.test.js`: モックを `broadcastToAll` に差し替え。
-  「LINE成功・Discord失敗 → `exitCode: 1`」「Discord未設定 → `exitCode: 0`」を追加。
+- `tests/index.test.js`: モックを `broadcastToAll` に差し替え。
+  「LINE成功・Discord失敗 → `exitCode: 1`」「Discord未設定（resultsにdiscordなし） → `exitCode: 0`」を追加。
+  `getDiscordFailure` は純粋関数なのでモックせず本物を注入し、`results` の形と終了コードの連動を検証する。
   夜通知の全員達成日が引き続き `broadcastToDiscordOnly` を使うことの確認は現行テストを維持。
+- `tests/morning-index.test.js`: 変更しない。エクスポート確認のみの軽量パターンで、
+  終了コードの検証にはクローラー・認証・playwrightを含むモックハーネスの新設が必要になる。
+  朝通知のDiscord失敗判定は夜通知・月次清算と同一の `getDiscordFailure` を同じ形で呼ぶだけなので、
+  ハーネスを増やす価値より重複コストが上回ると判断した。
 - `tests/monthly-bonus-index.test.js`: `getDiscordFailure` 経由に変えても既存の判定が壊れないことを確認。
 
 ## ドキュメント

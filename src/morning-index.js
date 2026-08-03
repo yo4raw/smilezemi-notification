@@ -9,7 +9,7 @@ const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getTargetDates } = require('./crawler');
 const { formatDetailedMessage, truncateToLimit } = require('./notifier');
-const { broadcastMessage, LINE_MAX_MESSAGE_LENGTH } = require('./broadcast');
+const { broadcastToAll, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH } = require('./broadcast');
 const {
   loadStreakData,
   saveStreakData,
@@ -102,7 +102,7 @@ async function main() {
           '朝通知のデータ取得に失敗したため、昨日分の通知をお届けできません。',
           'GitHub Actions のログを確認してください。'
         ].join('\n');
-        const errorNotifyResult = await broadcastMessage(errorMessage, config);
+        const errorNotifyResult = await broadcastToAll(errorMessage, config);
         if (!errorNotifyResult.success) {
           console.error('❌ エラー通知の送信に全宛先で失敗しました');
         }
@@ -184,20 +184,31 @@ async function main() {
       console.log('\n📋 === 通知メッセージプレビュー ===');
       console.log(truncateToLimit(message, LINE_MAX_MESSAGE_LENGTH));
       console.log('=== プレビュー終了 ===\n');
+      console.log('ℹ️ 実行時はLINEとDiscordの両方に送信します');
       console.log('ℹ️ ドライランモード: 通知はスキップしました');
       console.log('🎉 処理が正常に完了しました');
       return { success: true, exitCode: 0 };
     }
 
-    // 6. 通知送信（宛先の切り替え・リトライ・タイムアウト・マスキングはbroadcastMessageに委譲）
+    // 6. 通知送信（リトライ・タイムアウト・切り詰め・マスキングはbroadcastToAllに委譲）
     console.log('📤 通知を送信しています...');
-    const notifyResult = await broadcastMessage(message, config);
+    const notifyResult = await broadcastToAll(message, config);
 
     if (notifyResult.success) {
       console.log('✅ 朝通知の送信が完了しました');
     } else {
       console.error('❌ 朝通知の送信に全宛先で失敗しました');
       errors.push('朝通知が全宛先で失敗しました');
+    }
+
+    // LINEに届いていてもDiscordが失敗していれば異常終了させる(Webhook失効の検知)
+    // 全宛先で失敗した場合は上で既に errors に積んでいるため、届いた回だけ見る
+    if (notifyResult.success) {
+      const discordError = getDiscordFailure(notifyResult);
+      if (discordError) {
+        console.error('❌ Discordへの送信に失敗しました。Webhookが失効している可能性があります:', discordError);
+        errors.push(`Discordへの送信に失敗しました: ${discordError}`);
+      }
     }
 
     // 7. 完了

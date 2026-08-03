@@ -2,13 +2,13 @@
  * 送信層
  *
  * 1本のメッセージをどの宛先へどの順序で送るかだけを担う。
- * - broadcastMessage: LINEに送り、失敗したときだけDiscordへ転送する（日次の通知が使う）
- * - broadcastToAll:   LINEの成否にかかわらずDiscordへも送る（月次清算だけが使う）
+ * - broadcastToAll:   LINEの成否にかかわらずDiscordへも送る（LINEを使う全通知が使う）
  * - broadcastToDiscordOnly: Discordだけへ送る（夜通知の全員達成日だけが使う）
  *
  * 設計: docs/superpowers/specs/2026-07-27-discord-fallback-notification-design.md
  *       docs/superpowers/specs/2026-07-27-monthly-discord-healthcheck-design.md
  *       docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
+ *       docs/superpowers/specs/2026-08-03-always-dual-notification-design.md
  */
 
 const { sendPushMessage, truncateToLimit } = require('./notifier');
@@ -18,10 +18,11 @@ const { sendDiscordMessage, DISCORD_MAX_MESSAGE_LENGTH } = require('./discord');
 const LINE_MAX_MESSAGE_LENGTH = 5000;
 
 /**
- * Discord転送用にフォールバックの理由行を先頭に付ける
+ * Discordへ送る本文の先頭にLINE失敗の理由行を付ける
  *
- * 受信者が「LINEの月間枠切れ」なのか「障害」なのかを判別できるように理由を載せる。
- * lineError は notifier 側でトークンがマスキング済みの文字列であること。
+ * 通常はLINEにも同じ内容が届いているため、Discordだけに届いた回であることを
+ * 受信者が判別できるようにする。「月間枠切れ」なのか「障害」なのかを見分けられるよう
+ * 理由も載せる。lineError は notifier 側でトークンがマスキング済みの文字列であること。
  *
  * @param {string} message - 本文
  * @param {string} lineError - LINE送信のエラー文字列
@@ -29,7 +30,7 @@ const LINE_MAX_MESSAGE_LENGTH = 5000;
  */
 function formatFallbackMessage(message, lineError) {
   return [
-    '⚠️ LINEへの送信に失敗したためDiscordに転送しました',
+    '⚠️ LINEへの送信に失敗しました（この通知はDiscordにのみ届いています）',
     `理由: ${lineError}`,
     '',
     message
@@ -119,61 +120,16 @@ async function postToDiscord(body, config, options) {
 }
 
 /**
- * メッセージをLINEへ送り、失敗した場合のみDiscordへ転送する
- *
- * success は「1つ以上の宛先に届いたか」を表す。LINEの月間枠が尽きている間ずっと
- * ワークフローが赤くなり毎日失敗通知が届く状態を避けるため、この定義にしている。
- *
- * @param {string} message - 送信するメッセージ（切り詰めは本関数が宛先ごとに行う）
- * @param {{LINE_CHANNEL_ACCESS_TOKEN: string, LINE_USER_ID: string, DISCORD_WEBHOOK_URL?: string}} config
- * @param {object} [options] - 送信オプション（maxRetries / retryDelay / timeoutMs）。両宛先に渡る
- * @returns {Promise<{success: boolean, results: Array<{channel: string, success: boolean, error?: string}>}>}
- */
-async function broadcastMessage(message, config, options = {}) {
-  const results = [];
-
-  const lineResult = await sendToLine(message, config, options);
-  results.push({ channel: 'line', success: lineResult.success, error: lineResult.error });
-
-  if (lineResult.success) {
-    return { success: true, results };
-  }
-
-  console.error('❌ LINEへの送信に失敗しました:', lineResult.error);
-
-  if (!config.DISCORD_WEBHOOK_URL) {
-    console.warn('⚠️ DISCORD_WEBHOOK_URL が未設定のため、Discordへのフォールバックをスキップします');
-    return { success: false, results };
-  }
-
-  console.log('📤 Discordへフォールバック送信しています...');
-  // ここに来る時点でLINEは失敗しているため、必ず理由行付きで転送される
-  const discordResult = await postToDiscord(
-    formatFallbackMessage(message, lineResult.error || '不明なエラー'),
-    config,
-    options
-  );
-  results.push({ channel: 'discord', success: discordResult.success, error: discordResult.error });
-
-  if (discordResult.success) {
-    console.warn('⚠️ LINEには届きませんでしたが、Discordへの転送に成功しました');
-  } else {
-    console.error('❌ Discordへの転送にも失敗しました:', discordResult.error);
-  }
-
-  return { success: discordResult.success, results };
-}
-
-/**
  * メッセージをLINEとDiscordの両方へ送る
  *
- * LINEの成否にかかわらずDiscordへも送る。月次ボーナス清算だけがこれを使う。
- * Discordはフォールバック専用のままだとLINEが成功する限り一度も叩かれず、
- * Webhookが失効しても「LINEが落ちた当日」まで気づけない。年12回必ず走る
- * 月次清算を定期的な疎通確認に使うことで、失効を最大1か月で検知する。
+ * LINEの成否にかかわらずDiscordへも送る。LINEを使う通知はすべてこれを使う。
+ * Discordをフォールバック専用にしていた頃はLINEが成功する限り一度も叩かれず、
+ * Webhookが失効しても「LINEが落ちた当日」まで気づけなかった。毎回両方へ送ることで
+ * Discordが常時の記録先になり、失効も翌日には検知できる。
  *
- * success の意味は broadcastMessage() と同じく「1つ以上の宛先に届いたか」。
- * Discord単体の失敗をどう扱うかは呼び出し側が results を見て決める。
+ * success は「1つ以上の宛先に届いたか」を表す。LINEの月間枠が尽きている間ずっと
+ * 通知が届かなかったと扱われる状態を避けるため、この定義にしている。
+ * Discord単体の失敗をどう扱うかは呼び出し側が getDiscordFailure() で決める。
  *
  * @param {string} message - 送信するメッセージ（切り詰めは本関数が宛先ごとに行う）
  * @param {{LINE_CHANNEL_ACCESS_TOKEN: string, LINE_USER_ID: string, DISCORD_WEBHOOK_URL?: string}} config
@@ -218,7 +174,7 @@ async function broadcastToAll(message, config, options = {}) {
  * 人数分カウントされ無料枠(月200)が逼迫しているため、この日はLINEを消費しない。
  * 一方Discordには月間送信数の上限がないので、記録としては必ず残す。
  *
- * success の意味は broadcastMessage() と同じく「1つ以上の宛先に届いたか」。
+ * success の意味は broadcastToAll() と同じく「1つ以上の宛先に届いたか」。
  * DISCORD_WEBHOOK_URL 未設定のときは「宛先がないから送らなかった」ことを skipped で示す。
  * この設定は任意扱いのため、未設定環境で毎晩ワークフローが赤くなるのを避けたい呼び出し側が
  * 「送って失敗した(success:false)」と区別できるようにしている。
@@ -252,11 +208,34 @@ async function broadcastToDiscordOnly(message, config, options = {}) {
   };
 }
 
+/**
+ * 送信結果からDiscordの失敗理由を取り出す
+ *
+ * Webhookの失効を検知するため、Discordだけが失敗した場合も呼び出し側で異常終了させたい。
+ * その判定を各エントリポイントに散らかさないようここへ集約する。
+ *
+ * DISCORD_WEBHOOK_URL 未設定のときは results にDiscordのエントリ自体が入らない。
+ * これは「宛先がないから送らなかった」であって失敗ではないため null を返し、
+ * Discord連携を任意にしている環境でワークフローが赤くならないようにする。
+ *
+ * @param {{results?: Array<{channel: string, success: boolean, error?: string}>}} notifyResult
+ * @returns {string|null} 失敗理由。失敗していなければ null
+ */
+function getDiscordFailure(notifyResult) {
+  const discordResult = (notifyResult && notifyResult.results || []).find(result => result.channel === 'discord');
+
+  if (!discordResult || discordResult.success) {
+    return null;
+  }
+
+  return discordResult.error || '不明なエラー';
+}
+
 module.exports = {
-  broadcastMessage,
   broadcastToAll,
   broadcastToDiscordOnly,
   formatFallbackMessage,
+  getDiscordFailure,
   LINE_MAX_MESSAGE_LENGTH,
   // 呼び出し側（DRY_RUNプレビュー）が宛先ごとの上限で切り詰められるよう再エクスポートする
   DISCORD_MAX_MESSAGE_LENGTH
