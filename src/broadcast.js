@@ -105,11 +105,8 @@ async function sendToLine(message, config, options) {
  */
 async function postToDiscord(body, config, options) {
   try {
-    return await sendDiscordMessage(
-      truncateToLimit(body, DISCORD_MAX_MESSAGE_LENGTH),
-      config.DISCORD_WEBHOOK_URL,
-      options
-    );
+    // 2000文字を超える本文の分割は sendDiscordMessage が行うため、ここでは切り詰めない
+    return await sendDiscordMessage(body, config.DISCORD_WEBHOOK_URL, options);
   } catch (error) {
     // 例外メッセージはログに残るため、シークレット（Webhook URL・LINEトークン）を落としてから積む
     return {
@@ -237,6 +234,6 @@ module.exports = {
   formatFallbackMessage,
   getDiscordFailure,
   LINE_MAX_MESSAGE_LENGTH,
-  // 呼び出し側（DRY_RUNプレビュー）が宛先ごとの上限で切り詰められるよう再エクスポートする
+  // 呼び出し側（DRY_RUNプレビュー）が分割の単位を表示できるよう再エクスポートする
   DISCORD_MAX_MESSAGE_LENGTH
 };

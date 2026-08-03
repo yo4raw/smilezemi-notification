@@ -314,14 +314,14 @@ async function main() {
 
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない
     if (process.env.DRY_RUN === 'true') {
-      // 実送信ではbroadcastが宛先ごとに切り詰めるため、プレビューも実際の宛先の上限で切って表示する
-      // （送信経路には手を入れず、表示だけを実際の文面に合わせる）
+      // Discordは分割して全文が届くため切り詰めない。LINEは切り詰めるので実際の文面に合わせる
       console.log('\n📋 === 通知メッセージプレビュー ===');
-      console.log(truncateToLimit(outgoingMessage, discordOnly ? DISCORD_MAX_MESSAGE_LENGTH : LINE_MAX_MESSAGE_LENGTH));
+      console.log(discordOnly ? outgoingMessage : truncateToLimit(outgoingMessage, LINE_MAX_MESSAGE_LENGTH));
       console.log('=== プレビュー終了 ===\n');
       console.log(discordOnly
         ? 'ℹ️ 全員達成のため、実行時はDiscordのみに送信します'
         : 'ℹ️ 実行時はLINEとDiscordの両方に送信します');
+      console.log(`ℹ️ Discordへは${DISCORD_MAX_MESSAGE_LENGTH}文字ごとに分割して送信します`);
       console.log('ℹ️ ドライランモード: 通知とデータ保存はスキップしました');
       console.log('🎉 処理が正常に完了しました');
       return {

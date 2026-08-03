@@ -529,7 +529,7 @@ describe('オーケストレーション (src/index.js)', () => {
       }
     });
 
-    it('正常系: ドライラン+全員達成の日はプレビューがDiscordの上限(2000文字)に切り詰められる', async () => {
+    it('正常系: ドライラン+全員達成の日はプレビューを切り詰めない（Discordは分割して全文が届く）', async () => {
       const originalDryRun = process.env.DRY_RUN;
       process.env.DRY_RUN = 'true';
       const longMessage = 'あ'.repeat(5000);
@@ -559,8 +559,12 @@ describe('オーケストレーション (src/index.js)', () => {
       );
       assert.ok(previewLog, 'プレビューが出力されること');
       assert.ok(
-        previewLog[0].length <= 2000,
-        `プレビューがDiscordの上限(2000)以内に収まること(実測${previewLog[0].length}文字)`
+        previewLog[0].includes(longMessage),
+        'プレビューに本文が全文含まれること（分割送信で欠けないため）'
+      );
+      assert.ok(
+        !previewLog[0].includes('省略'),
+        '切り詰めの省略サフィックスが付かないこと'
       );
     });
 
