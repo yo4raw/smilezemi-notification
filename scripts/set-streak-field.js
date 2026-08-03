@@ -11,8 +11,11 @@
  *
  * 形式・バージョン(1.3)の整合は src/streak.js の load/save を再利用して担保する。
  *
+ * --user に渡すユーザーキーはクローラーの表示名で、コース選択画面を経由しないユーザーは
+ * コース名が付かない素の名前になる(本番は全員この形式)。
+ *
  * 使い方:
- *   node scripts/set-streak-field.js --user "名前 (コース名)" --field grace --value 3 [--dry-run]
+ *   node scripts/set-streak-field.js --user "たろう" --field grace --value 3 [--dry-run]
  */
 
 const { loadStreakData, saveStreakData } = require('../src/streak');
@@ -56,7 +59,7 @@ function validateInput(args) {
   const dryRun = args['dry-run'] === true;
 
   if (typeof user !== 'string' || user.trim() === '') {
-    throw new Error('--user は必須です(例: --user "たろう (小学生コース)")');
+    throw new Error('--user は必須です(例: --user "たろう")');
   }
 
   if (!Object.prototype.hasOwnProperty.call(FIELD_CONSTRAINTS, field)) {

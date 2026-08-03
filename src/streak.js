@@ -6,9 +6,11 @@
  *   version: "1.3",  // 1.3未満の読み込み時は全ユーザーのおたすけを3にする移行を適用(一度きり)
  *   timestamp: "ISO 8601",
  *   users: {
- *     "ユーザー名 (コース名)": {
+ *     "ユーザー名": {                    // クローラーの表示名。コース選択画面を経由した場合のみ "名前 (コース名)" になる
  *       streak: number,                 // 確定済み連続学習日数
  *       grace: number,                  // おたすけ残数 (0〜3)
+ *       bonus: number,                  // ボーナスポイント (月次清算で0にリセット)
+ *       course: string|undefined,       // 'elementary' | 'juniorHigh'。月次清算の単価判定に使う。未設定は elementary 扱い
  *       lastConfirmedDate: string|null  // 最後に確定判定した日 (YYYY-MM-DD, JST)
  *     }
  *   }
@@ -193,14 +195,15 @@ function confirmDay(state, dateString, studied) {
  * 月次清算: 全ユーザーのボーナスを0にした新しいマップと清算リストを返す(純粋関数)
  *
  * @param {object} streakUsers - userName → state のマップ
- * @returns {{streakUsers: object, settlements: Array<{userName: string, bonus: number}>}}
+ * @returns {{streakUsers: object, settlements: Array<{userName: string, bonus: number, course: ('elementary'|'juniorHigh'|undefined)}>}}
  */
 function settleBonuses(streakUsers) {
   const settled = {};
   const settlements = [];
 
   Object.entries(streakUsers).forEach(([userName, state]) => {
-    settlements.push({ userName, bonus: state.bonus ?? 0 });
+    // course は月次清算がポイント単価を決めるために使う(未設定は呼び出し側で小学生扱い)
+    settlements.push({ userName, bonus: state.bonus ?? 0, course: state.course });
     settled[userName] = { ...state, bonus: 0 };
   });
 
@@ -208,13 +211,32 @@ function settleBonuses(streakUsers) {
 }
 
 /**
+ * 状態にコース種別を反映した新しい状態を返す(純粋関数)
+ *
+ * course は学習したかどうかと無関係にクロール結果から分かる情報なので、
+ * 確定判定の成否によらず保存する。月次清算(src/monthly-bonus-index.js)が
+ * ポイント単価を決めるために使う。course が未指定のときは状態をそのまま返す。
+ *
+ * @private
+ * @param {object} state - ストリーク状態
+ * @param {'elementary'|'juniorHigh'|undefined} course
+ * @returns {object}
+ */
+function withCourse(state, course) {
+  if (!course || state.course === course) {
+    return state;
+  }
+  return { ...state, course };
+}
+
+/**
  * 全ユーザー分の確定判定を適用(純粋関数、入力は変更しない)
  *
  * @param {object} streakUsers - userName → state のマップ
- * @param {Array} users - 判定対象日のクロール済みユーザーデータ(v2.0形式、dataReliable省略時はtrue扱い)
+ * @param {Array} users - 判定対象日のクロール済みユーザーデータ(v2.0形式、dataReliable省略時はtrue扱い。user.course があれば各ユーザー状態にも保存する)
  * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
  * @param {object} [options] - isStudied に伝搬する判定オプション(minCompletedMissions等)
- * @returns {{streakUsers: object, results: Array<{userName: string, state: object, event: string}>}}
+ * @returns {{streakUsers: object, results: Array<{userName: string, state: object, event: string}>}} streakUsers の各 state には course(user.course または既存値)が反映される
  */
 function updateStreaks(streakUsers, users, dateString, options = {}) {
   const updated = { ...streakUsers };
@@ -224,15 +246,24 @@ function updateStreaks(streakUsers, users, dateString, options = {}) {
     const current = updated[user.userName] || createInitialState();
     const studied = isStudied(user, options);
 
+    // confirmDay() は全分岐で状態を新規に組み立て直すため course が落ちる。
+    // course は連続日数の遷移と直交するメタデータなので confirmDay には持ち込まず、
+    // 遷移の後段でここで付け直す。user.course 未指定時は既存値を引き継ぐ。
+    const course = user.course || current.course;
+
     // dataReliable: false かつ未学習判定の場合、クロール部分失敗によるデフォルト値(0/[])
     // が原因の偽陰性である可能性があるため確定をスキップする(空白日の中立処理に委ねる)。
     // 学習した証跡がある場合(studied === true)は信頼して通常通り確定する。
+    // 確定はしないが course だけは保存する(学習判定と無関係に分かる情報のため)。
     if (user.dataReliable === false && !studied) {
-      results.push({ userName: user.userName, state: current, event: 'none' });
+      const skipped = withCourse(current, course);
+      updated[user.userName] = skipped;
+      results.push({ userName: user.userName, state: skipped, event: 'none' });
       return;
     }
 
-    const { state, event } = confirmDay(current, dateString, studied);
+    const { state: confirmed, event } = confirmDay(current, dateString, studied);
+    const state = withCourse(confirmed, course);
     updated[user.userName] = state;
     results.push({ userName: user.userName, state, event });
   });
