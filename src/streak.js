@@ -195,7 +195,7 @@ function confirmDay(state, dateString, studied) {
  * 月次清算: 全ユーザーのボーナスを0にした新しいマップと清算リストを返す(純粋関数)
  *
  * @param {object} streakUsers - userName → state のマップ
- * @returns {{streakUsers: object, settlements: Array<{userName: string, bonus: number}>}}
+ * @returns {{streakUsers: object, settlements: Array<{userName: string, bonus: number, course: ('elementary'|'juniorHigh'|undefined)}>}}
  */
 function settleBonuses(streakUsers) {
   const settled = {};
@@ -233,10 +233,10 @@ function withCourse(state, course) {
  * 全ユーザー分の確定判定を適用(純粋関数、入力は変更しない)
  *
  * @param {object} streakUsers - userName → state のマップ
- * @param {Array} users - 判定対象日のクロール済みユーザーデータ(v2.0形式、dataReliable省略時はtrue扱い)
+ * @param {Array} users - 判定対象日のクロール済みユーザーデータ(v2.0形式、dataReliable省略時はtrue扱い。user.course があれば各ユーザー状態にも保存する)
  * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
  * @param {object} [options] - isStudied に伝搬する判定オプション(minCompletedMissions等)
- * @returns {{streakUsers: object, results: Array<{userName: string, state: object, event: string}>}}
+ * @returns {{streakUsers: object, results: Array<{userName: string, state: object, event: string}>}} streakUsers の各 state には course(user.course または既存値)が反映される
  */
 function updateStreaks(streakUsers, users, dateString, options = {}) {
   const updated = { ...streakUsers };

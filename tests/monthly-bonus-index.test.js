@@ -26,15 +26,15 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
   let originalDryRun;
 
   const defaultStreakUsers = {
-    'じろう (小学生コース)': { streak: 12, grace: 3, bonus: 2, lastConfirmedDate: '2026-07-31' },
-    'はなこ (小学生コース)': { streak: 5, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-31' }
+    'じろう': { streak: 12, grace: 3, bonus: 2, course: 'elementary', lastConfirmedDate: '2026-07-31' },
+    'はなこ': { streak: 5, grace: 1, bonus: 0, course: 'juniorHigh', lastConfirmedDate: '2026-07-31' }
   };
 
   function fakeSettleBonuses(streakUsers) {
     const settled = {};
     const settlements = [];
     Object.entries(streakUsers).forEach(([userName, state]) => {
-      settlements.push({ userName, bonus: state.bonus ?? 0 });
+      settlements.push({ userName, bonus: state.bonus ?? 0, course: state.course });
       settled[userName] = { ...state, bonus: 0 };
     });
     return { streakUsers: settled, settlements };
@@ -120,8 +120,8 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       assert.strictEqual(passedConfig.LINE_CHANNEL_ACCESS_TOKEN, 'test_token');
       assert.strictEqual(passedConfig.LINE_USER_ID, 'test_user');
       assert.match(message, /💰 ボーナスポイント清算\(\d+月分\)/, '月ラベルが含まれること');
-      assert.match(message, /じろう \(小学生コース\): 2ポイント/, 'ボーナスありの子が表示されること');
-      assert.match(message, /はなこ \(小学生コース\): 0ポイント/, '0ポイントの子も表示されること');
+      assert.match(message, /じろう: 2ポイント/, 'ボーナスありの子が表示されること');
+      assert.match(message, /はなこ: 0ポイント/, '0ポイントの子も表示されること');
       assert.match(message, /お小遣いとして支給/, '支給の案内が含まれること');
     });
 
@@ -131,8 +131,8 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       const saveCalls = callLog.filter(c => c.type === 'saveStreakData');
       assert.strictEqual(saveCalls.length, 1, '保存が1回行われること');
       const saved = saveCalls[0].users;
-      assert.strictEqual(saved['じろう (小学生コース)'].bonus, 0, 'ボーナスがリセットされること');
-      assert.strictEqual(saved['じろう (小学生コース)'].streak, 12, 'ストリークは変わらないこと');
+      assert.strictEqual(saved['じろう'].bonus, 0, 'ボーナスがリセットされること');
+      assert.strictEqual(saved['じろう'].streak, 12, 'ストリークは変わらないこと');
     });
 
     it('異常系: 送信失敗時はリセット保存せず終了コード1(清算持ち越し)', async () => {
@@ -224,7 +224,7 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       assert.strictEqual(result.exitCode, 0);
       const saveCalls = callLog.filter(c => c.type === 'saveStreakData');
       assert.strictEqual(saveCalls.length, 1, 'Discordに届いていればリセットすること');
-      assert.strictEqual(saveCalls[0].users['じろう (小学生コース)'].bonus, 0);
+      assert.strictEqual(saveCalls[0].users['じろう'].bonus, 0);
     });
 
     it('正常系: LINE成功・Discord失敗のときリセットはするが終了コード1で失効を知らせる', async () => {
@@ -245,7 +245,7 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
 
       const saveCalls = callLog.filter(c => c.type === 'saveStreakData');
       assert.strictEqual(saveCalls.length, 1, 'LINEに届いているのでリセットすること(二重支給防止)');
-      assert.strictEqual(saveCalls[0].users['じろう (小学生コース)'].bonus, 0);
+      assert.strictEqual(saveCalls[0].users['じろう'].bonus, 0);
       assert.strictEqual(result.exitCode, 1, 'Webhook失効に気づけるよう終了コード1にすること');
     });
 
