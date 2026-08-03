@@ -6,7 +6,7 @@
  */
 
 const { loadConfig } = require('./config');
-const { broadcastToAll } = require('./broadcast');
+const { broadcastToAll, getDiscordFailure } = require('./broadcast');
 const { loadStreakData, saveStreakData, settleBonuses } = require('./streak');
 
 // ボーナスポイント1点あたりの金額(円)。コース別に単価が違う。
@@ -157,7 +157,7 @@ async function main() {
     return { success: true, exitCode: 0 };
   }
 
-  // 5. 通知送信（LINEとDiscordの両方へ。Discordは年12回の疎通確認を兼ねる）
+  // 5. 通知送信（LINEとDiscordの両方へ）
   console.log('📤 通知を送信しています...');
   const notifyResult = await broadcastToAll(message, config);
 
@@ -181,13 +181,11 @@ async function main() {
   }
 
   // Discordへ送ったのに失敗した場合は、Webhookが失効している可能性がある。
-  // 清算そのものはLINEに届いているためリセットは済ませたうえで、
-  // 終了コードで知らせる(Discordはフォールバック専用で普段は叩かれないため、
-  // この月次実行が唯一の定期的な疎通確認になっている)
-  const discordResult = notifyResult.results.find(result => result.channel === 'discord');
-  if (discordResult && !discordResult.success) {
-    console.error('❌ Discordへの送信に失敗しました。Webhookが失効している可能性があります:', discordResult.error);
-    errors.push(`Discordへの疎通確認に失敗しました: ${discordResult.error}`);
+  // 清算そのものはLINEに届いているためリセットは済ませたうえで、終了コードで知らせる
+  const discordError = getDiscordFailure(notifyResult);
+  if (discordError) {
+    console.error('❌ Discordへの送信に失敗しました。Webhookが失効している可能性があります:', discordError);
+    errors.push(`Discordへの送信に失敗しました: ${discordError}`);
   }
 
   console.log('🎉 処理が正常に完了しました');

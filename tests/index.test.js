@@ -27,6 +27,7 @@ function clearModuleCache() {
 
 // 切り詰めは本物を使う（DRY_RUNプレビューが実送信と同じ文面になることを担保するため）
 const { truncateToLimit: realTruncateToLimit } = require('../src/notifier');
+const { getDiscordFailure: realGetDiscordFailure } = require('../src/broadcast');
 
 describe('オーケストレーション (src/index.js)', () => {
   let mainModule;
@@ -147,14 +148,16 @@ describe('オーケストレーション (src/index.js)', () => {
     require.cache[resolveModule('../src/broadcast')] = {
       id: resolveModule('../src/broadcast'), filename: resolveModule('../src/broadcast'), loaded: true,
       exports: {
-        broadcastMessage: overrides.broadcastMessage || (async (...args) => {
-          callLog.push({ type: 'broadcastMessage', args });
+        broadcastToAll: overrides.broadcastToAll || (async (...args) => {
+          callLog.push({ type: 'broadcastToAll', args });
           return { success: true, results: [{ channel: 'line', success: true }] };
         }),
         broadcastToDiscordOnly: overrides.broadcastToDiscordOnly || (async (...args) => {
           callLog.push({ type: 'broadcastToDiscordOnly', args });
           return { success: true, results: [{ channel: 'discord', success: true }] };
         }),
+        // 判定は純粋関数なのでモックせず本物を使う（resultsの形と終了コードの連動を検証したいため）
+        getDiscordFailure: realGetDiscordFailure,
         LINE_MAX_MESSAGE_LENGTH: 5000,
         DISCORD_MAX_MESSAGE_LENGTH: 2000
       }
@@ -203,11 +206,11 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.exitCode, 0, '終了コードが0であること');
     });
 
-    it('正常系: 通知がbroadcastMessage経由で送信される', async () => {
+    it('正常系: 通知がbroadcastToAll経由で送信される', async () => {
       await mainModule.main();
 
-      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
-      assert.strictEqual(pushCalls.length, 1, 'broadcastMessageが1回呼ばれること');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
+      assert.strictEqual(pushCalls.length, 1, 'broadcastToAllが1回呼ばれること');
       const [message, passedConfig] = pushCalls[0].args;
       assert.strictEqual(typeof message, 'string', '整形済みメッセージが渡されること');
       assert.strictEqual(passedConfig.LINE_CHANNEL_ACCESS_TOKEN, 'test_token');
@@ -266,7 +269,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
       await mainModule.main();
 
-      const calls = callLog.filter(c => c.type === 'broadcastMessage');
+      const calls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(calls.length, 1, '基本モードでも1回だけ通知すること');
       assert.match(calls[0].args[0], /テスト基本メッセージ/, 'formatMessageの結果が送られること');
     });
@@ -292,7 +295,7 @@ describe('オーケストレーション (src/index.js)', () => {
       const result = await mainModule.main();
 
       assert.strictEqual(result.exitCode, 1);
-      const calls = callLog.filter(c => c.type === 'broadcastMessage');
+      const calls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(calls.length, 1, '障害通知が送られること');
       assert.match(calls[0].args[0], /⚠️/, '障害メッセージであること');
       assert.doesNotMatch(calls[0].args[0], /変更ありませんでした/, '正常を装うメッセージでないこと');
@@ -300,7 +303,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
     it('異常系: 全宛先で送信失敗した場合、errorsに記録される', async () => {
       setupMocks({
-        broadcastMessage: async () => ({
+        broadcastToAll: async () => ({
           success: false,
           results: [
             { channel: 'line', success: false, error: 'LINE API エラー: 500 Internal Server Error' },
@@ -318,8 +321,8 @@ describe('オーケストレーション (src/index.js)', () => {
 
     it('正常系: LINEが失敗してもDiscordに届いていれば成功扱いになる', async () => {
       setupMocks({
-        broadcastMessage: async (...args) => {
-          callLog.push({ type: 'broadcastMessage', args });
+        broadcastToAll: async (...args) => {
+          callLog.push({ type: 'broadcastToAll', args });
           return {
             success: true,
             results: [
@@ -334,6 +337,39 @@ describe('オーケストレーション (src/index.js)', () => {
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.exitCode, 0);
+    });
+
+    it('異常系: LINEが成功してもDiscordが失敗したら異常終了する（Webhook失効の検知）', async () => {
+      setupMocks({
+        broadcastToAll: async (...args) => {
+          callLog.push({ type: 'broadcastToAll', args });
+          return {
+            success: true,
+            results: [
+              { channel: 'line', success: true },
+              { channel: 'discord', success: false, error: 'Discord API エラー: 404 Not Found - Unknown Webhook' }
+            ]
+          };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.exitCode, 1, 'Discord失敗はワークフローを赤くすること');
+      assert.strictEqual(result.errors.some(e => e.includes('Unknown Webhook')), true, '失効を判別できる理由が残ること');
+    });
+
+    it('正常系: Webhook未設定でDiscordのresultsが無い場合は正常終了する', async () => {
+      setupMocks({
+        broadcastToAll: async (...args) => {
+          callLog.push({ type: 'broadcastToAll', args });
+          return { success: true, results: [{ channel: 'line', success: true }] };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.exitCode, 0, '宛先がないだけなので赤くしないこと');
     });
 
     it('正常系: 夜通知は確定処理(updateStreaks/saveStreakData)を行わない', async () => {
@@ -382,8 +418,8 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.exitCode, 0);
 
       assert.strictEqual(
-        callLog.filter(c => c.type === 'broadcastMessage').length, 0,
-        '全員達成の日はLINE経路(broadcastMessage)を使わないこと'
+        callLog.filter(c => c.type === 'broadcastToAll').length, 0,
+        '全員達成の日はLINE経路(broadcastToAll)を使わないこと'
       );
       assert.strictEqual(
         callLog.filter(c => c.type === 'broadcastToDiscordOnly').length, 1,
@@ -458,7 +494,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
       await mainModule.main();
 
-      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(pushCalls.length, 1, '未達ユーザーがいる日は送信されること');
 
       const [sentMessage] = pushCalls[0].args;
@@ -481,7 +517,7 @@ describe('オーケストレーション (src/index.js)', () => {
         const result = await mainModule.main();
 
         assert.strictEqual(result.success, true);
-        assert.strictEqual(callLog.filter(c => c.type === 'broadcastMessage').length, 0);
+        assert.strictEqual(callLog.filter(c => c.type === 'broadcastToAll').length, 0);
         assert.strictEqual(callLog.filter(c => c.type === 'broadcastToDiscordOnly').length, 0, 'ドライランではDiscordにも送らないこと');
         assert.strictEqual(callLog.filter(c => c.type === 'saveData').length, 0, 'ドライランではデータ保存しないこと');
       } finally {
@@ -585,8 +621,8 @@ describe('オーケストレーション (src/index.js)', () => {
         assert.strictEqual(result.success, true, 'ドライランが成功すること');
         assert.strictEqual(result.exitCode, 0);
 
-        const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
-        assert.strictEqual(pushCalls.length, 0, 'broadcastMessageが呼ばれないこと');
+        const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
+        assert.strictEqual(pushCalls.length, 0, 'broadcastToAllが呼ばれないこと');
 
         const saveCalls = callLog.filter(c => c.type === 'saveData');
         assert.strictEqual(saveCalls.length, 0, 'saveDataが呼ばれないこと');
@@ -670,7 +706,7 @@ describe('オーケストレーション (src/index.js)', () => {
       const saveStreakCalls = callLog.filter(c => c.type === 'saveStreakData');
       assert.strictEqual(saveStreakCalls.length, 0, '夜通知は保存しないこと');
 
-      const pushCalls = callLog.filter(c => c.type === 'broadcastMessage');
+      const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(pushCalls.length, 1, '通知は送信されること');
       assert.ok(capturedFormatOptions.streaks, 'streaksマップは渡されること(空状態ベース)');
     });

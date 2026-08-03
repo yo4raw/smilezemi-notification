@@ -21,7 +21,7 @@ GitHub Actions (cron) → actions/cacheでdata/復元 → Docker → Playwright 
 
 1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。両コース(小学生・中学生)の当日分を速報通知。ストリークは確定値＋当日暫定+1を表示するのみで確定・保存しない。**LINE送信数節約のため、当日のストリーク要件未達のユーザーが1人でもいる日だけLINEに送信**（全員達成日はLINEに送らず、断り行を付けてDiscordのみに記録する）
 2. **朝通知** (`src/morning-index.js`): 毎日 JST 7:00 に実行。両コース(小学生・中学生)の前日確定分を通知。前日は確定データのためストリークを確定する(唯一の確定点)
-3. **月次ボーナス清算** (`src/monthly-bonus-index.js`): 毎月1日 JST 8:00 に実行。前月分のボーナスポイントを子供ごとに通知して0にリセット。クロール不要のためブラウザを起動しない。LINEの成否にかかわらずDiscordにも送り、Webhook失効の定期検知を兼ねる
+3. **月次ボーナス清算** (`src/monthly-bonus-index.js`): 毎月1日 JST 8:00 に実行。前月分のボーナスポイントを子供ごとに通知して0にリセット。クロール不要のためブラウザを起動しない
 
 ※ 週間レポート通知は LINE 送信数削減のため 2026-07 に廃止（コードごと削除。必要なら git 履歴から復元）
 
@@ -68,7 +68,7 @@ src/
 ├── streak.js                 # ストリーク管理 (confirmDay, updateStreaks, formatStreakInfo, load/saveStreakData)
 ├── notifier.js               # LINE通知 (sendNotification, formatDetailedMessage, truncateToLimit)
 ├── discord.js                # Discord Webhook通知 (sendDiscordMessage, maskWebhookUrl)
-└── broadcast.js              # 送信層 (broadcastMessage: LINE→失敗時のみDiscord / broadcastToAll: 常に両方 / broadcastToDiscordOnly: Discordのみ)
+└── broadcast.js              # 送信層 (broadcastToAll: 常に両方 / broadcastToDiscordOnly: Discordのみ / getDiscordFailure: Discord失敗の抽出)
 
 tests/                        # Node.js built-in test runner (node --test)
 scripts/                      # validate-env.js, validate-security.sh, test-docker.sh 等
@@ -118,7 +118,7 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 `SMILEZEMI_USERNAME`, `SMILEZEMI_PASSWORD`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_USER_ID`
 (GitHub Secretsまたは`.env`ファイルで管理。本番はdocker composeのenv_file経由)
 
-任意: `DISCORD_WEBHOOK_URL`（夜通知・朝通知ではLINE送信失敗時のフォールバック先。月次ボーナス清算だけはLINEの成否にかかわらず常に送りWebhook失効の疎通確認を兼ねる。未設定ならいずれもDiscordへ送らず従来どおりLINEのみ）
+任意: `DISCORD_WEBHOOK_URL`（全通知の送信先。LINEの成否にかかわらず常にDiscordへも送る。未設定ならDiscordへ送らず従来どおりLINEのみ）
 
 ### LINE送信数の制約（重要）
 
@@ -127,9 +127,9 @@ DRY_RUN=true node -r dotenv/config src/monthly-bonus-index.js  # 月次清算ド
 - 通知を増やす変更をする際は必ず月間カウントを見積もること（固定分≈128=朝124+月次4、夜通知の残枠≈72=月18日分）
 - 1つのLINEグループに公式アカウント(bot)は1つしか入れないため、チャンネル追加で枠を増やす手は使えない
 - 上限超過時はLINE APIが429を返す。notifier.jsは429を非リトライで即失敗させ、レスポンスボディの理由をログに残す
-- LINE送信が失敗した場合（429の枠切れ・401・ネットワーク障害すべて）は `src/broadcast.js` が Discord Webhook へ転送する。転送メッセージには失敗理由の行が付く。Discordには月間送信数の上限がない
-- Discordは日次通知では原則フォールバック専用で、LINEが成功している限り呼ばれない。例外は夜通知の全員達成日で、この日はLINEを使わずDiscordのみに記録する（`src/broadcast.js` の `broadcastToDiscordOnly`）。Webhookの失効を検知するため、**月次ボーナス清算だけはLINEの成否にかかわらずDiscordにも送る**（`src/broadcast.js` の `broadcastToAll`）。年12回の疎通確認になり、Discord送信が失敗した月は終了コード1でワークフローが赤くなる。詳細: `docs/superpowers/specs/2026-07-27-monthly-discord-healthcheck-design.md`
-- 通知の成否は「1つ以上の宛先に届いたか」で判定する。LINEだけ失敗してもワークフローは赤くしない
+- **全通知をLINEとDiscordの両方へ送る**（`src/broadcast.js` の `broadcastToAll`）。LINEの成否にかかわらずDiscordへも送るため、Discordが常時の記録先になる。唯一の例外は夜通知の全員達成日で、この日はLINEを使わずDiscordのみに記録する（`broadcastToDiscordOnly`）。Discordには月間送信数の上限がない。詳細: `docs/superpowers/specs/2026-08-03-always-dual-notification-design.md`
+- LINE送信が失敗した場合（429の枠切れ・401・ネットワーク障害すべて）、Discordへ送る本文の先頭に失敗理由の行が付く。LINEが成功した回は本文だけを送る
+- 通知の成否は「1つ以上の宛先に届いたか」で判定する。LINEだけ失敗してもワークフローは赤くしない。一方**Discordだけの失敗は全エントリポイントで終了コード1にする**（Webhook失効を翌日に検知するため）。判定は `getDiscordFailure()` に集約されており、`DISCORD_WEBHOOK_URL` 未設定の環境は「宛先がない」だけなので赤くしない
 
 ## Key Design Decisions
 

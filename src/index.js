@@ -9,7 +9,7 @@ const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
 const { formatMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
-const { broadcastMessage, broadcastToDiscordOnly, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
+const { broadcastToAll, broadcastToDiscordOnly, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
 const { loadStreakData, formatStreakInfo, isStudied, createInitialState, getRequirementForCourse } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
@@ -158,7 +158,7 @@ async function main() {
             '夜通知のデータ取得に失敗したため、本日の通知をお届けできません。',
             'GitHub Actions のログを確認してください。'
           ].join('\n');
-          const errorNotifyResult = await broadcastMessage(errorMessage, config);
+          const errorNotifyResult = await broadcastToAll(errorMessage, config);
           if (!errorNotifyResult.success) {
             console.error('❌ エラー通知の送信に全宛先で失敗しました');
           }
@@ -189,7 +189,7 @@ async function main() {
         };
       }
 
-      const notifyResult = await broadcastMessage(
+      const notifyResult = await broadcastToAll(
         formatMessage(compareResult.changes),
         config
       );
@@ -199,6 +199,16 @@ async function main() {
       } else {
         console.error('❌ 基本モードでの通知に失敗しました');
         errors.push('基本モードの通知が全宛先で失敗しました');
+      }
+
+      // LINEに届いていてもDiscordが失敗していれば異常終了させる(Webhook失効の検知)
+      // 全宛先で失敗した場合は上で既に errors に積んでいるため、届いた回だけ見る
+      if (notifyResult.success) {
+        const basicDiscordError = getDiscordFailure(notifyResult);
+        if (basicDiscordError) {
+          console.error('❌ Discordへの送信に失敗しました。Webhookが失効している可能性があります:', basicDiscordError);
+          errors.push(`Discordへの送信に失敗しました: ${basicDiscordError}`);
+        }
       }
 
       // データ保存（v2.0形式、デフォルト値付き）
@@ -311,7 +321,7 @@ async function main() {
       console.log('=== プレビュー終了 ===\n');
       console.log(discordOnly
         ? 'ℹ️ 全員達成のため、実行時はDiscordのみに送信します'
-        : 'ℹ️ 実行時はLINEに送信します(失敗時はDiscordへ転送)');
+        : 'ℹ️ 実行時はLINEとDiscordの両方に送信します');
       console.log('ℹ️ ドライランモード: 通知とデータ保存はスキップしました');
       console.log('🎉 処理が正常に完了しました');
       return {
@@ -327,7 +337,7 @@ async function main() {
     }
     const notifyResult = discordOnly
       ? await broadcastToDiscordOnly(outgoingMessage, config)
-      : await broadcastMessage(outgoingMessage, config);
+      : await broadcastToAll(outgoingMessage, config);
 
     if (notifyResult.success) {
       console.log('✅ 通知の送信が完了しました');
@@ -337,6 +347,17 @@ async function main() {
     } else {
       console.error('❌ 通知の送信に全宛先で失敗しました');
       errors.push('通知が全宛先で失敗しました');
+    }
+
+    // LINEに届いていてもDiscordが失敗していれば異常終了させる(Webhook失効の検知)
+    // 全員達成日(Discord単独)の失敗は上のブロックで既に errors に積まれているため、
+    // 二重に積まないよう success の判定を経たここで getDiscordFailure を見る
+    if (notifyResult.success) {
+      const discordError = getDiscordFailure(notifyResult);
+      if (discordError) {
+        console.error('❌ Discordへの送信に失敗しました。Webhookが失効している可能性があります:', discordError);
+        errors.push(`Discordへの送信に失敗しました: ${discordError}`);
+      }
     }
 
     // 9. 新しいデータの保存
