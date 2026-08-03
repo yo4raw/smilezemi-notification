@@ -578,6 +578,136 @@ describe('settleBonuses', () => {
   });
 });
 
+describe('updateStreaks - コース種別の保存', () => {
+  const studiedElementaryUser = {
+    userName: 'はなこ',
+    course: 'elementary',
+    studyTime: { hours: 1, minutes: 0 },
+    missionCount: 4,
+    missions: []
+  };
+
+  it('確定したユーザーの状態に course を保存する', () => {
+    const { streakUsers } = updateStreaks({}, [studiedElementaryUser], '2026-07-12');
+
+    assert.strictEqual(streakUsers['はなこ'].course, 'elementary');
+    assert.strictEqual(streakUsers['はなこ'].streak, 1, 'ストリークの確定は従来どおり行われること');
+  });
+
+  it('中学生コースの course も保存する', () => {
+    const juniorHighUser = {
+      userName: 'たろう',
+      course: 'juniorHigh',
+      studyTime: { hours: 1, minutes: 0 },
+      missionCount: 3,
+      missions: []
+    };
+    const { streakUsers } = updateStreaks({}, [juniorHighUser], '2026-07-12', { minCompletedMissions: 3 });
+
+    assert.strictEqual(streakUsers['たろう'].course, 'juniorHigh');
+  });
+
+  it('results に載る状態にも course が含まれる', () => {
+    const { results } = updateStreaks({}, [studiedElementaryUser], '2026-07-12');
+
+    assert.strictEqual(results[0].state.course, 'elementary');
+  });
+
+  it('dataReliable:false で確定をスキップする場合も course は保存する', () => {
+    const initial = {
+      'たろう': { streak: 5, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-11' }
+    };
+    const unreliableNotStudiedUser = {
+      userName: 'たろう',
+      course: 'juniorHigh',
+      studyTime: { hours: 0, minutes: 0 },
+      missions: [],
+      dataReliable: false
+    };
+    const { streakUsers, results } = updateStreaks(initial, [unreliableNotStudiedUser], '2026-07-12');
+
+    assert.strictEqual(streakUsers['たろう'].course, 'juniorHigh', 'コースは学習判定と無関係に分かるため保存すること');
+    assert.strictEqual(streakUsers['たろう'].streak, 5, 'ストリークは変わらないこと');
+    assert.strictEqual(streakUsers['たろう'].grace, 1, 'おたすけは変わらないこと');
+    assert.strictEqual(streakUsers['たろう'].bonus, 0, 'ボーナスは変わらないこと');
+    assert.strictEqual(streakUsers['たろう'].lastConfirmedDate, '2026-07-11', '確定日は進めないこと');
+    assert.strictEqual(results[0].event, 'none');
+  });
+
+  it('user.course が未指定なら既存の course を保持する', () => {
+    const initial = {
+      'たろう': { streak: 5, grace: 1, bonus: 0, course: 'juniorHigh', lastConfirmedDate: '2026-07-11' }
+    };
+    const noCourseUser = {
+      userName: 'たろう',
+      studyTime: { hours: 1, minutes: 0 },
+      missionCount: 4,
+      missions: []
+    };
+    const { streakUsers } = updateStreaks(initial, [noCourseUser], '2026-07-12');
+
+    assert.strictEqual(streakUsers['たろう'].course, 'juniorHigh', '未指定で既存値を消さないこと');
+    assert.strictEqual(streakUsers['たろう'].streak, 6, '確定は従来どおり行われること');
+  });
+
+  it('入力のマップを変更しない(純粋関数)', () => {
+    const initial = {
+      'はなこ': { streak: 3, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-11' }
+    };
+    updateStreaks(initial, [studiedElementaryUser], '2026-07-12');
+
+    assert.strictEqual(initial['はなこ'].course, undefined, '入力側に course が生えないこと');
+    assert.strictEqual(initial['はなこ'].streak, 3);
+  });
+
+  it('同日再実行でも course は保存される(冪等な確定スキップ経路)', () => {
+    const initial = {
+      'はなこ': { streak: 3, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
+    };
+    const { streakUsers } = updateStreaks(initial, [studiedElementaryUser], '2026-07-12');
+
+    assert.strictEqual(streakUsers['はなこ'].course, 'elementary');
+    assert.strictEqual(streakUsers['はなこ'].streak, 3, '同日再実行でストリークは進まないこと');
+  });
+});
+
+describe('settleBonuses - コース種別の引き継ぎ', () => {
+  it('settlements に course を載せる', () => {
+    const users = {
+      'たろう': { streak: 20, grace: 3, bonus: 3, course: 'juniorHigh', lastConfirmedDate: '2026-07-31' },
+      'はなこ': { streak: 5, grace: 1, bonus: 2, course: 'elementary', lastConfirmedDate: '2026-07-31' }
+    };
+    const { settlements } = settleBonuses(users);
+
+    assert.deepStrictEqual(
+      settlements.map(s => [s.userName, s.bonus, s.course]).sort(),
+      [
+        ['たろう', 3, 'juniorHigh'],
+        ['はなこ', 2, 'elementary']
+      ].sort()
+    );
+  });
+
+  it('course のないユーザーは course: undefined で返す', () => {
+    const users = {
+      'じろう': { streak: 1, grace: 1, bonus: 1, lastConfirmedDate: '2026-07-31' }
+    };
+    const { settlements } = settleBonuses(users);
+
+    assert.strictEqual(settlements[0].course, undefined);
+  });
+
+  it('リセット後の状態でも course は残る', () => {
+    const users = {
+      'たろう': { streak: 20, grace: 3, bonus: 3, course: 'juniorHigh', lastConfirmedDate: '2026-07-31' }
+    };
+    const { streakUsers } = settleBonuses(users);
+
+    assert.strictEqual(streakUsers['たろう'].course, 'juniorHigh');
+    assert.strictEqual(streakUsers['たろう'].bonus, 0);
+  });
+});
+
 describe('formatStreakInfo', () => {
   it('ボーナス1以上のときストリーク行に表示される', () => {
     const text = formatStreakInfo({
