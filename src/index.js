@@ -10,7 +10,7 @@ const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTarge
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
 const { formatMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const { broadcastToAll, broadcastToDiscordOnly, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
-const { loadStreakData, formatStreakInfo, isStudied, createInitialState, getRequirementForCourse } = require('./streak');
+const { isStudied, getRequirementForCourse } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -242,35 +242,16 @@ async function main() {
       console.warn('⚠️ 詳細情報の一部が取得できませんでした');
     }
 
-    // 6.5 ストリーク(連続学習日数)の表示
-    // 夜通知は速報のため確定・保存はしない(確定は翌朝の朝通知が前日分で行う)。
-    // streak_data.json の確定値を読み、当日すでにしきい値達成なら暫定+1して表示する。
-    let streaks = null;
-    console.log('🔥 ストリーク情報を読み込んでいます...');
-    const streakLoadResult = await loadStreakData();
-
-    let streakUsers;
-    if (streakLoadResult.success) {
-      streakUsers = streakLoadResult.data;
-    } else {
-      // 読み込み失敗はエラー記録しつつ空状態で表示を続行する(確定は朝が担うため保存はしない)
-      console.error('❌ ストリークデータの読み込みに失敗しました:', streakLoadResult.error);
-      errors.push(streakLoadResult.error);
-      console.warn('⚠️ ストリークデータを初期化して表示します');
-      streakUsers = {};
-    }
-
+    // 6.5 当日のストリーク要件の達成判定
+    // 夜通知はストリーク・おたすけ・ボーナスを表示しない(翌朝の確定通知がカバーする)ため
+    // streak_data.json は読まない。LINEに送るかどうかの判定にだけ達成状況を使う。
     const todayDateString = getTargetDates(0).dateString;
-    streaks = {};
     let hasUnqualifiedUser = false;
     currentData.forEach(user => {
-      const state = streakUsers[user.userName] || createInitialState();
       const threshold = getRequirementForCourse(user.course, todayDateString);
-      const todayStudied = isStudied(user, { minCompletedMissions: threshold });
-      if (!todayStudied) {
+      if (!isStudied(user, { minCompletedMissions: threshold })) {
         hasUnqualifiedUser = true;
       }
-      streaks[user.userName] = formatStreakInfo({ state, event: 'none' }, { todayStudied });
     });
 
     // 7. データ比較（変更検出）
@@ -294,8 +275,10 @@ async function main() {
     console.log('📤 通知を送信しています...');
 
     // 詳細メッセージをフォーマット（ミッション変化情報・コース別しきい値未達警告を含む）
+    // ストリーク行と勉強時間は翌朝の確定通知でカバーするため夜は出さない
     const message = formatDetailedMessage(currentData, missionChangesResult, {
-      streaks,
+      showStudyTime: false,
+      missionWarningStyle: 'today',
       missionWarningThresholds: {
         elementary: getRequirementForCourse('elementary', todayDateString),
         juniorHigh: getRequirementForCourse('juniorHigh', todayDateString)

@@ -166,7 +166,10 @@ describe('オーケストレーション (src/index.js)', () => {
     require.cache[resolveModule('../src/streak')] = {
       id: resolveModule('../src/streak'), filename: resolveModule('../src/streak'), loaded: true,
       exports: {
-        loadStreakData: overrides.loadStreakData || (async () => ({ success: true, data: {} })),
+        loadStreakData: overrides.loadStreakData || (async () => {
+          callLog.push({ type: 'loadStreakData' });
+          return { success: true, data: {} };
+        }),
         saveStreakData: overrides.saveStreakData || (async () => {
           callLog.push({ type: 'saveStreakData' });
           return { success: true };
@@ -692,30 +695,29 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.deepStrictEqual(detailedCalls[0], { courseFilter: null }, '両コース(null)で当日分を取得すること');
     });
 
-    it('異常系: loadStreakData失敗時、errorsに記録し保存せず表示のみで続行する', async () => {
-      let capturedFormatOptions;
+    it('夜通知はストリークデータを読まない(loadStreakDataが失敗しても成功する)', async () => {
       setupMocks({
-        loadStreakData: async () => ({ success: false, error: 'ストリークデータ読み込み失敗' }),
-        formatDetailedMessage: (currentData, changes, options) => {
-          capturedFormatOptions = options;
-          return 'テスト詳細メッセージ';
+        loadStreakData: async () => {
+          callLog.push({ type: 'loadStreakData' });
+          return { success: false, error: 'ストリークデータ読み込み失敗' };
         }
       });
 
       const result = await mainModule.main();
 
-      assert.strictEqual(result.exitCode, 1, 'loadStreakData失敗時は終了コード1');
-      assert.strictEqual(result.errors.includes('ストリークデータ読み込み失敗'), true, 'errorsに記録されること');
+      assert.strictEqual(result.exitCode, 0, 'ストリーク読み込み失敗に影響されないこと');
+
+      const loadStreakCalls = callLog.filter(c => c.type === 'loadStreakData');
+      assert.strictEqual(loadStreakCalls.length, 0, 'loadStreakDataが呼ばれないこと(呼ばれていれば失敗が伝搬するはず)');
 
       const saveStreakCalls = callLog.filter(c => c.type === 'saveStreakData');
       assert.strictEqual(saveStreakCalls.length, 0, '夜通知は保存しないこと');
 
       const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(pushCalls.length, 1, '通知は送信されること');
-      assert.ok(capturedFormatOptions.streaks, 'streaksマップは渡されること(空状態ベース)');
     });
 
-    it('正常系: formatDetailedMessageに渡すoptions.streaksに対象ユーザーのキーが含まれる', async () => {
+    it('formatDetailedMessageにstreaksを渡さない(ストリーク行を出さない)', async () => {
       let capturedOptions;
       setupMocks({
         formatDetailedMessage: (currentData, missionChangesResult, options) => {
@@ -727,8 +729,27 @@ describe('オーケストレーション (src/index.js)', () => {
       await mainModule.main();
 
       assert.ok(capturedOptions, 'formatDetailedMessageが呼ばれること');
-      assert.ok(capturedOptions.streaks, 'streaksオプションが渡されること');
-      assert.strictEqual(typeof capturedOptions.streaks['太郎'], 'string', '対象ユーザー(太郎)のキーが含まれること');
+      assert.strictEqual(capturedOptions.streaks, undefined, 'streaksオプションが渡されないこと');
+    });
+
+    it('formatDetailedMessageに夜通知用の表示オプションを渡す', async () => {
+      let capturedOptions;
+      setupMocks({
+        formatDetailedMessage: (currentData, missionChangesResult, options) => {
+          capturedOptions = options;
+          return 'テスト詳細メッセージ';
+        }
+      });
+
+      await mainModule.main();
+
+      assert.strictEqual(capturedOptions.showStudyTime, false, '勉強時間を出さないこと');
+      assert.strictEqual(capturedOptions.missionWarningStyle, 'today', '当日向けの警告文言を使うこと');
+      assert.deepStrictEqual(
+        capturedOptions.missionWarningThresholds,
+        { elementary: 4, juniorHigh: 3 },
+        'コース別しきい値は従来どおり渡すこと'
+      );
     });
   });
 
