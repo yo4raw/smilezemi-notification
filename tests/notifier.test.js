@@ -564,6 +564,24 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '既定は past であること');
     });
 
+    it('missionWarningStyle が未知の値のときは past にフォールバックする', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, {
+        missionWarningThreshold: 5,
+        missionWarningStyle: 'unknown'
+      });
+
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '未知の値は past にフォールバックすること');
+    });
+
+    it('missionWarningStyle が "constructor" のような Object.prototype のプロパティ名でも past にフォールバックする', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, {
+        missionWarningThreshold: 5,
+        missionWarningStyle: 'constructor'
+      });
+
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, 'prototype汚染を拾わずpastにフォールバックすること');
+    });
+
     it('完了ミッションが閾値以上なら警告行は表示されない', () => {
       const user = { ...baseUser, missionCount: 5 };
       const message = notifier.formatDetailedMessage([user], null, { missionWarningThreshold: 5 });
@@ -582,6 +600,54 @@ describe('通知モジュール (src/notifier.js)', () => {
       const message = notifier.formatDetailedMessage([user], null, { missionWarningThreshold: 5 });
 
       assert.doesNotMatch(message, /あと\d+件/, '警告行が含まれないこと');
+    });
+
+    it('dataReliable:false のユーザーは夜通知相当のオプションでもデータ取得失敗を表示し、未達警告は出さない', () => {
+      const user = {
+        userName: 'たろう (中学生コース)',
+        course: 'juniorHigh',
+        missionCount: 0,
+        studyItemCount: 0,
+        date: '2026-08-04',
+        studyTime: { hours: 0, minutes: 0 },
+        totalScore: 0,
+        missions: [],
+        dataReliable: false
+      };
+      const message = notifier.formatDetailedMessage([user], null, {
+        showStudyTime: false,
+        missionWarningStyle: 'today',
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
+      });
+
+      assert.match(message, /⚠️ データを取得できませんでした/, 'データ取得失敗の行が出ること');
+      assert.doesNotMatch(message, /あと\d+件/, '未達警告行は出ないこと');
+    });
+
+    it('dataReliable:false かつ完全未学習のユーザーは朝通知相当のオプションでも「学習していません」ではなくデータ取得失敗を表示する', () => {
+      const user = {
+        userName: 'はなこ (小学生コース)',
+        course: 'elementary',
+        missionCount: 0,
+        studyItemCount: 0,
+        date: '2026-08-03',
+        studyTime: { hours: 0, minutes: 0 },
+        totalScore: 0,
+        missions: [],
+        dataReliable: false
+      };
+      const message = notifier.formatDetailedMessage([user], null, {
+        showNoStudyWarning: true
+      });
+
+      assert.match(message, /⚠️ データを取得できませんでした/, 'データ取得失敗の行が出ること');
+      assert.doesNotMatch(message, /昨日は学習していません/, '断定的な未学習警告は出さないこと');
+    });
+
+    it('dataReliable 未設定のユーザーにはデータ取得失敗行を出さない', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, { missionWarningThreshold: 5 });
+
+      assert.doesNotMatch(message, /データを取得できませんでした/, 'dataReliable未設定なら出ないこと');
     });
 
     it('警告文言はコースが違っても同一になる', () => {

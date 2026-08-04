@@ -354,6 +354,12 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
       message += `${streaks[user.userName]}\n`;
     }
 
+    // データ取得に失敗したユーザーは学習有無を判定できないため、専用の警告を出す
+    // (学習件数0件と区別できないままだと未取得なのか未学習なのか読み取れない)
+    if (user.dataReliable === false) {
+      message += '⚠️ データを取得できませんでした\n';
+    }
+
     // 勉強時間(夜通知は翌朝の確定通知でカバーするため出さない)
     const hours = user.studyTime?.hours ?? 0;
     const minutes = user.studyTime?.minutes ?? 0;
@@ -393,14 +399,16 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
       const completedCount = countStudyItems(user);
       if (completedCount < warnThreshold) {
-        const formatWarning = MISSION_WARNING_STYLES[missionWarningStyle] || MISSION_WARNING_STYLES.past;
+        const formatWarning = Object.hasOwn(MISSION_WARNING_STYLES, missionWarningStyle)
+          ? MISSION_WARNING_STYLES[missionWarningStyle]
+          : MISSION_WARNING_STYLES.past;
         message += `${formatWarning(warnThreshold - completedCount)}\n`;
       }
     }
 
     // ミッション詳細（朝通知では未学習の場合に警告文言のみ表示）
 
-    if (showNoStudyWarning && isNoStudy) {
+    if (showNoStudyWarning && isNoStudy && user.dataReliable !== false) {
       message += '⚠️ 昨日は学習していません\n';
     } else if (missions.length > 0) {
       message += `\n📋 ${detailLabel}:\n`;

@@ -166,7 +166,10 @@ describe('オーケストレーション (src/index.js)', () => {
     require.cache[resolveModule('../src/streak')] = {
       id: resolveModule('../src/streak'), filename: resolveModule('../src/streak'), loaded: true,
       exports: {
-        loadStreakData: overrides.loadStreakData || (async () => ({ success: true, data: {} })),
+        loadStreakData: overrides.loadStreakData || (async () => {
+          callLog.push({ type: 'loadStreakData' });
+          return { success: true, data: {} };
+        }),
         saveStreakData: overrides.saveStreakData || (async () => {
           callLog.push({ type: 'saveStreakData' });
           return { success: true };
@@ -694,12 +697,18 @@ describe('オーケストレーション (src/index.js)', () => {
 
     it('夜通知はストリークデータを読まない(loadStreakDataが失敗しても成功する)', async () => {
       setupMocks({
-        loadStreakData: async () => ({ success: false, error: 'ストリークデータ読み込み失敗' })
+        loadStreakData: async () => {
+          callLog.push({ type: 'loadStreakData' });
+          return { success: false, error: 'ストリークデータ読み込み失敗' };
+        }
       });
 
       const result = await mainModule.main();
 
       assert.strictEqual(result.exitCode, 0, 'ストリーク読み込み失敗に影響されないこと');
+
+      const loadStreakCalls = callLog.filter(c => c.type === 'loadStreakData');
+      assert.strictEqual(loadStreakCalls.length, 0, 'loadStreakDataが呼ばれないこと(呼ばれていれば失敗が伝搬するはず)');
 
       const saveStreakCalls = callLog.filter(c => c.type === 'saveStreakData');
       assert.strictEqual(saveStreakCalls.length, 0, '夜通知は保存しないこと');
