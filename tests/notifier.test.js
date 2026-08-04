@@ -737,6 +737,50 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
+  describe('formatDetailedMessage - 勉強時間の表示切り替え', () => {
+    const { formatDetailedMessage } = require('../src/notifier');
+
+    const userData = [{
+      userName: 'たろう (小学生コース)',
+      course: 'elementary',
+      studyItemCount: 4,
+      missionCount: 0,
+      date: '2026-08-03',
+      studyTime: { hours: 0, minutes: 13 },
+      totalScore: 202,
+      missions: [{ name: '国語テスト(2年生：夏)', score: 20, completed: true }]
+    }];
+
+    it('showStudyTime: false で勉強時間行を出さない', () => {
+      const message = formatDetailedMessage(userData, null, { showStudyTime: false });
+      assert.ok(!message.includes('勉強時間'), message);
+      assert.ok(message.includes('✅ 学習4件'), '学習件数行は残ること');
+    });
+
+    it('showStudyTime 省略時は従来どおり勉強時間行を出す', () => {
+      const message = formatDetailedMessage(userData, null, {});
+      assert.ok(message.includes('⏱️ 勉強時間: 00:13'), message);
+    });
+
+    it('showStudyTime: false でも朝通知の完全未学習判定は勉強時間を見る', () => {
+      const noStudy = [{
+        userName: 'はなこ (小学生コース)',
+        course: 'elementary',
+        studyItemCount: 0,
+        missionCount: 0,
+        date: '2026-08-03',
+        studyTime: { hours: 0, minutes: 0 },
+        totalScore: 0,
+        missions: []
+      }];
+      const message = formatDetailedMessage(noStudy, null, {
+        showStudyTime: false,
+        showNoStudyWarning: true
+      });
+      assert.ok(message.includes('⚠️ 昨日は学習していません'), message);
+    });
+  });
+
   describe('formatDetailedMessage - ストリーク表示', () => {
     const { formatDetailedMessage } = require('../src/notifier');
 

@@ -297,12 +297,15 @@ function formatMessage(changes) {
  *
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} userData - ユーザーデータ配列（v2.0形式）
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} [previousData] - 前回のユーザーデータ配列（v2.0形式、オプション）
+ * @param {object} [options] - 表示オプション
+ * @param {boolean} [options.showStudyTime=true] - 勉強時間行を表示するか(夜通知は false)
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
   const {
     dateLabel = null,
     showNoStudyWarning = false,
+    showStudyTime = true,
     streaks = null,
     missionWarningThreshold = null,
     missionWarningThresholds = null
@@ -341,10 +344,12 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
       message += `${streaks[user.userName]}\n`;
     }
 
-    // 勉強時間
+    // 勉強時間(夜通知は翌朝の確定通知でカバーするため出さない)
     const hours = user.studyTime?.hours ?? 0;
     const minutes = user.studyTime?.minutes ?? 0;
-    message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
+    if (showStudyTime) {
+      message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
+    }
 
     // コース種別: course フィールド優先、なければ名前サフィックスで判定
     const course = user.course || (user.userName.includes('中学生コース') ? 'juniorHigh' : 'elementary');
