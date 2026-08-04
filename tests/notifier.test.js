@@ -540,36 +540,54 @@ describe('通知モジュール (src/notifier.js)', () => {
       ]
     };
 
-    it('完了ミッションが閾値未満なら警告行が表示される', () => {
+    it('完了ミッションが閾値未満なら警告行が表示される(today)', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, {
+        missionWarningThreshold: 5,
+        missionWarningStyle: 'today'
+      });
+
+      assert.match(message, /🚨🚨 あと2件! がんばろう! 🚨🚨/, '残り件数つきの励まし文言が出ること');
+    });
+
+    it('missionWarningStyle: past は過去形の文言になる', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, {
+        missionWarningThreshold: 5,
+        missionWarningStyle: 'past'
+      });
+
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '過去形の文言が出ること');
+    });
+
+    it('missionWarningStyle 省略時は past 扱いになる', () => {
       const message = notifier.formatDetailedMessage([baseUser], null, { missionWarningThreshold: 5 });
 
-      assert.match(message, /⚠️ 学習完了 3\/5件/, '完了数と閾値が表示されること');
-      assert.match(message, /カウントされない/, 'ストリークにカウントされない旨が含まれること');
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '既定は past であること');
     });
 
     it('完了ミッションが閾値以上なら警告行は表示されない', () => {
       const user = { ...baseUser, missionCount: 5 };
       const message = notifier.formatDetailedMessage([user], null, { missionWarningThreshold: 5 });
 
-      assert.doesNotMatch(message, /学習完了 \d+\/\d+件/, '警告行が含まれないこと');
+      assert.doesNotMatch(message, /あと\d+件/, '警告行が含まれないこと');
     });
 
     it('閾値未指定なら警告行は表示されない', () => {
       const message = notifier.formatDetailedMessage([baseUser], null, {});
 
-      assert.doesNotMatch(message, /学習完了 \d+\/\d+件/, '警告行が含まれないこと');
+      assert.doesNotMatch(message, /あと\d+件/, '警告行が含まれないこと');
     });
 
     it('dataReliable:false のユーザーには警告を出さない(取得失敗の誤警告防止)', () => {
       const user = { ...baseUser, missionCount: 0, dataReliable: false };
       const message = notifier.formatDetailedMessage([user], null, { missionWarningThreshold: 5 });
 
-      assert.doesNotMatch(message, /学習完了 \d+\/\d+件/, '警告行が含まれないこと');
+      assert.doesNotMatch(message, /あと\d+件/, '警告行が含まれないこと');
     });
 
-    it('中学生コースのユーザーには「講座完了」表記で警告する', () => {
+    it('警告文言はコースが違っても同一になる', () => {
       const juniorUser = {
         userName: 'たろう (中学生コース)',
+        course: 'juniorHigh',
         missionCount: 2,
         date: '2026-07-13',
         studyTime: { hours: 0, minutes: 30 },
@@ -579,11 +597,14 @@ describe('通知モジュール (src/notifier.js)', () => {
           { name: '英語: 不定詞', score: 80, completed: true }
         ]
       };
-      const message = notifier.formatDetailedMessage([juniorUser], null, { missionWarningThreshold: 4 });
+      const message = notifier.formatDetailedMessage([juniorUser], null, {
+        missionWarningThreshold: 4,
+        missionWarningStyle: 'today'
+      });
 
-      assert.match(message, /⚠️ 講座完了 2\/4件/, '講座表記で完了数と閾値が表示されること');
-      assert.match(message, /4件完了しないと連続学習にカウントされないよ/, 'ルール説明が含まれること');
-      assert.doesNotMatch(message, /学習完了/, 'ミッション表記にならないこと');
+      assert.match(message, /🚨🚨 あと2件! がんばろう! 🚨🚨/, '小学生と同じ文言になること');
+      assert.doesNotMatch(message, /講座完了/, '旧表記が残っていないこと');
+      assert.doesNotMatch(message, /連続学習/, '「連続学習」への言及が消えていること');
     });
 
     it('showNoStudyWarning併用時、完全未学習の日は「学習していません」のみで閾値警告を重複させない', () => {
@@ -601,7 +622,7 @@ describe('通知モジュール (src/notifier.js)', () => {
       });
 
       assert.match(message, /昨日は学習していません/, '未学習警告が表示されること');
-      assert.doesNotMatch(message, /講座完了 \d+\/\d+件/, '閾値警告が重複しないこと');
+      assert.doesNotMatch(message, /あと\d+件/, '閾値警告が重複しないこと');
     });
 
     it('showNoStudyWarning併用時、部分学習(閾値未満)の日は閾値警告が表示される', () => {
@@ -618,7 +639,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         missionWarningThreshold: 4
       });
 
-      assert.match(message, /⚠️ 講座完了 1\/4件/, '閾値警告が表示されること');
+      assert.match(message, /😢😢 あと3件たりなかった… 😢😢/, '閾値警告が表示されること');
       assert.doesNotMatch(message, /昨日は学習していません/, '未学習警告は表示されないこと');
     });
 
@@ -631,7 +652,7 @@ describe('通知モジュール (src/notifier.js)', () => {
       const message = notifier.formatDetailedMessage([user], null, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
-      assert.match(message, /⚠️ 学習完了 3\/4件/, '小学生は elementary(4) 閾値・学習表記');
+      assert.match(message, /😢😢 あと1件たりなかった… 😢😢/, '小学生は elementary(4) 閾値が使われること');
     });
 
     it('missionWarningThresholds: courseフィールドで中学生に juniorHigh 閾値を適用', () => {
@@ -643,7 +664,7 @@ describe('通知モジュール (src/notifier.js)', () => {
       const message = notifier.formatDetailedMessage([user], null, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
-      assert.match(message, /⚠️ 講座完了 2\/3件/, '中学生は juniorHigh(3) 閾値・講座表記');
+      assert.match(message, /😢😢 あと1件たりなかった… 😢😢/, '中学生は juniorHigh(3) 閾値が使われること');
     });
 
     it('missionWarningThresholds: 混在データを1メッセージでコース別に警告する', () => {
@@ -653,15 +674,15 @@ describe('通知モジュール (src/notifier.js)', () => {
         missions: [{ name: '算数', score: 80, completed: true }]
       };
       const jh = {
-        userName: 'たろう', course: 'juniorHigh', missionCount: 2,
+        userName: 'たろう', course: 'juniorHigh', missionCount: 1,
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };
       const message = notifier.formatDetailedMessage([elem, jh], null, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
-      assert.match(message, /学習完了 3\/4件/, '小学生の警告');
-      assert.match(message, /講座完了 2\/3件/, '中学生の警告');
+      assert.match(message, /😢😢 あと1件たりなかった… 😢😢/, '小学生の警告(4-3=1件)');
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '中学生の警告(3-1=2件)');
     });
 
     it('missionWarningThresholds は course 未設定時に名前サフィックスで判定する', () => {
@@ -673,7 +694,7 @@ describe('通知モジュール (src/notifier.js)', () => {
       const message = notifier.formatDetailedMessage([jh], null, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
-      assert.match(message, /⚠️ 講座完了 2\/3件/, 'サフィックスで中学生と判定');
+      assert.match(message, /😢😢 あと1件たりなかった… 😢😢/, 'サフィックスで中学生と判定');
     });
   });
 
@@ -995,7 +1016,7 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.ok(!message.includes('ほか'), message);
     });
 
-    it('小学生コースの未達警告は「学習」表記になる', () => {
+    it('小学生コースの未達警告に残り件数が出る', () => {
       const userData = [{
         userName: 'たろう (小学生コース)',
         course: 'elementary',
@@ -1011,11 +1032,10 @@ describe('通知モジュール (src/notifier.js)', () => {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
 
-      assert.ok(message.includes('⚠️ 学習完了 2/4件'), message);
-      assert.ok(message.includes('4件完了しないと連続学習にカウントされないよ!'), message);
+      assert.ok(message.includes('😢😢 あと2件たりなかった… 😢😢'), message);
     });
 
-    it('中学生コースの未達警告は「講座」表記のまま', () => {
+    it('中学生コースの未達警告にも残り件数が出る', () => {
       const userData = [{
         userName: 'じろう (中学生コース)',
         course: 'juniorHigh',
@@ -1031,7 +1051,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
 
-      assert.ok(message.includes('⚠️ 講座完了 1/3件'), message);
+      assert.ok(message.includes('😢😢 あと2件たりなかった… 😢😢'), message);
     });
   });
 

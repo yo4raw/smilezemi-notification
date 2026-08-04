@@ -16,6 +16,14 @@ const MAX_MESSAGE_LENGTH = 5000;
 // クローラー側では全件取得しており、合計点や学習件数は全件から計算される。
 const MAX_LISTED_COURSES = 10;
 
+// 学習件数がしきい値に届かないときに出す警告文言。
+// 夜通知(today)は当日中に挽回できるため励まし、朝通知(past)は前日確定の結果報告なので過去形にする。
+// 残り件数だけを出すため、コース別の単位ラベル(学習/講座)は使わない。
+const MISSION_WARNING_STYLES = {
+  today: remaining => `🚨🚨 あと${remaining}件! がんばろう! 🚨🚨`,
+  past: remaining => `😢😢 あと${remaining}件たりなかった… 😢😢`
+};
+
 /**
  * LINE通知を送信する
  *
@@ -299,6 +307,7 @@ function formatMessage(changes) {
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} [previousData] - 前回のユーザーデータ配列（v2.0形式、オプション）
  * @param {object} [options] - 表示オプション
  * @param {boolean} [options.showStudyTime=true] - 勉強時間行を表示するか(夜通知は false)
+ * @param {'today'|'past'} [options.missionWarningStyle='past'] - 未達警告の文言(夜通知は 'today')
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
@@ -308,7 +317,8 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     showStudyTime = true,
     streaks = null,
     missionWarningThreshold = null,
-    missionWarningThresholds = null
+    missionWarningThresholds = null,
+    missionWarningStyle = 'past'
   } = options;
 
   // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
@@ -383,7 +393,8 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
       const completedCount = countStudyItems(user);
       if (completedCount < warnThreshold) {
-        message += `⚠️ ${unitLabel}完了 ${completedCount}/${warnThreshold}件 — ${warnThreshold}件完了しないと連続学習にカウントされないよ!\n`;
+        const formatWarning = MISSION_WARNING_STYLES[missionWarningStyle] || MISSION_WARNING_STYLES.past;
+        message += `${formatWarning(warnThreshold - completedCount)}\n`;
       }
     }
 

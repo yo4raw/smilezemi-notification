@@ -171,6 +171,7 @@ async function main() {
       dateLabel: `昨日(${targetDates.withPadding})`,
       showNoStudyWarning: true,
       streaks,
+      missionWarningStyle: 'past',
       missionWarningThresholds: {
         elementary: STREAK_REQUIREMENTS.elementaryMissions,
         juniorHigh: getJuniorHighRequirement(targetDates.dateString)
