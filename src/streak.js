@@ -3,15 +3,24 @@
  *
  * データ構造 (data/streak_data.json):
  * {
- *   version: "1.3",  // 1.3未満の読み込み時は全ユーザーのおたすけを3にする移行を適用(一度きり)
+ *   version: "1.4",  // 1.3未満は全ユーザーのおたすけを3にする移行、1.4未満は免除日フィールドの補完を適用
  *   timestamp: "ISO 8601",
  *   users: {
  *     "ユーザー名": {                    // クローラーの表示名。コース選択画面を経由した場合のみ "名前 (コース名)" になる
- *       streak: number,                 // 確定済み連続学習日数
- *       grace: number,                  // おたすけ残数 (0〜3)
- *       bonus: number,                  // ボーナスポイント (月次清算で0にリセット)
+ *       streak: number,                 // 確定済み連続学習日数(リプレイの導出値)
+ *       grace: number,                  // おたすけ残数 (0〜3、リプレイの導出値)
+ *       bonus: number,                  // ボーナスポイント (月次清算で0にリセット。リプレイ対象外)
  *       course: string|undefined,       // 'elementary' | 'juniorHigh'。月次清算の単価判定に使う。未設定は elementary 扱い
- *       lastConfirmedDate: string|null  // 最後に確定判定した日 (YYYY-MM-DD, JST)
+ *       lastConfirmedDate: string|null, // 最後に確定判定した日 (YYYY-MM-DD, JST)
+ *       exemptDates: string[],          // 免除日 (YYYY-MM-DD)。未来・過去を問わない
+ *       history: {                      // 判定対象日 → その日に学習が成立したか。保持は90日
+ *         "YYYY-MM-DD": boolean
+ *       },
+ *       replayBase: {                   // history より前をまとめたチェックポイント
+ *         streak: number,
+ *         grace: number,
+ *         date: string|null             // このチェックポイントが確定済みとしている最後の日
+ *       }
  *     }
  *   }
  * }
@@ -26,6 +35,8 @@ const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
 const GRACE_MAX = 3;
 const GRACE_INITIAL = 1; // 初回特典。リセット後は0から再スタート(10日連続で再獲得)
 const MILESTONE_INTERVAL = 10;
+const HISTORY_RETENTION_DAYS = 90; // 学習履歴の保持日数。これより古い日は replayBase に畳み込む
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 // ストリーク更新(カウント+1)に必要な完了数。変更時はここだけ書き換える
 const STREAK_REQUIREMENTS = {
@@ -37,7 +48,15 @@ const STREAK_REQUIREMENTS = {
  * ストリーク状態の初期値を生成
  */
 function createInitialState() {
-  return { streak: 0, grace: GRACE_INITIAL, bonus: 0, lastConfirmedDate: null };
+  return {
+    streak: 0,
+    grace: GRACE_INITIAL,
+    bonus: 0,
+    lastConfirmedDate: null,
+    exemptDates: [],
+    history: {},
+    replayBase: { streak: 0, grace: GRACE_INITIAL, date: null }
+  };
 }
 
 /**
@@ -104,9 +123,11 @@ function isStudied(user, options = {}) {
  * @param {{streak: number, grace: number, lastConfirmedDate: string|null}} state
  * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
  * @param {boolean} studied - 対象日に学習したか
- * @returns {{state: object, event: 'milestone'|'grace_used'|'reset'|'none'}}
+ * @param {object} [options]
+ * @param {boolean} [options.exempt=false] - 免除日なら未学習でも罰しない
+ * @returns {{state: object, event: 'milestone'|'grace_used'|'reset'|'exempt'|'none'}}
  */
-function confirmDay(state, dateString, studied) {
+function confirmDay(state, dateString, studied, options = {}) {
   // YYYY-MM-DD 形式は辞書順比較 = 日付順比較
   if (state.lastConfirmedDate && dateString <= state.lastConfirmedDate) {
     return { state, event: 'none' };
@@ -143,6 +164,15 @@ function confirmDay(state, dateString, studied) {
     };
   }
 
+  // 免除日は未学習でも罰しない: streak も grace も据え置き、日付だけ進める。
+  // studied の経路は先に return しているため、ここに届くのは未学習の日だけ
+  if (options.exempt) {
+    return {
+      state: { streak: state.streak, grace: state.grace, bonus, lastConfirmedDate: dateString },
+      event: 'exempt'
+    };
+  }
+
   // 守るべき記録がないうちはおたすけを消費せず、日付だけ確定する(初回特典の無駄消費防止)
   if (state.streak === 0) {
     return {
@@ -172,6 +202,189 @@ function confirmDay(state, dateString, studied) {
   return {
     state: { streak: 0, grace: 0, bonus, lastConfirmedDate: dateString },
     event: 'reset'
+  };
+}
+
+/**
+ * YYYY-MM-DD を日数だけずらす(純粋関数)
+ * UTC深夜として解釈するため実行環境のタイムゾーンに依存しない
+ *
+ * @param {string} dateString - YYYY-MM-DD
+ * @param {number} days - ずらす日数(負値で過去へ)
+ * @returns {string} YYYY-MM-DD
+ */
+function shiftDate(dateString, days) {
+  const date = new Date(`${dateString}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * 学習履歴のキーを検証して日付昇順に返す(壊れたエントリは無視してログに残す)
+ * 履歴の不備を理由に streak を失わせないための防御
+ *
+ * @private
+ * @param {Object<string, boolean>} history
+ * @returns {string[]}
+ */
+function sortedHistoryDates(history) {
+  if (!history || typeof history !== 'object') {
+    return [];
+  }
+
+  return Object.keys(history)
+    .filter(date => {
+      if (!DATE_PATTERN.test(date)) {
+        console.warn(`⚠️ 学習履歴の不正な日付キーを無視します: ${date}`);
+        return false;
+      }
+      if (typeof history[date] !== 'boolean') {
+        console.warn(`⚠️ 学習履歴の不正な値を無視します: ${date}=${history[date]}`);
+        return false;
+      }
+      return true;
+    })
+    .toSorted();
+}
+
+/**
+ * 学習履歴を日付順に confirmDay へ通してストリーク状態を導出する(純粋関数)
+ *
+ * bonus はどの分岐の条件にも影響しない(confirmDay は読み書きするだけ)ため
+ * リプレイでは扱わない。ボーナス残高は呼び出し側が当日のイベントで加算する。
+ *
+ * @param {{streak: number, grace: number, date: string|null}} replayBase - history より前の状態
+ * @param {Object<string, boolean>} history - 判定対象日 → その日に学習が成立したか
+ * @param {string[]} [exemptDates] - 免除日
+ * @returns {{streak: number, grace: number, lastConfirmedDate: string|null, events: Object<string, string>}}
+ */
+function replayStreak(replayBase, history, exemptDates = []) {
+  const base = replayBase || {};
+  const exempt = new Set(exemptDates);
+  const events = {};
+
+  let state = {
+    streak: base.streak ?? 0,
+    grace: base.grace ?? GRACE_INITIAL,
+    bonus: 0, // リプレイでは使わないダミー値
+    lastConfirmedDate: base.date ?? null
+  };
+
+  sortedHistoryDates(history).forEach(date => {
+    const result = confirmDay(state, date, history[date], { exempt: exempt.has(date) });
+    state = result.state;
+    events[date] = result.event;
+  });
+
+  return {
+    streak: state.streak,
+    grace: state.grace,
+    lastConfirmedDate: state.lastConfirmedDate,
+    events
+  };
+}
+
+/**
+ * 学習履歴に1日分を追記してリプレイし、新しい状態とその日のイベントを返す(純粋関数)
+ *
+ * 既に履歴にある日は何もしない(同日再実行の冪等性。旧 lastConfirmedDate ガードの役割)。
+ * bonus はリプレイ対象外のため、その日のイベントが bonus のときだけここで加算する。
+ *
+ * @param {object} state - ユーザーのストリーク状態
+ * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
+ * @param {boolean} studied - 対象日に学習が成立したか
+ * @returns {{state: object, event: string}}
+ */
+function confirmDayWithHistory(state, dateString, studied) {
+  const history = state.history || {};
+  if (Object.hasOwn(history, dateString)) {
+    return { state, event: 'none' };
+  }
+
+  const nextHistory = { ...history, [dateString]: studied };
+  const replayed = replayStreak(state.replayBase, nextHistory, state.exemptDates || []);
+  const event = replayed.events[dateString] || 'none';
+
+  const next = {
+    ...state,
+    streak: replayed.streak,
+    grace: replayed.grace,
+    bonus: (state.bonus ?? 0) + (event === 'bonus' ? 1 : 0),
+    lastConfirmedDate: replayed.lastConfirmedDate,
+    history: nextHistory
+  };
+
+  return { state: pruneHistory(next), event };
+}
+
+/**
+ * 保持期間より古い学習履歴を replayBase に畳み込む(純粋関数、入力は変更しない)
+ *
+ * 畳み込みの際も免除日を参照するため、免除の効果はチェックポイントに正しく残る。
+ * 畳み込み済みの免除日は効果が replayBase に入っているため取り除く。
+ *
+ * @param {object} state - ユーザーのストリーク状態
+ * @param {number} [retentionDays=HISTORY_RETENTION_DAYS]
+ * @returns {object} 新しい状態
+ */
+function pruneHistory(state, retentionDays = HISTORY_RETENTION_DAYS) {
+  const dates = sortedHistoryDates(state.history);
+  if (dates.length === 0) {
+    return state;
+  }
+
+  const cutoff = shiftDate(dates[dates.length - 1], -retentionDays);
+  const foldDates = dates.filter(date => date < cutoff);
+  if (foldDates.length === 0) {
+    return state;
+  }
+
+  const exemptDates = state.exemptDates || [];
+  const exempt = new Set(exemptDates);
+
+  let base = {
+    streak: state.replayBase?.streak ?? 0,
+    grace: state.replayBase?.grace ?? GRACE_INITIAL,
+    bonus: 0,
+    lastConfirmedDate: state.replayBase?.date ?? null
+  };
+  foldDates.forEach(date => {
+    base = confirmDay(base, date, state.history[date], { exempt: exempt.has(date) }).state;
+  });
+
+  const history = {};
+  dates.filter(date => date >= cutoff).forEach(date => {
+    history[date] = state.history[date];
+  });
+
+  const folded = new Set(foldDates);
+  return {
+    ...state,
+    history,
+    exemptDates: exemptDates.filter(date => !folded.has(date)),
+    replayBase: { streak: base.streak, grace: base.grace, date: base.lastConfirmedDate }
+  };
+}
+
+/**
+ * 現在の streak / grace をチェックポイントに畳み込み、学習履歴を空にする(純粋関数、入力は変更しない)
+ *
+ * streak / grace は学習履歴のリプレイから導出されるため、値を書き換えただけでは
+ * 次回の確定でリプレイ結果に上書きされてしまう。手動変更を確定値として残すために使う。
+ * この操作以降、畳み込んだ日より前の遡及免除はできなくなる(履歴が消えるため)。
+ *
+ * @param {object} state - ユーザーのストリーク状態
+ * @returns {object} 新しい状態
+ */
+function collapseHistory(state) {
+  return {
+    ...state,
+    history: {},
+    replayBase: {
+      streak: state.streak ?? 0,
+      grace: state.grace ?? GRACE_INITIAL,
+      date: state.lastConfirmedDate ?? null
+    }
   };
 }
 
@@ -246,7 +459,7 @@ function updateStreaks(streakUsers, users, dateString, options = {}) {
       return;
     }
 
-    const { state: confirmed, event } = confirmDay(current, dateString, studied);
+    const { state: confirmed, event } = confirmDayWithHistory(current, dateString, studied);
     const state = withCourse(confirmed, course);
     updated[user.userName] = state;
     results.push({ userName: user.userName, state, event });
@@ -322,6 +535,8 @@ function formatStreakInfo(result, options = {}) {
     lines.push(`💤 昨日はおたすけを使って連続記録を守りました(残り${state.grace})`);
   } else if (event === 'reset') {
     lines.push('😢 連続記録がリセットされました。今日からまた頑張ろう!');
+  } else if (event === 'exempt') {
+    lines.push('😌 免除日のため記録はそのままです');
   }
 
   return lines.join('\n');
@@ -345,7 +560,7 @@ async function loadStreakData() {
     const jsonData = JSON.parse(fileContent);
 
     const version = jsonData.version || '1.0';
-    if (!['1.0', '1.1', '1.2', '1.3'].includes(version)) {
+    if (!['1.0', '1.1', '1.2', '1.3', '1.4'].includes(version)) {
       return {
         success: false,
         error: `未知のストリークデータバージョン: ${version}`
@@ -357,10 +572,24 @@ async function loadStreakData() {
     // 〜1.2 → 1.3 移行: 全ユーザーのおたすけを満タン(3)にする一度きりのチャージ。
     // (v1.2の初回チャージは小学生ユーザーがファイル未登録の時点で発火したため再適用。
     //  旧1.0→1.1移行もこの移行に包含される)
-    // 次回保存で1.3になるため一度きりの適用(以降消費した分は再付与しない)
-    if (version !== '1.3') {
+    // 1.3以降のデータには適用しない(再チャージしてしまうため)
+    if (!['1.3', '1.4'].includes(version)) {
       Object.values(users).forEach(state => {
         state.grace = GRACE_MAX;
+      });
+    }
+
+    // 〜1.3 → 1.4 移行: 免除日機能のフィールドを補う。
+    // history は空から始まるため、移行より前の日は遡及免除できない(設計どおりの割り切り)
+    if (version !== '1.4') {
+      Object.values(users).forEach(state => {
+        state.exemptDates = state.exemptDates || [];
+        state.history = state.history || {};
+        state.replayBase = state.replayBase || {
+          streak: state.streak ?? 0,
+          grace: state.grace ?? GRACE_INITIAL,
+          date: state.lastConfirmedDate ?? null
+        };
       });
     }
 
@@ -391,7 +620,7 @@ async function saveStreakData(streakUsers) {
     await fs.mkdir(DATA_DIR, { recursive: true });
 
     const saveObject = {
-      version: '1.3',
+      version: '1.4',
       timestamp: new Date().toISOString(),
       users: streakUsers
     };
@@ -409,6 +638,13 @@ module.exports = {
   countCompletedMissions,
   countStudyItems,
   confirmDay,
+  confirmDayWithHistory,
+  shiftDate,
+  replayStreak,
+  pruneHistory,
+  collapseHistory,
+  HISTORY_RETENTION_DAYS,
+  GRACE_INITIAL,
   STREAK_REQUIREMENTS,
   getRequirementForCourse,
   updateStreaks,

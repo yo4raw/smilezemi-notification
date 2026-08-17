@@ -1121,6 +1121,47 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
+  describe('formatDetailedMessage() - 免除日', () => {
+    const user = { userName: 'たろう', studyItemCount: 0, missionCount: 0, missions: [], date: '2026-08-17' };
+
+    it('免除ユーザーには未達警告を出さない', () => {
+      const message = notifier.formatDetailedMessage([user], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        missionWarningStyle: 'today',
+        exemptUserNames: ['たろう']
+      });
+      assert.ok(!message.includes('あと'), `未達警告が出ている: ${message}`);
+    });
+
+    it('showExemptNotice が true ならおやすみ行を出す', () => {
+      const message = notifier.formatDetailedMessage([user], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        missionWarningStyle: 'today',
+        exemptUserNames: ['たろう'],
+        showExemptNotice: true
+      });
+      assert.ok(message.includes('🏝️ 今日はおやすみ（免除日）'), message);
+    });
+
+    it('showExemptNotice を省略するとおやすみ行は出ない(朝通知はストリーク行で伝える)', () => {
+      const message = notifier.formatDetailedMessage([user], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        exemptUserNames: ['たろう']
+      });
+      assert.ok(!message.includes('🏝️'), message);
+    });
+
+    it('免除ユーザー以外には従来どおり警告を出す', () => {
+      const others = [user, { ...user, userName: 'はなこ' }];
+      const message = notifier.formatDetailedMessage(others, null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        missionWarningStyle: 'today',
+        exemptUserNames: ['たろう']
+      });
+      assert.ok(message.includes('あと4件'), `はなこの警告が出ていない: ${message}`);
+    });
+  });
+
   describe('truncateToLimit() - 宛先別の文字数制限', () => {
     it('引数なしなら5000文字を上限として切り詰める', () => {
       const long = 'あ'.repeat(6000);
