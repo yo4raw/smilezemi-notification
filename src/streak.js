@@ -29,25 +29,9 @@ const MILESTONE_INTERVAL = 10;
 
 // ストリーク更新(カウント+1)に必要な完了数。変更時はここだけ書き換える
 const STREAK_REQUIREMENTS = {
-  elementaryMissions: 4,                        // 小学生コース: 完了ミッション数(夜通知が使用)
-  juniorHighCourses: { weekday: 3, weekend: 5 } // 中学生コース: 完了講座数(朝通知が使用)。祝日は曜日のみで判定
+  elementaryMissions: 4, // 小学生コース: 完了ミッション数(夜通知が使用)
+  juniorHighCourses: 3   // 中学生コース: 完了講座数(朝通知が使用)。曜日によらず一律
 };
-
-/**
- * 中学生コースの必要講座数を判定対象日の曜日から返す(純粋関数)
- * 土曜・日曜は weekend、月〜金曜は weekday。祝日は考慮しない(意図的な割り切り)
- *
- * @param {string} dateString - 判定対象日 (YYYY-MM-DD, JSTのカレンダー日付)
- * @returns {number} 必要講座数
- */
-function getJuniorHighRequirement(dateString) {
-  // YYYY-MM-DDをUTC深夜として解釈しgetUTCDay()で曜日を引くことで、実行環境のTZに依存しない
-  const dayOfWeek = new Date(`${dateString}T00:00:00Z`).getUTCDay();
-  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-  return isWeekend
-    ? STREAK_REQUIREMENTS.juniorHighCourses.weekend
-    : STREAK_REQUIREMENTS.juniorHighCourses.weekday;
-}
 
 /**
  * ストリーク状態の初期値を生成
@@ -274,12 +258,11 @@ function updateStreaks(streakUsers, users, dateString, options = {}) {
 /**
  * コースのしきい値(ストリーク成立に必要な完了数)を返す(純粋関数)
  * @param {'elementary'|'juniorHigh'|undefined} course
- * @param {string} dateString - 判定対象日 (YYYY-MM-DD)
  * @returns {number}
  */
-function getRequirementForCourse(course, dateString) {
+function getRequirementForCourse(course) {
   return course === 'juniorHigh'
-    ? getJuniorHighRequirement(dateString)
+    ? STREAK_REQUIREMENTS.juniorHighCourses
     : STREAK_REQUIREMENTS.elementaryMissions;
 }
 
@@ -300,7 +283,7 @@ function updateStreaksByCourse(streakUsers, users, dateString) {
     const courseUsers = users.filter(user => (user.course || 'elementary') === course);
     if (courseUsers.length === 0) continue;
 
-    const threshold = getRequirementForCourse(course, dateString);
+    const threshold = getRequirementForCourse(course);
     const updateResult = updateStreaks(current, courseUsers, dateString, {
       minCompletedMissions: threshold
     });
@@ -427,7 +410,6 @@ module.exports = {
   countStudyItems,
   confirmDay,
   STREAK_REQUIREMENTS,
-  getJuniorHighRequirement,
   getRequirementForCourse,
   updateStreaks,
   updateStreaksByCourse,

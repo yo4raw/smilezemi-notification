@@ -15,7 +15,6 @@ const {
   saveStreakData,
   updateStreaksByCourse,
   formatStreakInfo,
-  getJuniorHighRequirement,
   STREAK_REQUIREMENTS
 } = require('./streak');
 const fs = require('fs').promises;
@@ -174,7 +173,7 @@ async function main() {
       missionWarningStyle: 'past',
       missionWarningThresholds: {
         elementary: STREAK_REQUIREMENTS.elementaryMissions,
-        juniorHigh: getJuniorHighRequirement(targetDates.dateString)
+        juniorHigh: STREAK_REQUIREMENTS.juniorHighCourses
       }
     });
 

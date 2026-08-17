@@ -182,7 +182,7 @@ describe('オーケストレーション (src/index.js)', () => {
         isStudied: overrides.isStudied || (() => false),
         createInitialState: overrides.createInitialState || (() => ({ streak: 0, grace: 1, bonus: 0, lastConfirmedDate: null })),
         getRequirementForCourse: overrides.getRequirementForCourse || ((course) => course === 'juniorHigh' ? 3 : 4),
-        STREAK_REQUIREMENTS: overrides.STREAK_REQUIREMENTS || { elementaryMissions: 4, juniorHighCourses: { weekday: 3, weekend: 5 } }
+        STREAK_REQUIREMENTS: overrides.STREAK_REQUIREMENTS || { elementaryMissions: 4, juniorHighCourses: 3 }
       }
     };
 

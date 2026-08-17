@@ -19,7 +19,6 @@ const {
   loadStreakData,
   saveStreakData,
   STREAK_REQUIREMENTS,
-  getJuniorHighRequirement,
   getRequirementForCourse,
   updateStreaksByCourse
 } = require('../src/streak');
@@ -30,33 +29,7 @@ const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
 describe('STREAK_REQUIREMENTS', () => {
   it('コースごとの必要完了数が正の整数として集約定義されている', () => {
     assert.ok(Number.isInteger(STREAK_REQUIREMENTS.elementaryMissions) && STREAK_REQUIREMENTS.elementaryMissions > 0);
-    assert.ok(Number.isInteger(STREAK_REQUIREMENTS.juniorHighCourses.weekday) && STREAK_REQUIREMENTS.juniorHighCourses.weekday > 0);
-    assert.ok(Number.isInteger(STREAK_REQUIREMENTS.juniorHighCourses.weekend) && STREAK_REQUIREMENTS.juniorHighCourses.weekend > 0);
-  });
-});
-
-describe('getJuniorHighRequirement', () => {
-  it('平日(金曜)は weekday の講座数を返す', () => {
-    assert.strictEqual(getJuniorHighRequirement('2026-07-10'), STREAK_REQUIREMENTS.juniorHighCourses.weekday);
-  });
-
-  it('土曜は weekend の講座数を返す', () => {
-    assert.strictEqual(getJuniorHighRequirement('2026-07-11'), STREAK_REQUIREMENTS.juniorHighCourses.weekend);
-  });
-
-  it('日曜は weekend の講座数を返す', () => {
-    assert.strictEqual(getJuniorHighRequirement('2026-07-12'), STREAK_REQUIREMENTS.juniorHighCourses.weekend);
-  });
-
-  it('月曜は weekday の講座数を返す(週明け境界)', () => {
-    assert.strictEqual(getJuniorHighRequirement('2026-07-13'), STREAK_REQUIREMENTS.juniorHighCourses.weekday);
-  });
-
-  it('平日は3・土日は5である', () => {
-    assert.strictEqual(getJuniorHighRequirement('2026-07-10'), 3);
-    assert.strictEqual(getJuniorHighRequirement('2026-07-11'), 5);
-    assert.strictEqual(getJuniorHighRequirement('2026-07-12'), 5);
-    assert.strictEqual(getJuniorHighRequirement('2026-07-13'), 3);
+    assert.ok(Number.isInteger(STREAK_REQUIREMENTS.juniorHighCourses) && STREAK_REQUIREMENTS.juniorHighCourses > 0);
   });
 });
 
@@ -786,28 +759,21 @@ describe('formatStreakInfo', () => {
 describe('getRequirementForCourse', () => {
   it('elementary は elementaryMissions を返す', () => {
     assert.strictEqual(
-      getRequirementForCourse('elementary', '2026-07-13'),
+      getRequirementForCourse('elementary'),
       STREAK_REQUIREMENTS.elementaryMissions
     );
   });
 
-  it('juniorHigh は平日しきい値を返す(2026-07-13は月曜)', () => {
+  it('juniorHigh は juniorHighCourses を返す', () => {
     assert.strictEqual(
-      getRequirementForCourse('juniorHigh', '2026-07-13'),
-      STREAK_REQUIREMENTS.juniorHighCourses.weekday
-    );
-  });
-
-  it('juniorHigh は土日しきい値を返す(2026-07-11は土曜)', () => {
-    assert.strictEqual(
-      getRequirementForCourse('juniorHigh', '2026-07-11'),
-      STREAK_REQUIREMENTS.juniorHighCourses.weekend
+      getRequirementForCourse('juniorHigh'),
+      STREAK_REQUIREMENTS.juniorHighCourses
     );
   });
 
   it('未知/未設定コースは elementary 扱い', () => {
     assert.strictEqual(
-      getRequirementForCourse(undefined, '2026-07-13'),
+      getRequirementForCourse(undefined),
       STREAK_REQUIREMENTS.elementaryMissions
     );
   });
@@ -815,7 +781,7 @@ describe('getRequirementForCourse', () => {
 
 describe('updateStreaksByCourse', () => {
   it('コースごとに異なるしきい値で確定する', () => {
-    // 小学生: 4ミッションで学習成立 / 中学生(月曜): 3講座で学習成立
+    // 小学生: 4ミッションで学習成立 / 中学生: 3講座で学習成立
     const elemUser = { userName: '太郎 (小学生コース)', course: 'elementary', missionCount: 4, missions: [] };
     const jhUser = { userName: '花子 (中学生コース)', course: 'juniorHigh', missionCount: 3, missions: [] };
 
@@ -828,7 +794,14 @@ describe('updateStreaksByCourse', () => {
     assert.strictEqual(results.length, 2, '両コース分のresultが返る');
   });
 
-  it('中学生の平日しきい値未満(2講座)は学習不成立', () => {
+  it('土曜でも中学生は3講座で学習成立(曜日別しきい値を持たない)', () => {
+    // 2026-07-11 は土曜。曜日別しきい値時代は5講座必要だった日付
+    const jhUser = { userName: '花子', course: 'juniorHigh', missionCount: 3, missions: [] };
+    const { streakUsers } = updateStreaksByCourse({}, [jhUser], '2026-07-11');
+    assert.strictEqual(streakUsers['花子'].streak, 1, '土曜でも3講座で+1される');
+  });
+
+  it('中学生のしきい値未満(2講座)は学習不成立', () => {
     const jhUser = { userName: '花子 (中学生コース)', course: 'juniorHigh', missionCount: 2, missions: [] };
     const { streakUsers } = updateStreaksByCourse({}, [jhUser], '2026-07-13');
     assert.strictEqual(streakUsers['花子 (中学生コース)'].streak, 0, '2講座では+1されない');

@@ -6,7 +6,7 @@
 const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
-const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
+const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList } = require('./crawler');
 const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
 const { formatMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const { broadcastToAll, broadcastToDiscordOnly, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
@@ -245,10 +245,9 @@ async function main() {
     // 6.5 当日のストリーク要件の達成判定
     // 夜通知はストリーク・おたすけ・ボーナスを表示しない(翌朝の確定通知がカバーする)ため
     // streak_data.json は読まない。LINEに送るかどうかの判定にだけ達成状況を使う。
-    const todayDateString = getTargetDates(0).dateString;
     let hasUnqualifiedUser = false;
     currentData.forEach(user => {
-      const threshold = getRequirementForCourse(user.course, todayDateString);
+      const threshold = getRequirementForCourse(user.course);
       if (!isStudied(user, { minCompletedMissions: threshold })) {
         hasUnqualifiedUser = true;
       }
@@ -280,8 +279,8 @@ async function main() {
       showStudyTime: false,
       missionWarningStyle: 'today',
       missionWarningThresholds: {
-        elementary: getRequirementForCourse('elementary', todayDateString),
-        juniorHigh: getRequirementForCourse('juniorHigh', todayDateString)
+        elementary: getRequirementForCourse('elementary'),
+        juniorHigh: getRequirementForCourse('juniorHigh')
       }
     });
 
