@@ -152,6 +152,11 @@ async function main() {
       streaks[result.userName] = formatStreakInfo(result);
     });
 
+    // 免除日のユーザーには未達警告を出さない(ストリーク行が「記録はそのまま」と伝える)
+    const exemptUserNames = results
+      .filter(result => result.event === 'exempt')
+      .map(result => result.userName);
+
     // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
     if (process.env.DRY_RUN === 'true') {
       console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
@@ -174,7 +179,8 @@ async function main() {
       missionWarningThresholds: {
         elementary: STREAK_REQUIREMENTS.elementaryMissions,
         juniorHigh: STREAK_REQUIREMENTS.juniorHighCourses
-      }
+      },
+      exemptUserNames
     });
 
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信しない

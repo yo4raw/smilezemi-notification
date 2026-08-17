@@ -24,6 +24,9 @@ const MISSION_WARNING_STYLES = {
   past: remaining => `😢😢 あと${remaining}件たりなかった… 😢😢`
 };
 
+// 免除日(おやすみ)の告知行。夜通知だけが出す(朝はストリーク行が伝えるため)
+const EXEMPT_NOTICE = '🏝️ 今日はおやすみ（免除日）';
+
 /**
  * LINE通知を送信する
  *
@@ -308,6 +311,8 @@ function formatMessage(changes) {
  * @param {object} [options] - 表示オプション
  * @param {boolean} [options.showStudyTime=true] - 勉強時間行を表示するか(夜通知は false)
  * @param {'today'|'past'} [options.missionWarningStyle='past'] - 未達警告の文言(夜通知は 'today')
+ * @param {string[]} [options.exemptUserNames=null] - 免除日のユーザー名。未達警告を出さない
+ * @param {boolean} [options.showExemptNotice=false] - 免除ユーザーに「おやすみ」行を出すか(夜通知は true)
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
@@ -318,7 +323,9 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     streaks = null,
     missionWarningThreshold = null,
     missionWarningThresholds = null,
-    missionWarningStyle = 'past'
+    missionWarningStyle = 'past',
+    exemptUserNames = null,
+    showExemptNotice = false
   } = options;
 
   // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
@@ -392,11 +399,18 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
 
     // 完了数未達の警告。コース別しきい値(missionWarningThresholds)を優先し、
     // なければ単一の missionWarningThreshold を使う(後方互換)。
+    // 免除日(おやすみ)のユーザーには警告を出さない。
     const warnThreshold = missionWarningThresholds
       ? (isJuniorHigh ? missionWarningThresholds.juniorHigh : missionWarningThresholds.elementary)
       : missionWarningThreshold;
 
-    if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
+    const isExempt = Array.isArray(exemptUserNames) && exemptUserNames.includes(user.userName);
+
+    if (isExempt) {
+      if (showExemptNotice) {
+        message += `${EXEMPT_NOTICE}\n`;
+      }
+    } else if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
       const completedCount = countStudyItems(user);
       if (completedCount < warnThreshold) {
         const formatWarning = Object.hasOwn(MISSION_WARNING_STYLES, missionWarningStyle)

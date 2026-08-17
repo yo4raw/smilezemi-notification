@@ -117,7 +117,8 @@ describe('オーケストレーション (src/index.js)', () => {
       exports: {
         getAllUsersDetailedData: overrides.getAllUsersDetailedData || (async () => crawlDetailedResult),
         getAllUsersMissionCounts: overrides.getAllUsersMissionCounts || (async () => crawlBasicResult),
-        getUserList: overrides.getUserList || (async () => ({ success: true, users: [{ name: '太郎', index: 0 }] }))
+        getUserList: overrides.getUserList || (async () => ({ success: true, users: [{ name: '太郎', index: 0 }] })),
+        getTargetDates: overrides.getTargetDates || (() => ({ dateString: '2025-12-24', withPadding: '2025-12-24' }))
       }
     };
 
@@ -507,6 +508,60 @@ describe('オーケストレーション (src/index.js)', () => {
       );
     });
 
+    it('正常系: 免除日のユーザーは未達に数えずDiscordのみに送る', async () => {
+      setupMocks({
+        isStudied: () => false, // 全員がしきい値未達
+        loadStreakData: async () => ({
+          success: true,
+          data: { '太郎': { exemptDates: ['2025-12-24'] } } // getTargetDates モックと同じ日
+        })
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToAll').length, 0,
+        '免除日のユーザーしかいない日はLINE経路を使わないこと'
+      );
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToDiscordOnly').length, 1,
+        'Discordには記録として送ること'
+      );
+    });
+
+    it('正常系: 免除日でないユーザーが未達なら従来どおりLINEに送る', async () => {
+      setupMocks({
+        isStudied: () => false,
+        loadStreakData: async () => ({
+          success: true,
+          data: { '太郎': { exemptDates: ['2025-12-01'] } } // 当日ではない免除日
+        })
+      });
+
+      await mainModule.main();
+
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToAll').length, 1,
+        '免除日でない未達ユーザーがいればLINEに送ること'
+      );
+    });
+
+    it('正常系: ストリークデータを読めなくても免除なしとして通知を続ける', async () => {
+      setupMocks({
+        isStudied: () => false,
+        loadStreakData: async () => ({ success: false, error: '読み込み失敗' })
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.success, true, '通知処理は止めないこと');
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToAll').length, 1,
+        '免除なし扱いで従来どおり送ること'
+      );
+    });
+
     it('正常系: ドライラン+全員達成の日は送信もデータ保存も行わない', async () => {
       const originalDryRun = process.env.DRY_RUN;
       process.env.DRY_RUN = 'true';
@@ -694,7 +749,7 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.deepStrictEqual(detailedCalls[0], { courseFilter: null }, '両コース(null)で当日分を取得すること');
     });
 
-    it('夜通知はストリークデータを読まない(loadStreakDataが失敗しても成功する)', async () => {
+    it('夜通知はストリーク確定処理を行わない(loadStreakDataは免除日判定のためだけに読み、失敗しても続行する)', async () => {
       setupMocks({
         loadStreakData: async () => {
           callLog.push({ type: 'loadStreakData' });
@@ -707,10 +762,10 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.exitCode, 0, 'ストリーク読み込み失敗に影響されないこと');
 
       const loadStreakCalls = callLog.filter(c => c.type === 'loadStreakData');
-      assert.strictEqual(loadStreakCalls.length, 0, 'loadStreakDataが呼ばれないこと(呼ばれていれば失敗が伝搬するはず)');
+      assert.strictEqual(loadStreakCalls.length, 1, '免除日判定のためloadStreakDataは呼ばれること');
 
       const saveStreakCalls = callLog.filter(c => c.type === 'saveStreakData');
-      assert.strictEqual(saveStreakCalls.length, 0, '夜通知は保存しないこと');
+      assert.strictEqual(saveStreakCalls.length, 0, '夜通知は保存しないこと(確定処理はしない)');
 
       const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(pushCalls.length, 1, '通知は送信されること');
