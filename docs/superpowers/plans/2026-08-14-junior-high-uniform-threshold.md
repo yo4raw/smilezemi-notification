@@ -70,6 +70,8 @@ describe('STREAK_REQUIREMENTS', () => {
 });
 ```
 
+> 実行時の裁定（2026-08-14）: 2本目の `it('中学生コースは曜日によらず一律のしきい値である(数値であること)')` は実装しなかった。1本目の `Number.isInteger()` に包含される重複アサーションのため。曜日非依存の回帰担保は、同じ Step で `describe('updateStreaksByCourse')` に追加した土曜(2026-07-11)のテストが持つ。
+
 786-814行目の `describe('getRequirementForCourse')` を、日付引数なしの次の内容に置き換える(平日/土日の2テストは1本に統合する):
 
 ```javascript
