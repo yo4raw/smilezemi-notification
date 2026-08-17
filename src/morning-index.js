@@ -140,7 +140,7 @@ async function main() {
       previousStreakUsers = {};
     }
 
-    // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生は前日曜日で3or5)
+    // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生3)
     const { streakUsers, results } = updateStreaksByCourse(
       previousStreakUsers,
       crawlResult.data,
