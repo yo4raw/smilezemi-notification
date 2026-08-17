@@ -13,6 +13,7 @@ const {
   countCompletedMissions,
   countStudyItems,
   confirmDay,
+  confirmDayWithHistory,
   updateStreaks,
   formatStreakInfo,
   settleBonuses,
@@ -23,7 +24,8 @@ const {
   updateStreaksByCourse,
   shiftDate,
   replayStreak,
-  pruneHistory
+  pruneHistory,
+  GRACE_INITIAL
 } = require('../src/streak');
 
 const DATA_DIR = path.join(__dirname, '../data');
@@ -38,7 +40,15 @@ describe('STREAK_REQUIREMENTS', () => {
 
 describe('createInitialState', () => {
   it('初期おたすけは1(初回特典)、ボーナスは0', () => {
-    assert.deepStrictEqual(createInitialState(), { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: null });
+    assert.deepStrictEqual(createInitialState(), {
+      streak: 0,
+      grace: 1,
+      bonus: 0,
+      lastConfirmedDate: null,
+      exemptDates: [],
+      history: {},
+      replayBase: { streak: 0, grace: 1, date: null }
+    });
   });
 });
 
@@ -342,10 +352,10 @@ describe('loadStreakData / saveStreakData', () => {
     assert.deepStrictEqual(loadResult.data, users);
   });
 
-  it('保存ファイルに version(1.3) と ISO 8601 timestamp が含まれる', async () => {
+  it('保存ファイルに version(1.4) と ISO 8601 timestamp が含まれる', async () => {
     await saveStreakData({});
     const content = JSON.parse(await fs.readFile(STREAK_FILE, 'utf-8'));
-    assert.strictEqual(content.version, '1.3');
+    assert.strictEqual(content.version, '1.4');
     assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(content.timestamp));
   });
 
@@ -430,6 +440,41 @@ describe('loadStreakData / saveStreakData', () => {
     const result = await saveStreakData([]);
     assert.strictEqual(result.success, false);
   });
+
+  it('v1.3のデータを読むと免除日フィールドが補われる', async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(STREAK_FILE, JSON.stringify({
+      version: '1.3',
+      timestamp: '2026-08-16T00:00:00.000Z',
+      users: { 'たろう': { streak: 7, grace: 2, bonus: 3, lastConfirmedDate: '2026-08-16' } }
+    }), 'utf-8');
+
+    const result = await loadStreakData();
+    assert.strictEqual(result.success, true);
+    const state = result.data['たろう'];
+    assert.deepStrictEqual(state.exemptDates, []);
+    assert.deepStrictEqual(state.history, {});
+    assert.strictEqual(state.replayBase.streak, 7, '現在値がチェックポイントになる');
+    assert.strictEqual(state.replayBase.grace, 2);
+    assert.strictEqual(state.replayBase.date, '2026-08-16');
+  });
+
+  it('v1.4のデータではおたすけを再チャージしない', async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(STREAK_FILE, JSON.stringify({
+      version: '1.4',
+      timestamp: '2026-08-16T00:00:00.000Z',
+      users: {
+        'たろう': {
+          streak: 7, grace: 1, bonus: 0, lastConfirmedDate: '2026-08-16',
+          exemptDates: [], history: {}, replayBase: { streak: 7, grace: 1, date: '2026-08-16' }
+        }
+      }
+    }), 'utf-8');
+
+    const result = await loadStreakData();
+    assert.strictEqual(result.data['たろう'].grace, 1, '既に1.4なら移行は走らない');
+  });
 });
 
 describe('updateStreaks', () => {
@@ -453,7 +498,10 @@ describe('updateStreaks', () => {
 
   it('既存の状態から更新される', () => {
     const initial = {
-      'たろう (中学生コース)': { streak: 9, grace: 0, lastConfirmedDate: '2026-07-11' }
+      'たろう (中学生コース)': {
+        streak: 9, grace: 0, bonus: 0, lastConfirmedDate: '2026-07-11',
+        exemptDates: [], history: {}, replayBase: { streak: 9, grace: 0, date: '2026-07-11' }
+      }
     };
     const { streakUsers, results } = updateStreaks(initial, [studiedUser], '2026-07-12');
     assert.strictEqual(streakUsers['たろう (中学生コース)'].streak, 10);
@@ -515,7 +563,15 @@ describe('updateStreaks', () => {
 
     assert.deepStrictEqual(
       streakUsers['じろう (小学生コース)'],
-      { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' },
+      {
+        streak: 0,
+        grace: 1,
+        bonus: 0,
+        lastConfirmedDate: '2026-07-12',
+        exemptDates: [],
+        history: { '2026-07-12': false },
+        replayBase: { streak: 0, grace: 1, date: null }
+      },
       '新規ユーザーはおたすけ1のまま(streak 0では消費しない)日付だけ確定されること'
     );
   });
@@ -525,13 +581,24 @@ describe('updateStreaks', () => {
 
     assert.deepStrictEqual(
       streakUsers['たろう (中学生コース)'],
-      { streak: 1, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
+      {
+        streak: 1,
+        grace: 1,
+        bonus: 0,
+        lastConfirmedDate: '2026-07-12',
+        exemptDates: [],
+        history: { '2026-07-12': true },
+        replayBase: { streak: 0, grace: 1, date: null }
+      }
     );
   });
 
   it('minCompletedMissions オプションが判定に伝搬する(完了4個は未学習扱いでおたすけ消費)', () => {
     const initial = {
-      'じろう (小学生コース)': { streak: 7, grace: 1, lastConfirmedDate: '2026-07-11' }
+      'じろう (小学生コース)': {
+        streak: 7, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-11',
+        exemptDates: [], history: {}, replayBase: { streak: 7, grace: 1, date: '2026-07-11' }
+      }
     };
     const fourMissionsUser = {
       userName: 'じろう (小学生コース)',
@@ -653,7 +720,10 @@ describe('updateStreaks - コース種別の保存', () => {
 
   it('user.course が未指定なら既存の course を保持する', () => {
     const initial = {
-      'たろう': { streak: 5, grace: 1, bonus: 0, course: 'juniorHigh', lastConfirmedDate: '2026-07-11' }
+      'たろう': {
+        streak: 5, grace: 1, bonus: 0, course: 'juniorHigh', lastConfirmedDate: '2026-07-11',
+        exemptDates: [], history: {}, replayBase: { streak: 5, grace: 1, date: '2026-07-11' }
+      }
     };
     const noCourseUser = {
       userName: 'たろう',
@@ -679,7 +749,10 @@ describe('updateStreaks - コース種別の保存', () => {
 
   it('同日再実行でも course は保存される(冪等な確定スキップ経路)', () => {
     const initial = {
-      'はなこ': { streak: 3, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
+      'はなこ': {
+        streak: 3, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12',
+        exemptDates: [], history: { '2026-07-12': true }, replayBase: { streak: 0, grace: 1, date: null }
+      }
     };
     const { streakUsers } = updateStreaks(initial, [studiedElementaryUser], '2026-07-12');
 
@@ -1039,5 +1112,96 @@ describe('pruneHistory()', () => {
     assert.strictEqual(after.streak, before.streak);
     assert.strictEqual(after.grace, before.grace);
     assert.strictEqual(after.lastConfirmedDate, before.lastConfirmedDate);
+  });
+});
+
+describe('createInitialState() - 免除日フィールド', () => {
+  it('免除日・履歴・チェックポイントが初期化される', () => {
+    const state = createInitialState();
+    assert.deepStrictEqual(state.exemptDates, []);
+    assert.deepStrictEqual(state.history, {});
+    assert.strictEqual(state.replayBase.date, null);
+    assert.strictEqual(state.replayBase.streak, 0);
+  });
+});
+
+describe('confirmDayWithHistory()', () => {
+  it('履歴に追記してリプレイ結果を返す', () => {
+    const state = createInitialState();
+    const { state: next, event } = confirmDayWithHistory(state, '2026-08-01', true);
+    assert.strictEqual(next.streak, 1);
+    assert.strictEqual(next.history['2026-08-01'], true);
+    assert.strictEqual(next.lastConfirmedDate, '2026-08-01');
+    assert.strictEqual(event, 'none');
+  });
+
+  it('同じ日を2回確定しても値が動かない(冪等)', () => {
+    const first = confirmDayWithHistory(createInitialState(), '2026-08-01', true).state;
+    const second = confirmDayWithHistory(first, '2026-08-01', true);
+    assert.strictEqual(second.state.streak, 1, '二重加算されない');
+    assert.strictEqual(second.event, 'none');
+  });
+
+  it('免除日は未学習でも記録が守られる', () => {
+    let state = confirmDayWithHistory(createInitialState(), '2026-08-01', true).state;
+    state = { ...state, exemptDates: ['2026-08-02'] };
+    const { state: next, event } = confirmDayWithHistory(state, '2026-08-02', false);
+    assert.strictEqual(event, 'exempt');
+    assert.strictEqual(next.streak, 1, 'streak は据え置き');
+    assert.strictEqual(next.grace, GRACE_INITIAL, 'おたすけも据え置き');
+  });
+
+  it('イベントが bonus の日だけボーナスが増える', () => {
+    // おたすけ満タンで学習するとボーナス+1
+    const state = {
+      ...createInitialState(),
+      grace: 3,
+      replayBase: { streak: 0, grace: 3, date: null }
+    };
+    const { state: next, event } = confirmDayWithHistory(state, '2026-08-01', true);
+    assert.strictEqual(event, 'bonus');
+    assert.strictEqual(next.bonus, 1);
+  });
+
+  it('入力の状態を破壊しない', () => {
+    const state = createInitialState();
+    confirmDayWithHistory(state, '2026-08-01', true);
+    assert.deepStrictEqual(state.history, {}, '入力の history は空のまま');
+  });
+});
+
+describe('updateStreaks() - 遡及免除の反映', () => {
+  it('確定済みの日を後から免除するとリプレイで修復される', () => {
+    const users = [{ userName: 'たろう', studyItemCount: 0, missions: [] }];
+
+    // 1日目は学習、2日目は未学習でおたすけを消費
+    let streakUsers = updateStreaks(
+      {}, [{ userName: 'たろう', studyItemCount: 4, missions: [] }], '2026-08-01',
+      { minCompletedMissions: 4 }
+    ).streakUsers;
+    streakUsers = updateStreaks(streakUsers, users, '2026-08-02', { minCompletedMissions: 4 }).streakUsers;
+    assert.strictEqual(streakUsers['たろう'].grace, GRACE_INITIAL - 1, 'おたすけが1減っている');
+
+    // 2日目を免除に指定してリプレイすると戻る
+    const repaired = { ...streakUsers['たろう'], exemptDates: ['2026-08-02'] };
+    const replayed = replayStreak(repaired.replayBase, repaired.history, repaired.exemptDates);
+    assert.strictEqual(replayed.grace, GRACE_INITIAL, 'おたすけが復活する');
+    assert.strictEqual(replayed.streak, 1, 'streak は維持される');
+  });
+
+  it('dataReliable: false の未学習日は履歴に入らない', () => {
+    const users = [{ userName: 'たろう', studyItemCount: 0, missions: [], dataReliable: false }];
+    const { streakUsers } = updateStreaks({}, users, '2026-08-01', { minCompletedMissions: 4 });
+    assert.deepStrictEqual(streakUsers['たろう'].history, {}, '確定していない日は記録しない');
+  });
+});
+
+describe('formatStreakInfo() - 免除日', () => {
+  it('exempt イベントの行を出す', () => {
+    const text = formatStreakInfo({
+      state: { streak: 12, grace: 2, bonus: 0 },
+      event: 'exempt'
+    });
+    assert.ok(text.includes('😌 免除日のため記録はそのままです'), text);
   });
 });
