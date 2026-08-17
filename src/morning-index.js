@@ -15,7 +15,6 @@ const {
   saveStreakData,
   updateStreaksByCourse,
   formatStreakInfo,
-  getJuniorHighRequirement,
   STREAK_REQUIREMENTS
 } = require('./streak');
 const fs = require('fs').promises;
@@ -141,7 +140,7 @@ async function main() {
       previousStreakUsers = {};
     }
 
-    // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生は前日曜日で3or5)
+    // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生3)
     const { streakUsers, results } = updateStreaksByCourse(
       previousStreakUsers,
       crawlResult.data,
@@ -174,7 +173,7 @@ async function main() {
       missionWarningStyle: 'past',
       missionWarningThresholds: {
         elementary: STREAK_REQUIREMENTS.elementaryMissions,
-        juniorHigh: getJuniorHighRequirement(targetDates.dateString)
+        juniorHigh: STREAK_REQUIREMENTS.juniorHighCourses
       }
     });
 

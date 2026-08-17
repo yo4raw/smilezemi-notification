@@ -117,8 +117,7 @@ describe('オーケストレーション (src/index.js)', () => {
       exports: {
         getAllUsersDetailedData: overrides.getAllUsersDetailedData || (async () => crawlDetailedResult),
         getAllUsersMissionCounts: overrides.getAllUsersMissionCounts || (async () => crawlBasicResult),
-        getUserList: overrides.getUserList || (async () => ({ success: true, users: [{ name: '太郎', index: 0 }] })),
-        getTargetDates: overrides.getTargetDates || (() => ({ dateString: '2025-12-24', withPadding: '2025-12-24' }))
+        getUserList: overrides.getUserList || (async () => ({ success: true, users: [{ name: '太郎', index: 0 }] }))
       }
     };
 
@@ -182,7 +181,7 @@ describe('オーケストレーション (src/index.js)', () => {
         isStudied: overrides.isStudied || (() => false),
         createInitialState: overrides.createInitialState || (() => ({ streak: 0, grace: 1, bonus: 0, lastConfirmedDate: null })),
         getRequirementForCourse: overrides.getRequirementForCourse || ((course) => course === 'juniorHigh' ? 3 : 4),
-        STREAK_REQUIREMENTS: overrides.STREAK_REQUIREMENTS || { elementaryMissions: 4, juniorHighCourses: { weekday: 3, weekend: 5 } }
+        STREAK_REQUIREMENTS: overrides.STREAK_REQUIREMENTS || { elementaryMissions: 4, juniorHighCourses: 3 }
       }
     };
 
