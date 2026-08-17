@@ -64,6 +64,29 @@ describe('validateInput()', () => {
       /add/
     );
   });
+
+  it('カレンダー上存在しない日付は拒否する', () => {
+    assert.throws(
+      () => validateInput({ user: 'たろう', from: '2026-09-31', action: 'add' }),
+      /実在する日付/
+    );
+    assert.throws(
+      () => validateInput({ user: 'たろう', from: '2026-02-30', action: 'add' }),
+      /実在する日付/
+    );
+  });
+
+  it('存在しない月も読めるメッセージで拒否する', () => {
+    assert.throws(
+      () => validateInput({ user: 'たろう', from: '2026-13-01', action: 'add' }),
+      /実在する日付/
+    );
+  });
+
+  it('うるう年の2月29日は受理する', () => {
+    const input = validateInput({ user: 'たろう', from: '2028-02-29', action: 'add' });
+    assert.strictEqual(input.from, '2028-02-29');
+  });
 });
 
 describe('expandDateRange()', () => {

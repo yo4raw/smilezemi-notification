@@ -57,7 +57,7 @@
 
 - **実際に確定判定した日だけ**を持つ。`dataReliable: false` でスキップした日は記録しないため、現行の「未判定の空白日は中立扱い（ペナルティなし）」がそのまま保たれる
 - 値は「その日に学習が成立したか」（`isStudied()` の結果）であって、完了件数ではない。しきい値が将来変わっても過去の判定結果は動かない
-- 保持期間は **90日**。溢れた古い日は `replayBase` に畳み込む（後述のプルーニング）
+- 保持期間は「最新の判定日から90日より前」を `replayBase` に畳み込む基準で管理する（境界日を含むため実際に残る幅は91日ぶん）。詳細は後述のプルーニング
 
 ### replayBase の性質
 
@@ -129,6 +129,8 @@ replayStreak(replayBase, history, exemptDates)
 
 この判断により、`src/monthly-bonus-index.js`・`scripts/set-streak-field.js`・`smilezemi-set-bonus` スキルには変更が入らない。
 
+一方で `streak` / `grace` は導出値になるため、`scripts/set-streak-field.js` による手動変更は `collapseHistory()` で現在値をチェックポイントに畳み込んでから保存する。畳み込んだ時点より前の日は遡及免除できなくなるが、手動変更を確定値として残すにはこれが必要である。`bonus` は導出値ではないため畳み込み不要。
+
 ## 移行（v1.3 → v1.4）
 
 読み込み時に、v1.4 未満のデータへ次を適用する。
@@ -140,6 +142,8 @@ replayStreak(replayBase, history, exemptDates)
 つまり**移行より前の日は遡及できない**。遡れるのは本機能を投入した日以降に確定した日だけであり、この制約は運用スキルの説明にも明記する。
 
 `loadStreakData()` の許可バージョン一覧に `'1.4'` を足し、`saveStreakData()` は常に `'1.4'` で書き出す。既存の 1.3 未満向けのおたすけチャージ移行は現状のまま残す。
+
+**ロールバックの注意:** v1.4 で保存した後にこの変更より前のコードへ戻すと、旧 `loadStreakData()` の許可バージョンに `1.4` が無いため読み込みが失敗する。朝通知は読み込み失敗を回復可能として空状態で続行し**そのまま保存する**ため、全ユーザーのストリークが 0 になってキャッシュに焼き付く。コードだけを戻すのは安全ではない。戻す場合はキャッシュも同時に巻き戻すか、旧コードの許可バージョン一覧に一時的に `'1.4'` を足すこと。
 
 ## 運用経路
 
@@ -220,7 +224,6 @@ node scripts/set-exempt-dates.js --all --from 2026-08-20 --to 2026-08-22 --actio
 
 - ストリークのしきい値（小学生4件 / 中学生3件）と `isStudied` の判定ロジック
 - 月次ボーナス清算（`src/monthly-bonus-index.js`）とコース別単価
-- 既存の `smilezemi-set-grace` / `smilezemi-set-streak` / `smilezemi-set-bonus` スキルと `scripts/set-streak-field.js`
 - 通知の送信経路（LINE / Discord）とその失敗時の扱い
 - クローリング処理（`src/crawler.js`）と DOM セレクタ
 

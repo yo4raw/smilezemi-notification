@@ -367,6 +367,28 @@ function pruneHistory(state, retentionDays = HISTORY_RETENTION_DAYS) {
 }
 
 /**
+ * 現在の streak / grace をチェックポイントに畳み込み、学習履歴を空にする(純粋関数、入力は変更しない)
+ *
+ * streak / grace は学習履歴のリプレイから導出されるため、値を書き換えただけでは
+ * 次回の確定でリプレイ結果に上書きされてしまう。手動変更を確定値として残すために使う。
+ * この操作以降、畳み込んだ日より前の遡及免除はできなくなる(履歴が消えるため)。
+ *
+ * @param {object} state - ユーザーのストリーク状態
+ * @returns {object} 新しい状態
+ */
+function collapseHistory(state) {
+  return {
+    ...state,
+    history: {},
+    replayBase: {
+      streak: state.streak ?? 0,
+      grace: state.grace ?? GRACE_INITIAL,
+      date: state.lastConfirmedDate ?? null
+    }
+  };
+}
+
+/**
  * 月次清算: 全ユーザーのボーナスを0にした新しいマップと清算リストを返す(純粋関数)
  *
  * @param {object} streakUsers - userName → state のマップ
@@ -620,6 +642,7 @@ module.exports = {
   shiftDate,
   replayStreak,
   pruneHistory,
+  collapseHistory,
   HISTORY_RETENTION_DAYS,
   GRACE_INITIAL,
   STREAK_REQUIREMENTS,

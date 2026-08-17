@@ -450,6 +450,28 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.match(sentMessage, /テスト詳細メッセージ/, '本文が保持されること');
     });
 
+    it('正常系: 免除ユーザーがいる日のDiscord本文は「全員が達成した」と主張しない', async () => {
+      setupMocks({
+        // 唯一のクロール対象ユーザー(太郎)が当日免除日 → 未達判定から除外され discordOnly になる
+        loadStreakData: async () => ({
+          success: true,
+          data: { '太郎': { exemptDates: ['2025-12-24'] } }
+        }),
+        formatDetailedMessage: () => 'テスト詳細メッセージ'
+      });
+
+      await mainModule.main();
+
+      const [sentMessage] = callLog.find(c => c.type === 'broadcastToDiscordOnly').args;
+      assert.doesNotMatch(
+        sentMessage,
+        /全員が本日のストリーク要件を達成した/,
+        '免除ユーザーがいる日に「全員達成」と読める文言を出さないこと'
+      );
+      assert.match(sentMessage, /おやすみ登録/, '免除があったことが分かる文言を出すこと');
+      assert.match(sentMessage, /テスト詳細メッセージ/, '本文が保持されること');
+    });
+
     it('異常系: 全員達成の日にDiscord送信が失敗したら終了コード1になる', async () => {
       setupMocks({
         isStudied: () => true,

@@ -22,6 +22,9 @@ const path = require('path');
  */
 const DISCORD_ONLY_NOTICE = 'ℹ️ 全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します(送信数節約)';
 
+// 免除日のユーザーがいる日は「全員達成」ではないため、断り行を切り替える
+const DISCORD_ONLY_NOTICE_EXEMPT = 'ℹ️ おやすみ登録のユーザーがいて、それ以外の人は本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します(送信数節約)';
+
 /**
  * メイン実行関数
  *
@@ -315,7 +318,8 @@ async function main() {
     // 確定通知は翌朝の朝通知が毎日必ず送る。
     // 詳細: docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
     const discordOnly = !hasUnqualifiedUser;
-    const outgoingMessage = discordOnly ? `${DISCORD_ONLY_NOTICE}\n\n${message}` : message;
+    const discordOnlyNotice = exemptUserNames.length > 0 ? DISCORD_ONLY_NOTICE_EXEMPT : DISCORD_ONLY_NOTICE;
+    const outgoingMessage = discordOnly ? `${discordOnlyNotice}\n\n${message}` : message;
 
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない
     if (process.env.DRY_RUN === 'true') {

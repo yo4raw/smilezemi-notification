@@ -25,6 +25,7 @@ const {
   shiftDate,
   replayStreak,
   pruneHistory,
+  collapseHistory,
   GRACE_INITIAL
 } = require('../src/streak');
 
@@ -1112,6 +1113,48 @@ describe('pruneHistory()', () => {
     assert.strictEqual(after.streak, before.streak);
     assert.strictEqual(after.grace, before.grace);
     assert.strictEqual(after.lastConfirmedDate, before.lastConfirmedDate);
+  });
+});
+
+describe('collapseHistory()', () => {
+  it('現在値をチェックポイントに移して履歴を空にする', () => {
+    const state = {
+      streak: 7, grace: 2, bonus: 3, lastConfirmedDate: '2026-08-16',
+      exemptDates: ['2026-08-10'],
+      history: { '2026-08-15': true, '2026-08-16': true },
+      replayBase: { streak: 0, grace: 1, date: null }
+    };
+    const collapsed = collapseHistory(state);
+
+    assert.deepStrictEqual(collapsed.history, {}, '履歴は空になる');
+    assert.deepStrictEqual(collapsed.replayBase, { streak: 7, grace: 2, date: '2026-08-16' });
+    assert.strictEqual(collapsed.bonus, 3, 'ボーナスは触らない');
+    assert.deepStrictEqual(collapsed.exemptDates, ['2026-08-10'], '免除日は残る');
+    assert.deepStrictEqual(state.history, { '2026-08-15': true, '2026-08-16': true }, '入力を破壊しない');
+  });
+
+  it('畳み込んだ値は次の確定でも維持される(手動変更が巻き戻らない)', () => {
+    // 8/15 学習 → 8/16 学習 で streak 2 / grace 1 になった状態
+    let state = confirmDayWithHistory(createInitialState(), '2026-08-15', true).state;
+    state = confirmDayWithHistory(state, '2026-08-16', true).state;
+    assert.strictEqual(state.streak, 2);
+
+    // grace を手動で 3 にする → 畳み込まないと次の確定でリプレイに戻される
+    const adjusted = collapseHistory({ ...state, grace: 3 });
+    const next = confirmDayWithHistory(adjusted, '2026-08-17', true).state;
+
+    assert.strictEqual(next.grace, 3, '手動変更した grace が維持される');
+    assert.strictEqual(next.streak, 3, '連続日数は通常どおり加算される');
+  });
+
+  it('畳み込まないと手動変更は次の確定で失われる(回帰の証拠)', () => {
+    let state = confirmDayWithHistory(createInitialState(), '2026-08-15', true).state;
+    state = confirmDayWithHistory(state, '2026-08-16', true).state;
+
+    const notCollapsed = { ...state, grace: 3 };
+    const next = confirmDayWithHistory(notCollapsed, '2026-08-17', true).state;
+
+    assert.notStrictEqual(next.grace, 3, '畳み込まない場合はリプレイ結果に戻る');
   });
 });
 

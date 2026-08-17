@@ -49,6 +49,27 @@ function parseArgs(argv) {
 }
 
 /**
+ * カレンダー上存在する日付かを検証する。存在しなければ例外を投げる。
+ *
+ * shiftDate は内部で Date に通すため、2026-09-31 のような日付は 2026-10-01 に
+ * 正規化されて戻る。往復して一致しなければ実在しない日付と判定できる。
+ *
+ * @param {string} label - エラーメッセージ用のフラグ名(from / to)
+ * @param {string} value - YYYY-MM-DD
+ */
+function assertCalendarDate(label, value) {
+  let normalized;
+  try {
+    normalized = shiftDate(value, 0);
+  } catch {
+    normalized = null;
+  }
+  if (normalized !== value) {
+    throw new Error(`--${label} は実在する日付を指定してください(指定値: ${value})`);
+  }
+}
+
+/**
  * 入力を検証し、正常なら {user, all, from, to, action, dryRun} を返す。
  * 不正なら message 付きで例外を投げる(呼び出し側で終了コード1にする)。
  */
@@ -67,9 +88,11 @@ function validateInput(args) {
   if (typeof from !== 'string' || !DATE_PATTERN.test(from)) {
     throw new Error(`--from は YYYY-MM-DD 形式で指定してください(指定値: ${from})`);
   }
+  assertCalendarDate('from', from);
   if (typeof to !== 'string' || !DATE_PATTERN.test(to)) {
     throw new Error(`--to は YYYY-MM-DD 形式で指定してください(指定値: ${to})`);
   }
+  assertCalendarDate('to', to);
   if (from > to) {
     throw new Error(`開始日は終了日以前にしてください(--from ${from} / --to ${to})`);
   }
@@ -239,4 +262,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { parseArgs, validateInput, expandDateRange, applyExemptChange, findUnrepairableDates };
+module.exports = { parseArgs, validateInput, expandDateRange, applyExemptChange, findUnrepairableDates, assertCalendarDate };
