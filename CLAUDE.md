@@ -19,7 +19,7 @@ GitHub Actions (cron) → actions/cacheでdata/復元 → Docker → Playwright 
 
 ### Three Entry Points
 
-1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。両コース(小学生・中学生)の当日分を速報通知。ストリーク・おたすけ・ボーナス・勉強時間は表示せず(翌朝の確定通知がカバーする)、`streak_data.json` も読まない。**LINE送信数節約のため、当日のストリーク要件未達のユーザーが1人でもいる日だけLINEに送信**（全員達成日はLINEに送らず、断り行を付けてDiscordのみに記録する）
+1. **日次通知** (`src/index.js`): 毎日 JST 20:00 に実行。両コース(小学生・中学生)の当日分を速報通知。ストリーク・おたすけ・ボーナス・勉強時間は表示せず(翌朝の確定通知がカバーする)、`streak_data.json` は免除日の判定にだけ読む。**LINE送信数節約のため、当日のストリーク要件未達のユーザーが1人でもいる日だけLINEに送信**（全員達成日はLINEに送らず、断り行を付けてDiscordのみに記録する）
 2. **朝通知** (`src/morning-index.js`): 毎日 JST 7:00 に実行。両コース(小学生・中学生)の前日確定分を通知。前日は確定データのためストリークを確定する(唯一の確定点)
 3. **月次ボーナス清算** (`src/monthly-bonus-index.js`): 毎月1日 JST 8:00 に実行。前月分のボーナスポイントを子供ごとに通知して0にリセット。クロール不要のためブラウザを起動しない
 
@@ -42,11 +42,12 @@ GitHub Actions はクリーンな checkout から始まるため、`data/` デ�
 
 ### ストリーク（連続学習日数）機能
 
-`src/streak.js` + `data/streak_data.json`。仕様詳細は `docs/superpowers/specs/2026-07-13-streak-notification-design.md`。**ストリーク確定は朝通知が両コースまとめて前日分で行う(唯一の確定点)。夜通知は速報で、ストリーク値を一切表示しない(当日の要件達成判定だけをLINE送信可否に使う)。**
+`src/streak.js` + `data/streak_data.json`。仕様詳細は `docs/superpowers/specs/2026-07-13-streak-notification-design.md`。**ストリーク確定は朝通知が両コースまとめて前日分で行う(唯一の確定点)。夜通知は速報で、ストリーク値を一切表示しない(当日の要件達成判定だけをLINE送信可否に使う)。夜通知も `streak_data.json` は読むが、免除日(`exemptDates`)を見るためだけで、確定も表示もしない。**
 
 - 学習判定は完了数のみで行う（勉強時間は見ない）: **小学生コースは学習4件以上、中学生コースは3件以上の完了講座**が必須。小学生コースの「学習件数」にはミッションとして配信された講座に加え、**子どもが自主的に取り組んだ講座（ミッションバッジのない行）も含む**。スターアプリはゲーム性が強いため学習に含めない。閾値は `STREAK_REQUIREMENTS`（`src/streak.js`）に集約されており、変更時はここだけ書き換える。学習した日は `streak += 1`、連続10日ごとに「おたすけ」+1（上限3）。**おたすけ満タン(3)中は学習した日ごとに毎日「ボーナスポイント」+1**（満タン中はマイルストーン判定なし。`bonus`フィールド。リセットでも消えず、毎月1日の月次清算通知で0にリセットしてお小遣いとして支給）。月次清算通知ではコース別単価（小学生コース 1P=¥30 / 中学生コース 1P=¥50）で金額に換算し、各ユーザーの金額と全員分の合計を表示する。単価は `src/monthly-bonus-index.js` の `BONUS_POINT_YEN` に集約されており、変更時はここだけ書き換える。コースの判定は `streak_data.json` の `course` フィールド（朝通知の確定処理が保存する）で行い、未設定・未知の値は小学生コース扱いにする。詳細: `docs/superpowers/specs/2026-08-03-monthly-bonus-course-rate-design.md`。**初期おたすけは1**（初回特典。`streak_data.json` v1.0→v1.1移行で既存ユーザーも最低1に引き上げ）。streak 0 のときは消費せず、リセット後は0から再スタート
 - 夜・朝通知とも完了数未達のユーザーに警告行を表示する。しきい値は `missionWarningThresholds`、文言は `missionWarningStyle`（夜=`today`「🚨🚨 あと◯件! がんばろう! 🚨🚨」/ 朝=`past`「😢😢 あと◯件たりなかった… 😢😢」）で切り替える。残り件数だけを出すためコース別の表記差はない。`dataReliable: false` のユーザーと、朝通知で完全未学習（「昨日は学習していません」表示）の日には出さない。`dataReliable: false` のユーザーには代わりに `⚠️ データを取得できませんでした` の1行を出す（学習件数0件との区別がつかなくなるのを防ぐため）
 - 未学習日はおたすけを自動消費してストリーク維持（+1しない）。尽きたらストリーク・おたすけとも0にリセット
+- **免除日（おやすみ）**: `exemptDates` に登録した日は未学習でもストリークをリセットせず、おたすけも消費しない（イベント `exempt`）。免除日に学習していれば通常どおり加算される。`streak`・`grace` は各ユーザーの学習履歴（`history`: 判定対象日→学習が成立したか、保持90日）を `replayStreak()` でリプレイして導出するため、**過去日付を後から免除に指定すると確定済みの判定が巻き戻って修復される**。`bonus` はリプレイ対象外（支給済みの現金のため）。履歴より古い日（90日超・機能導入前）は修復できず、その場合は streak/grace の手動変更スキルを使う。詳細: `docs/superpowers/specs/2026-08-17-study-exemption-design.md`
 - **前日分を翌日に確定判定**（20時以降の学習も翌日に正しく反映）
 - `lastConfirmedDate` で同日再実行は冪等。未判定の空白日は中立扱い（ペナルティなし）
 - クローラーの詳細取得が失敗したユーザーは `dataReliable: false` が付き、未学習に見えても確定判定をスキップ（誤リセット防止）
@@ -71,19 +72,20 @@ src/
 └── broadcast.js              # 送信層 (broadcastToAll: 常に両方 / broadcastToDiscordOnly: Discordのみ / getDiscordFailure: Discord失敗の抽出)
 
 tests/                        # Node.js built-in test runner (node --test)
-scripts/                      # validate-env.js, validate-security.sh, test-docker.sh 等
+scripts/                      # validate-env.js, validate-security.sh, test-docker.sh, set-exempt-dates.js 等
 
 .github/workflows/
 ├── crawler.yml               # 日次クローリング・両コース (UTC 06:17起動→JST 20:00まで待機) + data/キャッシュ
 ├── morning-crawler.yml       # 朝通知・両コース (UTC 17:47起動→JST 7:00まで待機) + data/キャッシュ
 ├── monthly-bonus.yml         # 月次ボーナス清算 (月末候補日起動 + JST1日ガード → JST 8:00)
 ├── show-streak-data.yml      # 手動: ストリークデータ現在値の表示 (読み取り専用, workflow_dispatch)
-└── adjust-streak-field.yml   # 手動: grace/streak/bonusを絶対値で変更しキャッシュ保存 (workflow_dispatch)
+├── adjust-streak-field.yml   # 手動: grace/streak/bonusを絶対値で変更しキャッシュ保存 (workflow_dispatch)
+└── exempt-days.yml           # 手動: 免除日(おやすみ)の登録・取り消し (workflow_dispatch)
 ```
 
 ### ストリーク値の手動変更 (運用スキル)
 
-grace(おたすけ)・streak(連続日数)・bonus は本番では actions/cache 内にのみ存在するため、手動変更は `adjust-streak-field.yml` (workflow_dispatch) で行う: キャッシュ復元 → `scripts/set-streak-field.js` で1ユーザーの1フィールドを絶対値設定 → 新run_idキーで保存 → 次回スケジュール実行で反映。検証(フィールド種別・範囲・既存ユーザーのみ)はスクリプトに集約。現在値確認は読み取り専用の `show-streak-data.yml` / `scripts/show-streak-data.js`。フィールドごとに `.claude/skills/smilezemi-set-{grace,streak,bonus}` の3スキルへ分離し、各スキルは自分のfieldのみ渡して誤操作を防ぐ。
+grace(おたすけ)・streak(連続日数)・bonus は本番では actions/cache 内にのみ存在するため、手動変更は `adjust-streak-field.yml` (workflow_dispatch) で行う: キャッシュ復元 → `scripts/set-streak-field.js` で1ユーザーの1フィールドを絶対値設定 → 新run_idキーで保存 → 次回スケジュール実行で反映。検証(フィールド種別・範囲・既存ユーザーのみ)はスクリプトに集約。現在値確認は読み取り専用の `show-streak-data.yml` / `scripts/show-streak-data.js`。フィールドごとに `.claude/skills/smilezemi-set-{grace,streak,bonus}` の3スキルへ分離し、各スキルは自分のfieldのみ渡して誤操作を防ぐ。免除日（おやすみ）の登録・取り消しは別系統で、`exempt-days.yml` (workflow_dispatch) → `scripts/set-exempt-dates.js` → `.claude/skills/smilezemi-exempt-day` が担当する。対象(1人/`__all__`)と期間(最大31日)を指定し、過去日付はリプレイで修復される。
 
 ## Tech Stack
 
