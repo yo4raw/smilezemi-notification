@@ -302,7 +302,7 @@ async function main() {
     // Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     console.log('📤 通知を送信しています...');
 
-    // 夜通知は「まだ今日のノルマが終わっていない人」を知らせるのが目的のため、
+    // 夜通知は「まだ今日の学習が終わっていない人」を知らせるのが目的のため、
     // 学習件数・ミッション詳細・勉強時間は出さず名前だけを並べる(翌朝の確定通知が詳細をカバーする)。
     // 終わった子もついでに並べて、誰が済んでいるかが一目で分かるようにする
     const message = formatUnqualifiedMessage({ unqualifiedNames, qualifiedNames, unreliableNames, exemptNames });

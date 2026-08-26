@@ -530,7 +530,7 @@ function formatUnqualifiedMessage({
   const sections = ['📊 スマイルゼミ 学習状況'];
 
   if (unqualifiedNames.length > 0) {
-    sections.push('🚨 まだ今日のノルマが終わっていません');
+    sections.push('🚨 まだ今日の学習が終わっていません');
     sections.push(listUserNames(unqualifiedNames));
   }
 
@@ -544,10 +544,10 @@ function formatUnqualifiedMessage({
     const allDone = unqualifiedNames.length === 0 && unreliableNames.length === 0;
     if (allDone) {
       sections.push(exemptNames.length > 0
-        ? '✅ おやすみの人以外は本日のノルマを達成しました'
-        : '✅ 全員が本日のノルマを達成しました');
+        ? '✅ おやすみの人以外は本日の学習を終えました'
+        : '✅ 全員が本日の学習を終えました');
     } else {
-      sections.push('✅ 今日のノルマが終わりました');
+      sections.push('✅ 今日の学習が終わりました');
     }
     sections.push(listUserNames(qualifiedNames));
   }
