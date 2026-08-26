@@ -16,11 +16,11 @@ jobs:
 
     steps:
       - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 前回データを復元
         id: restore-data
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}
@@ -42,7 +42,7 @@ jobs:
           echo "キャッシュエントリなし(初回実行またはエビクション後)"
 
       - name: Node.jsをセットアップ
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
 
