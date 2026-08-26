@@ -24,12 +24,12 @@ jobs:
     steps:
       # 1. リポジトリのチェックアウト
       - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # 前回データ(ミッション・ストリーク)をキャッシュから復元
       - name: 前回データを復元
         id: restore-data
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}
@@ -109,7 +109,7 @@ jobs:
       # 通知失敗などで exit code 1 でも確定済みストリークは保持したいため always()
       - name: データをキャッシュに保存
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data
           key: smilezemi-data-${{ github.run_id }}
