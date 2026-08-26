@@ -17,12 +17,9 @@ const MAX_MESSAGE_LENGTH = 5000;
 const MAX_LISTED_COURSES = 10;
 
 // 学習件数がしきい値に届かないときに出す警告文言。
-// 夜通知(today)は当日中に挽回できるため励まし、朝通知(past)は前日確定の結果報告なので過去形にする。
+// 使うのは前日確定の結果を伝える朝通知だけなので過去形にする。
 // 残り件数だけを出すため、コース別の単位ラベル(学習/講座)は使わない。
-const MISSION_WARNING_STYLES = {
-  today: remaining => `🚨🚨 あと${remaining}件! がんばろう! 🚨🚨`,
-  past: remaining => `😢😢 あと${remaining}件たりなかった… 😢😢`
-};
+const formatMissionWarning = remaining => `😢😢 あと${remaining}件たりなかった… 😢😢`;
 
 /**
  * LINE通知を送信する
@@ -306,19 +303,15 @@ function formatMessage(changes) {
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} userData - ユーザーデータ配列（v2.0形式）
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} [previousData] - 前回のユーザーデータ配列（v2.0形式、オプション）
  * @param {object} [options] - 表示オプション
- * @param {boolean} [options.showStudyTime=true] - 勉強時間行を表示するか(夜通知は false)
- * @param {'today'|'past'} [options.missionWarningStyle='past'] - 未達警告の文言(夜通知は 'today')
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
   const {
     dateLabel = null,
     showNoStudyWarning = false,
-    showStudyTime = true,
     streaks = null,
     missionWarningThreshold = null,
-    missionWarningThresholds = null,
-    missionWarningStyle = 'past'
+    missionWarningThresholds = null
   } = options;
 
   // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
@@ -360,12 +353,10 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
       message += '⚠️ データを取得できませんでした\n';
     }
 
-    // 勉強時間(夜通知は翌朝の確定通知でカバーするため出さない)
+    // 勉強時間
     const hours = user.studyTime?.hours ?? 0;
     const minutes = user.studyTime?.minutes ?? 0;
-    if (showStudyTime) {
-      message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
-    }
+    message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
 
     // コース種別: course フィールド優先、なければ名前サフィックスで判定
     const course = user.course || (user.userName.includes('中学生コース') ? 'juniorHigh' : 'elementary');
@@ -399,10 +390,7 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
       const completedCount = countStudyItems(user);
       if (completedCount < warnThreshold) {
-        const formatWarning = Object.hasOwn(MISSION_WARNING_STYLES, missionWarningStyle)
-          ? MISSION_WARNING_STYLES[missionWarningStyle]
-          : MISSION_WARNING_STYLES.past;
-        message += `${formatWarning(warnThreshold - completedCount)}\n`;
+        message += `${formatMissionWarning(warnThreshold - completedCount)}\n`;
       }
     }
 
@@ -509,6 +497,38 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
 }
 
 /**
+ * 夜通知用のメッセージを組み立てる
+ *
+ * 夜通知は速報であり、当日中に挽回してほしいユーザーを知らせることだけが目的のため、
+ * 学習件数・ミッション詳細・勉強時間は出さず名前だけを並べる(翌朝の確定通知が詳細をカバーする)。
+ * データ取得に失敗したユーザーは未達と断定できないため、別枠に分けて並べる。
+ *
+ * @param {object} [params]
+ * @param {Array<string>} [params.unqualifiedNames=[]] - 当日のストリーク要件が未達のユーザー名
+ * @param {Array<string>} [params.unreliableNames=[]] - データ取得に失敗したユーザー名
+ * @returns {string} - フォーマットされたメッセージ
+ */
+function formatUnqualifiedMessage({ unqualifiedNames = [], unreliableNames = [] } = {}) {
+  const sections = ['📊 スマイルゼミ 学習状況'];
+
+  if (unqualifiedNames.length > 0) {
+    sections.push('🚨 まだ今日のノルマが終わっていません');
+    sections.push(unqualifiedNames.map(name => `👤 ${name}`).join('\n'));
+  }
+
+  if (unreliableNames.length > 0) {
+    sections.push('⚠️ データを取得できませんでした');
+    sections.push(unreliableNames.map(name => `👤 ${name}`).join('\n'));
+  }
+
+  if (sections.length === 1) {
+    sections.push('✅ 全員が本日のノルマを達成しました');
+  }
+
+  return sections.join('\n\n');
+}
+
+/**
  * メッセージを指定文字数以内に切り詰める
  *
  * 上限は宛先ごとに異なる（LINE=5000, Discord=2000）ため引数で受け取る。
@@ -550,5 +570,6 @@ module.exports = {
   sendPushMessage,
   formatMessage,
   formatDetailedMessage,
+  formatUnqualifiedMessage,
   truncateToLimit
 };
