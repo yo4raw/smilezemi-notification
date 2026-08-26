@@ -10,7 +10,7 @@ const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTarge
 const { loadPreviousData, compareData, saveData } = require('./data');
 const { formatMessage, formatUnqualifiedMessage, truncateToLimit } = require('./notifier');
 const { broadcastToAll, broadcastToDiscordOnly, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
-const { isStudied, getRequirementForCourse } = require('./streak');
+const { isStudied, getRequirementForCourse, loadStreakData } = require('./streak');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -21,6 +21,9 @@ const path = require('path');
  * 届くため、受信側が両者を区別できるよう、送らなかった理由を明示する。
  */
 const DISCORD_ONLY_NOTICE = 'ℹ️ 全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します(送信数節約)';
+
+// 免除日のユーザーがいる日は「全員達成」ではないため、断り行を切り替える
+const DISCORD_ONLY_NOTICE_EXEMPT = 'ℹ️ おやすみ登録のユーザーがいて、それ以外の人は本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します(送信数節約)';
 
 /**
  * メイン実行関数
@@ -244,21 +247,40 @@ async function main() {
 
     // 6.5 当日のストリーク要件の達成判定
     // 夜通知はストリーク・おたすけ・ボーナスを表示しない(翌朝の確定通知がカバーする)ため
-    // streak_data.json は読まない。通知本文と送信先の判定にだけ達成状況を使う。
-    // データ取得に失敗したユーザーは未達と断定できないため、判定にかけず別枠に分ける。
+    // ストリーク値そのものは使わない。免除日(おやすみ)の判定にだけデータを読む。
+    // 通知本文と送信先の判定には達成状況を使い、データ取得に失敗したユーザーは
+    // 未達と断定できないため判定にかけず別枠に分ける。
     const todayDateString = getTargetDates(0).dateString;
+
+    const streakLoadResult = await loadStreakData();
+    if (!streakLoadResult.success) {
+      // 免除日が分からなくても通知は続ける(免除なし扱い)。子供に見える情報を止めないため
+      console.warn('⚠️ ストリークデータを読めなかったため免除日なしとして続行します:', streakLoadResult.error);
+    }
+    const streakUsers = streakLoadResult.success ? streakLoadResult.data : {};
+
+    const exemptNames = [];
     const unqualifiedNames = [];
     const unreliableNames = [];
     currentData.forEach(user => {
+      // 免除日のユーザーは未達に数えない(免除日のためにLINEを消費しない)
+      if ((streakUsers[user.userName]?.exemptDates ?? []).includes(todayDateString)) {
+        exemptNames.push(user.userName);
+        return;
+      }
       if (user.dataReliable === false) {
         unreliableNames.push(user.userName);
         return;
       }
-      const threshold = getRequirementForCourse(user.course, todayDateString);
+      const threshold = getRequirementForCourse(user.course);
       if (!isStudied(user, { minCompletedMissions: threshold })) {
         unqualifiedNames.push(user.userName);
       }
     });
+
+    if (exemptNames.length > 0) {
+      console.log(`🏝️ 免除日のユーザー: ${exemptNames.join(', ')}`);
+    }
 
     // 7. データ比較（変更検出）
     console.log('🔄 データを比較しています...');
@@ -279,7 +301,7 @@ async function main() {
 
     // 夜通知は「まだ今日のノルマが終わっていない人」を知らせるのが目的のため、
     // 学習件数・ミッション詳細・勉強時間は出さず名前だけを並べる(翌朝の確定通知が詳細をカバーする)
-    const message = formatUnqualifiedMessage({ unqualifiedNames, unreliableNames });
+    const message = formatUnqualifiedMessage({ unqualifiedNames, unreliableNames, exemptNames });
 
     // 送信先の決定
     // 夜通知は速報のため、全員が当日のストリーク要件を達成済みの日はLINEに送らない。
@@ -289,7 +311,8 @@ async function main() {
     // 確定通知は翌朝の朝通知が毎日必ず送る。
     // 詳細: docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
     const discordOnly = unqualifiedNames.length === 0 && unreliableNames.length === 0;
-    const outgoingMessage = discordOnly ? `${DISCORD_ONLY_NOTICE}\n\n${message}` : message;
+    const discordOnlyNotice = exemptNames.length > 0 ? DISCORD_ONLY_NOTICE_EXEMPT : DISCORD_ONLY_NOTICE;
+    const outgoingMessage = discordOnly ? `${discordOnlyNotice}\n\n${message}` : message;
 
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない
     if (process.env.DRY_RUN === 'true') {

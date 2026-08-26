@@ -1078,6 +1078,35 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
+  describe('formatDetailedMessage() - 免除日', () => {
+    const user = { userName: 'たろう', studyItemCount: 0, missionCount: 0, missions: [], date: '2026-08-17' };
+
+    it('免除ユーザーには未達警告を出さない', () => {
+      const message = notifier.formatDetailedMessage([user], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        exemptUserNames: ['たろう']
+      });
+      assert.ok(!message.includes('あと'), `未達警告が出ている: ${message}`);
+    });
+
+    it('朝通知はおやすみ行を出さない(ストリーク行で伝えるため)', () => {
+      const message = notifier.formatDetailedMessage([user], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        exemptUserNames: ['たろう']
+      });
+      assert.ok(!message.includes('🏝️'), message);
+    });
+
+    it('免除ユーザー以外には従来どおり警告を出す', () => {
+      const others = [user, { ...user, userName: 'はなこ' }];
+      const message = notifier.formatDetailedMessage(others, null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        exemptUserNames: ['たろう']
+      });
+      assert.ok(message.includes('あと4件'), `はなこの警告が出ていない: ${message}`);
+    });
+  });
+
   describe('truncateToLimit() - 宛先別の文字数制限', () => {
     it('引数なしなら5000文字を上限として切り詰める', () => {
       const long = 'あ'.repeat(6000);
@@ -1225,6 +1254,60 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('引数を省略しても全員達成のメッセージを返す', () => {
       assert.match(notifier.formatUnqualifiedMessage(), /全員が本日のノルマを達成しました/);
+    });
+
+    it('免除日のユーザーは未達とは別枠で並べる', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: ['たろう'],
+        unreliableNames: [],
+        exemptNames: ['はなこ']
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '🚨 まだ今日のノルマが終わっていません',
+          '',
+          '👤 たろう',
+          '',
+          '🏝️ 今日はおやすみ（免除日）',
+          '',
+          '👤 はなこ'
+        ].join('\n')
+      );
+    });
+
+    it('免除日のユーザーだけがいる日は「おやすみの人以外は達成」と伝える', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: [],
+        unreliableNames: [],
+        exemptNames: ['はなこ']
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '✅ おやすみの人以外は本日のノルマを達成しました',
+          '',
+          '🏝️ 今日はおやすみ（免除日）',
+          '',
+          '👤 はなこ'
+        ].join('\n')
+      );
+    });
+
+    it('免除日のユーザーがいなければ全員達成の文言のままにする', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: [],
+        unreliableNames: [],
+        exemptNames: []
+      });
+
+      assert.match(message, /✅ 全員が本日のノルマを達成しました/);
     });
   });
 });

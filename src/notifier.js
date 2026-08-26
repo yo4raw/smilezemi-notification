@@ -21,6 +21,12 @@ const MAX_LISTED_COURSES = 10;
 // 残り件数だけを出すため、コース別の単位ラベル(学習/講座)は使わない。
 const formatMissionWarning = remaining => `😢😢 あと${remaining}件たりなかった… 😢😢`;
 
+// 免除日(おやすみ)の見出し。夜通知だけが出す(朝はストリーク行が伝えるため)
+const EXEMPT_NOTICE = '🏝️ 今日はおやすみ（免除日）';
+
+// 夜通知の名前一覧。1行1名で並べる
+const listUserNames = names => names.map(name => `👤 ${name}`).join('\n');
+
 /**
  * LINE通知を送信する
  *
@@ -303,6 +309,7 @@ function formatMessage(changes) {
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} userData - ユーザーデータ配列（v2.0形式）
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} [previousData] - 前回のユーザーデータ配列（v2.0形式、オプション）
  * @param {object} [options] - 表示オプション
+ * @param {string[]} [options.exemptUserNames=null] - 免除日のユーザー名。未達警告を出さない
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
@@ -311,7 +318,8 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
     showNoStudyWarning = false,
     streaks = null,
     missionWarningThreshold = null,
-    missionWarningThresholds = null
+    missionWarningThresholds = null,
+    exemptUserNames = null
   } = options;
 
   // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
@@ -383,11 +391,14 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
 
     // 完了数未達の警告。コース別しきい値(missionWarningThresholds)を優先し、
     // なければ単一の missionWarningThreshold を使う(後方互換)。
+    // 免除日(おやすみ)のユーザーには警告を出さない。
     const warnThreshold = missionWarningThresholds
       ? (isJuniorHigh ? missionWarningThresholds.juniorHigh : missionWarningThresholds.elementary)
       : missionWarningThreshold;
 
-    if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
+    const isExempt = Array.isArray(exemptUserNames) && exemptUserNames.includes(user.userName);
+
+    if (!isExempt && warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
       const completedCount = countStudyItems(user);
       if (completedCount < warnThreshold) {
         message += `${formatMissionWarning(warnThreshold - completedCount)}\n`;
@@ -506,23 +517,32 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
  * @param {object} [params]
  * @param {Array<string>} [params.unqualifiedNames=[]] - 当日のストリーク要件が未達のユーザー名
  * @param {Array<string>} [params.unreliableNames=[]] - データ取得に失敗したユーザー名
+ * @param {Array<string>} [params.exemptNames=[]] - 免除日(おやすみ)のユーザー名
  * @returns {string} - フォーマットされたメッセージ
  */
-function formatUnqualifiedMessage({ unqualifiedNames = [], unreliableNames = [] } = {}) {
+function formatUnqualifiedMessage({ unqualifiedNames = [], unreliableNames = [], exemptNames = [] } = {}) {
   const sections = ['📊 スマイルゼミ 学習状況'];
 
   if (unqualifiedNames.length > 0) {
     sections.push('🚨 まだ今日のノルマが終わっていません');
-    sections.push(unqualifiedNames.map(name => `👤 ${name}`).join('\n'));
+    sections.push(listUserNames(unqualifiedNames));
   }
 
   if (unreliableNames.length > 0) {
     sections.push('⚠️ データを取得できませんでした');
-    sections.push(unreliableNames.map(name => `👤 ${name}`).join('\n'));
+    sections.push(listUserNames(unreliableNames));
   }
 
-  if (sections.length === 1) {
-    sections.push('✅ 全員が本日のノルマを達成しました');
+  // 呼びかける相手がいない日でも、クローリングが回ったことが分かるように結果を1行残す
+  if (unqualifiedNames.length === 0 && unreliableNames.length === 0) {
+    sections.push(exemptNames.length > 0
+      ? '✅ おやすみの人以外は本日のノルマを達成しました'
+      : '✅ 全員が本日のノルマを達成しました');
+  }
+
+  if (exemptNames.length > 0) {
+    sections.push(EXEMPT_NOTICE);
+    sections.push(listUserNames(exemptNames));
   }
 
   return sections.join('\n\n');

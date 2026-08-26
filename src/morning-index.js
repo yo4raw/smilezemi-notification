@@ -15,7 +15,6 @@ const {
   saveStreakData,
   updateStreaksByCourse,
   formatStreakInfo,
-  getJuniorHighRequirement,
   STREAK_REQUIREMENTS
 } = require('./streak');
 const fs = require('fs').promises;
@@ -141,7 +140,7 @@ async function main() {
       previousStreakUsers = {};
     }
 
-    // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生は前日曜日で3or5)
+    // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生3)
     const { streakUsers, results } = updateStreaksByCourse(
       previousStreakUsers,
       crawlResult.data,
@@ -152,6 +151,11 @@ async function main() {
     results.forEach(result => {
       streaks[result.userName] = formatStreakInfo(result);
     });
+
+    // 免除日のユーザーには未達警告を出さない(ストリーク行が「記録はそのまま」と伝える)
+    const exemptUserNames = results
+      .filter(result => result.event === 'exempt')
+      .map(result => result.userName);
 
     // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
     if (process.env.DRY_RUN === 'true') {
@@ -173,8 +177,9 @@ async function main() {
       streaks,
       missionWarningThresholds: {
         elementary: STREAK_REQUIREMENTS.elementaryMissions,
-        juniorHigh: getJuniorHighRequirement(targetDates.dateString)
-      }
+        juniorHigh: STREAK_REQUIREMENTS.juniorHighCourses
+      },
+      exemptUserNames
     });
 
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信しない

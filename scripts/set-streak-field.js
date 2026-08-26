@@ -18,7 +18,7 @@
  *   node scripts/set-streak-field.js --user "たろう" --field grace --value 3 [--dry-run]
  */
 
-const { loadStreakData, saveStreakData } = require('../src/streak');
+const { loadStreakData, saveStreakData, collapseHistory } = require('../src/streak');
 
 // フィールドごとの制約。変更時はここだけ書き換える
 const FIELD_CONSTRAINTS = {
@@ -130,6 +130,14 @@ async function main() {
 
   state[field] = value;
   console.log(`[set-streak-field] 変更後: ${field}=${value}`);
+
+  // streak / grace は学習履歴のリプレイから導出されるため、値を書き換えただけでは
+  // 次回の確定で上書きされてしまう。チェックポイントに畳み込んで確定させる。
+  // bonus はリプレイ対象外なので畳み込み不要。
+  if (field === 'streak' || field === 'grace') {
+    users[user] = collapseHistory(users[user]);
+    console.log('[set-streak-field] 手動変更のため学習履歴を畳み込みました(この日以前の遡及免除はできなくなります)');
+  }
 
   if (dryRun) {
     console.log('[set-streak-field] DRY_RUN のため保存しません');
