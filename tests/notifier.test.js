@@ -540,46 +540,12 @@ describe('通知モジュール (src/notifier.js)', () => {
       ]
     };
 
-    it('完了ミッションが閾値未満なら警告行が表示される(today)', () => {
+    it('完了ミッションが閾値未満なら残り件数つきの警告行が表示される', () => {
       const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5,
-        missionWarningStyle: 'today'
+        missionWarningThreshold: 5
       });
 
-      assert.match(message, /🚨🚨 あと2件! がんばろう! 🚨🚨/, '残り件数つきの励まし文言が出ること');
-    });
-
-    it('missionWarningStyle: past は過去形の文言になる', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5,
-        missionWarningStyle: 'past'
-      });
-
-      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '過去形の文言が出ること');
-    });
-
-    it('missionWarningStyle 省略時は past 扱いになる', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, { missionWarningThreshold: 5 });
-
-      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '既定は past であること');
-    });
-
-    it('missionWarningStyle が未知の値のときは past にフォールバックする', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5,
-        missionWarningStyle: 'unknown'
-      });
-
-      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '未知の値は past にフォールバックすること');
-    });
-
-    it('missionWarningStyle が "constructor" のような Object.prototype のプロパティ名でも past にフォールバックする', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5,
-        missionWarningStyle: 'constructor'
-      });
-
-      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, 'prototype汚染を拾わずpastにフォールバックすること');
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '残り件数つきの警告文言が出ること');
     });
 
     it('完了ミッションが閾値以上なら警告行は表示されない', () => {
@@ -615,8 +581,6 @@ describe('通知モジュール (src/notifier.js)', () => {
         dataReliable: false
       };
       const message = notifier.formatDetailedMessage([user], null, {
-        showStudyTime: false,
-        missionWarningStyle: 'today',
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
 
@@ -664,11 +628,10 @@ describe('通知モジュール (src/notifier.js)', () => {
         ]
       };
       const message = notifier.formatDetailedMessage([juniorUser], null, {
-        missionWarningThreshold: 4,
-        missionWarningStyle: 'today'
+        missionWarningThreshold: 4
       });
 
-      assert.match(message, /🚨🚨 あと2件! がんばろう! 🚨🚨/, '小学生と同じ文言になること');
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '小学生と同じ文言になること');
       assert.doesNotMatch(message, /講座完了/, '旧表記が残っていないこと');
       assert.doesNotMatch(message, /連続学習/, '「連続学習」への言及が消えていること');
     });
@@ -824,7 +787,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
-  describe('formatDetailedMessage - 勉強時間の表示切り替え', () => {
+  describe('formatDetailedMessage - 勉強時間の表示', () => {
     const { formatDetailedMessage } = require('../src/notifier');
 
     const userData = [{
@@ -838,18 +801,13 @@ describe('通知モジュール (src/notifier.js)', () => {
       missions: [{ name: '国語テスト(2年生：夏)', score: 20, completed: true }]
     }];
 
-    it('showStudyTime: false で勉強時間行を出さない', () => {
-      const message = formatDetailedMessage(userData, null, { showStudyTime: false });
-      assert.ok(!message.includes('勉強時間'), message);
-      assert.ok(message.includes('✅ 学習4件'), '学習件数行は残ること');
-    });
-
-    it('showStudyTime 省略時は従来どおり勉強時間行を出す', () => {
+    it('勉強時間行を出す', () => {
       const message = formatDetailedMessage(userData, null, {});
       assert.ok(message.includes('⏱️ 勉強時間: 00:13'), message);
+      assert.ok(message.includes('✅ 学習4件'), '学習件数行も出ること');
     });
 
-    it('showStudyTime: false でも朝通知の完全未学習判定は勉強時間を見る', () => {
+    it('完全未学習の日は「学習していません」を表示する', () => {
       const noStudy = [{
         userName: 'はなこ (小学生コース)',
         course: 'elementary',
@@ -861,7 +819,6 @@ describe('通知モジュール (src/notifier.js)', () => {
         missions: []
       }];
       const message = formatDetailedMessage(noStudy, null, {
-        showStudyTime: false,
         showNoStudyWarning: true
       });
       assert.ok(message.includes('⚠️ 昨日は学習していません'), message);
@@ -1175,6 +1132,99 @@ describe('通知モジュール (src/notifier.js)', () => {
         !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(result),
         '孤立した高サロゲートが残らないこと'
       );
+    });
+  });
+
+  describe('formatUnqualifiedMessage - 夜通知(未達ユーザー名のみ)', () => {
+    it('未達ユーザーの名前を見出しの下に並べる', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: ['たろう', 'はなこ'],
+        unreliableNames: []
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '🚨 まだ今日のノルマが終わっていません',
+          '',
+          '👤 たろう',
+          '👤 はなこ'
+        ].join('\n')
+      );
+    });
+
+    it('学習件数やミッション詳細は含めない', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: ['たろう'],
+        unreliableNames: []
+      });
+
+      assert.ok(!message.includes('件'), '学習件数の行を含まないこと');
+      assert.ok(!message.includes('ミッション詳細'), 'ミッション詳細を含まないこと');
+      assert.ok(!message.includes('勉強時間'), '勉強時間を含まないこと');
+    });
+
+    it('データ取得に失敗したユーザーは未達とは別枠で並べる', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: ['たろう'],
+        unreliableNames: ['じろう']
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '🚨 まだ今日のノルマが終わっていません',
+          '',
+          '👤 たろう',
+          '',
+          '⚠️ データを取得できませんでした',
+          '',
+          '👤 じろう'
+        ].join('\n')
+      );
+    });
+
+    it('未達が0人でも取得失敗がいれば未達の見出しは出さない', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: [],
+        unreliableNames: ['じろう']
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '⚠️ データを取得できませんでした',
+          '',
+          '👤 じろう'
+        ].join('\n')
+      );
+      assert.ok(!message.includes('まだ今日のノルマ'), '未達の見出しを含まないこと');
+    });
+
+    it('未達も取得失敗もいなければ全員達成のメッセージを返す', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: [],
+        unreliableNames: []
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '✅ 全員が本日のノルマを達成しました'
+        ].join('\n')
+      );
+    });
+
+    it('引数を省略しても全員達成のメッセージを返す', () => {
+      assert.match(notifier.formatUnqualifiedMessage(), /全員が本日のノルマを達成しました/);
     });
   });
 });

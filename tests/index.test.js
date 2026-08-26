@@ -139,7 +139,7 @@ describe('オーケストレーション (src/index.js)', () => {
       id: resolveModule('../src/notifier'), filename: resolveModule('../src/notifier'), loaded: true,
       exports: {
         formatMessage: overrides.formatMessage || ((changes) => `テスト基本メッセージ(${changes.length}件)`),
-        formatDetailedMessage: overrides.formatDetailedMessage || (() => 'テスト詳細メッセージ'),
+        formatUnqualifiedMessage: overrides.formatUnqualifiedMessage || (() => 'テスト未達メッセージ'),
         // 切り詰めはDRY_RUNプレビューで使うので本物を使う
         truncateToLimit: realTruncateToLimit
       }
@@ -384,17 +384,12 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(saveStreakCalls.length, 0, '夜通知はsaveStreakDataを呼ばない');
     });
 
-    it('正常系: 夜通知は当日学習判定にコース別しきい値を使い、警告閾値も渡す', async () => {
+    it('正常系: 夜通知は当日学習判定にコース別しきい値を使う', async () => {
       let capturedIsStudiedOptions;
-      let capturedFormatOptions;
       setupMocks({
-        // 未達(false)にして送信経路を通す(全員達成だと送信スキップされ警告閾値を検証できない)
+        // 未達(false)にして送信経路を通す(全員達成だと送信スキップされ判定を検証できない)
         isStudied: (user, options) => { capturedIsStudiedOptions = options; return false; },
-        getRequirementForCourse: (course) => course === 'juniorHigh' ? 3 : 4,
-        formatDetailedMessage: (currentData, changes, options) => {
-          capturedFormatOptions = options;
-          return 'テスト詳細メッセージ';
-        }
+        getRequirementForCourse: (course) => course === 'juniorHigh' ? 3 : 4
       });
 
       await mainModule.main();
@@ -405,9 +400,6 @@ describe('オーケストレーション (src/index.js)', () => {
         { minCompletedMissions: 4 },
         '当日暫定判定に elementary しきい値(4)が渡ること'
       );
-      assert.ok(capturedFormatOptions.missionWarningThresholds, 'missionWarningThresholds が渡ること');
-      assert.strictEqual(capturedFormatOptions.missionWarningThresholds.elementary, 4);
-      assert.strictEqual(capturedFormatOptions.missionWarningThresholds.juniorHigh, 3);
     });
 
     it('正常系: 全ユーザーがストリーク要件達成済みの日はDiscordのみに送る(LINE送信数節約)', async () => {
@@ -436,7 +428,7 @@ describe('オーケストレーション (src/index.js)', () => {
     it('正常系: 全員達成の日のDiscord本文には断り行が先頭に付く', async () => {
       setupMocks({
         isStudied: () => true,
-        formatDetailedMessage: () => 'テスト詳細メッセージ'
+        formatUnqualifiedMessage: () => 'テスト未達メッセージ'
       });
 
       await mainModule.main();
@@ -447,7 +439,7 @@ describe('オーケストレーション (src/index.js)', () => {
         /^ℹ️ 全員が本日のストリーク要件を達成したため、LINEには送らずDiscordのみに記録します\(送信数節約\)\n\n/,
         '断り行と空行が先頭に付くこと'
       );
-      assert.match(sentMessage, /テスト詳細メッセージ/, '本文が保持されること');
+      assert.match(sentMessage, /テスト未達メッセージ/, '本文が保持されること');
     });
 
     it('異常系: 全員達成の日にDiscord送信が失敗したら終了コード1になる', async () => {
@@ -539,7 +531,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
       setupMocks({
         isStudied: () => true,
-        formatDetailedMessage: () => longMessage
+        formatUnqualifiedMessage: () => longMessage
       });
 
       const logs = [];
@@ -578,7 +570,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
       setupMocks({
         isStudied: () => false,
-        formatDetailedMessage: () => longMessage
+        formatUnqualifiedMessage: () => longMessage
       });
 
       const logs = [];
@@ -717,39 +709,111 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(pushCalls.length, 1, '通知は送信されること');
     });
 
-    it('formatDetailedMessageにstreaksを渡さない(ストリーク行を出さない)', async () => {
-      let capturedOptions;
+    it('formatUnqualifiedMessageに未達ユーザーの名前だけを渡す', async () => {
+      let capturedParams;
       setupMocks({
-        formatDetailedMessage: (currentData, missionChangesResult, options) => {
-          capturedOptions = options;
-          return 'テスト詳細メッセージ';
+        getAllUsersDetailedData: async () => ({
+          success: true,
+          detailsAvailable: true,
+          data: [
+            { userName: '太郎', studyItemCount: 5, missionCount: 5, missions: [] },
+            { userName: '次郎', studyItemCount: 1, missionCount: 1, missions: [] }
+          ]
+        }),
+        isStudied: (user) => user.userName === '太郎',
+        formatUnqualifiedMessage: (params) => {
+          capturedParams = params;
+          return 'テスト未達メッセージ';
         }
       });
 
       await mainModule.main();
 
-      assert.ok(capturedOptions, 'formatDetailedMessageが呼ばれること');
-      assert.strictEqual(capturedOptions.streaks, undefined, 'streaksオプションが渡されないこと');
+      assert.ok(capturedParams, 'formatUnqualifiedMessageが呼ばれること');
+      assert.deepStrictEqual(capturedParams.unqualifiedNames, ['次郎'], '未達ユーザーだけを渡すこと');
+      assert.deepStrictEqual(capturedParams.unreliableNames, [], '取得失敗ユーザーはいないこと');
     });
 
-    it('formatDetailedMessageに夜通知用の表示オプションを渡す', async () => {
-      let capturedOptions;
+    it('データ取得に失敗したユーザーは未達ではなくunreliableNamesに入る', async () => {
+      let capturedParams;
       setupMocks({
-        formatDetailedMessage: (currentData, missionChangesResult, options) => {
-          capturedOptions = options;
-          return 'テスト詳細メッセージ';
+        getAllUsersDetailedData: async () => ({
+          success: true,
+          detailsAvailable: true,
+          data: [
+            { userName: '太郎', studyItemCount: 5, missionCount: 5, missions: [] },
+            { userName: '次郎', dataReliable: false, studyItemCount: 0, missionCount: 0, missions: [] }
+          ]
+        }),
+        isStudied: () => true,
+        formatUnqualifiedMessage: (params) => {
+          capturedParams = params;
+          return 'テスト未達メッセージ';
         }
       });
 
       await mainModule.main();
 
-      assert.strictEqual(capturedOptions.showStudyTime, false, '勉強時間を出さないこと');
-      assert.strictEqual(capturedOptions.missionWarningStyle, 'today', '当日向けの警告文言を使うこと');
-      assert.deepStrictEqual(
-        capturedOptions.missionWarningThresholds,
-        { elementary: 4, juniorHigh: 3 },
-        'コース別しきい値は従来どおり渡すこと'
+      assert.deepStrictEqual(capturedParams.unqualifiedNames, [], '取得失敗ユーザーを未達に混ぜないこと');
+      assert.deepStrictEqual(capturedParams.unreliableNames, ['次郎'], '取得失敗ユーザーを別枠に渡すこと');
+    });
+
+    it('データ取得に失敗したユーザーがいる日はLINEにも送る', async () => {
+      setupMocks({
+        getAllUsersDetailedData: async () => ({
+          success: true,
+          detailsAvailable: true,
+          data: [
+            { userName: '次郎', dataReliable: false, studyItemCount: 0, missionCount: 0, missions: [] }
+          ]
+        }),
+        // 他のユーザーは全員達成という状況でも、取得失敗があれば見逃さないようLINEに送る
+        isStudied: () => true
+      });
+
+      await mainModule.main();
+
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToAll').length, 1,
+        '取得失敗ユーザーがいる日はLINE経路を使うこと'
       );
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToDiscordOnly').length, 0,
+        'Discordのみの経路にしないこと'
+      );
+    });
+
+    it('データ取得に失敗したユーザーには当日学習判定を行わない', async () => {
+      const isStudiedCalls = [];
+      setupMocks({
+        getAllUsersDetailedData: async () => ({
+          success: true,
+          detailsAvailable: true,
+          data: [
+            { userName: '太郎', studyItemCount: 5, missionCount: 5, missions: [] },
+            { userName: '次郎', dataReliable: false, studyItemCount: 0, missionCount: 0, missions: [] }
+          ]
+        }),
+        isStudied: (user) => { isStudiedCalls.push(user.userName); return true; }
+      });
+
+      await mainModule.main();
+
+      assert.deepStrictEqual(isStudiedCalls, ['太郎'], '取得失敗ユーザーは判定対象から外すこと');
+    });
+
+    it('ミッション詳細の差分比較は行わない(本文に使わないため)', async () => {
+      let compareMissionDetailsCalls = 0;
+      setupMocks({
+        compareMissionDetails: () => {
+          compareMissionDetailsCalls++;
+          return { success: true, changes: [] };
+        }
+      });
+
+      await mainModule.main();
+
+      assert.strictEqual(compareMissionDetailsCalls, 0, 'compareMissionDetailsを呼ばないこと');
     });
   });
 
