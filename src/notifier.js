@@ -516,11 +516,17 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
  *
  * @param {object} [params]
  * @param {Array<string>} [params.unqualifiedNames=[]] - 当日のストリーク要件が未達のユーザー名
+ * @param {Array<string>} [params.qualifiedNames=[]] - 当日のストリーク要件を達成したユーザー名
  * @param {Array<string>} [params.unreliableNames=[]] - データ取得に失敗したユーザー名
  * @param {Array<string>} [params.exemptNames=[]] - 免除日(おやすみ)のユーザー名
  * @returns {string} - フォーマットされたメッセージ
  */
-function formatUnqualifiedMessage({ unqualifiedNames = [], unreliableNames = [], exemptNames = [] } = {}) {
+function formatUnqualifiedMessage({
+  unqualifiedNames = [],
+  qualifiedNames = [],
+  unreliableNames = [],
+  exemptNames = []
+} = {}) {
   const sections = ['📊 スマイルゼミ 学習状況'];
 
   if (unqualifiedNames.length > 0) {
@@ -533,11 +539,17 @@ function formatUnqualifiedMessage({ unqualifiedNames = [], unreliableNames = [],
     sections.push(listUserNames(unreliableNames));
   }
 
-  // 呼びかける相手がいない日でも、クローリングが回ったことが分かるように結果を1行残す
-  if (unqualifiedNames.length === 0 && unreliableNames.length === 0) {
-    sections.push(exemptNames.length > 0
-      ? '✅ おやすみの人以外は本日のノルマを達成しました'
-      : '✅ 全員が本日のノルマを達成しました');
+  // 達成した子も並べる。呼びかける相手が誰もいない日は「全員達成」とまとめて伝える
+  if (qualifiedNames.length > 0) {
+    const allDone = unqualifiedNames.length === 0 && unreliableNames.length === 0;
+    if (allDone) {
+      sections.push(exemptNames.length > 0
+        ? '✅ おやすみの人以外は本日のノルマを達成しました'
+        : '✅ 全員が本日のノルマを達成しました');
+    } else {
+      sections.push('✅ 今日のノルマが終わりました');
+    }
+    sections.push(listUserNames(qualifiedNames));
   }
 
   if (exemptNames.length > 0) {

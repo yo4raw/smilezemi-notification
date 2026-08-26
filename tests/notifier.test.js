@@ -1236,24 +1236,8 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.ok(!message.includes('まだ今日のノルマ'), '未達の見出しを含まないこと');
     });
 
-    it('未達も取得失敗もいなければ全員達成のメッセージを返す', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: [],
-        unreliableNames: []
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '✅ 全員が本日のノルマを達成しました'
-        ].join('\n')
-      );
-    });
-
-    it('引数を省略しても全員達成のメッセージを返す', () => {
-      assert.match(notifier.formatUnqualifiedMessage(), /全員が本日のノルマを達成しました/);
+    it('引数を省略しても見出しだけを返して例外にしない', () => {
+      assert.strictEqual(notifier.formatUnqualifiedMessage(), '📊 スマイルゼミ 学習状況');
     });
 
     it('免除日のユーザーは未達とは別枠で並べる', () => {
@@ -1279,9 +1263,56 @@ describe('通知モジュール (src/notifier.js)', () => {
       );
     });
 
-    it('免除日のユーザーだけがいる日は「おやすみの人以外は達成」と伝える', () => {
+    it('未達ユーザーがいる日は達成したユーザーも並べる', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: ['たろう'],
+        qualifiedNames: ['はなこ', 'じろう'],
+        unreliableNames: [],
+        exemptNames: []
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '🚨 まだ今日のノルマが終わっていません',
+          '',
+          '👤 たろう',
+          '',
+          '✅ 今日のノルマが終わりました',
+          '',
+          '👤 はなこ',
+          '👤 じろう'
+        ].join('\n')
+      );
+    });
+
+    it('全員が達成した日は達成の見出しの下に全員を並べる', () => {
       const message = notifier.formatUnqualifiedMessage({
         unqualifiedNames: [],
+        qualifiedNames: ['たろう', 'はなこ'],
+        unreliableNames: [],
+        exemptNames: []
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '✅ 全員が本日のノルマを達成しました',
+          '',
+          '👤 たろう',
+          '👤 はなこ'
+        ].join('\n')
+      );
+    });
+
+    it('免除日以外の全員が達成した日はおやすみを除いた達成として並べる', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: [],
+        qualifiedNames: ['たろう'],
         unreliableNames: [],
         exemptNames: ['はなこ']
       });
@@ -1293,6 +1324,8 @@ describe('通知モジュール (src/notifier.js)', () => {
           '',
           '✅ おやすみの人以外は本日のノルマを達成しました',
           '',
+          '👤 たろう',
+          '',
           '🏝️ 今日はおやすみ（免除日）',
           '',
           '👤 はなこ'
@@ -1300,14 +1333,36 @@ describe('通知モジュール (src/notifier.js)', () => {
       );
     });
 
-    it('免除日のユーザーがいなければ全員達成の文言のままにする', () => {
+    it('達成したユーザーがいなければ達成の見出しを出さない', () => {
       const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: [],
+        unqualifiedNames: ['たろう'],
+        qualifiedNames: [],
         unreliableNames: [],
         exemptNames: []
       });
 
-      assert.match(message, /✅ 全員が本日のノルマを達成しました/);
+      assert.ok(!message.includes('✅'), `達成の見出しが出ている: ${message}`);
+    });
+
+    it('全員が免除日なら達成の見出しを出さずおやすみだけを並べる', () => {
+      const message = notifier.formatUnqualifiedMessage({
+        unqualifiedNames: [],
+        qualifiedNames: [],
+        unreliableNames: [],
+        exemptNames: ['たろう', 'はなこ']
+      });
+
+      assert.strictEqual(
+        message,
+        [
+          '📊 スマイルゼミ 学習状況',
+          '',
+          '🏝️ 今日はおやすみ（免除日）',
+          '',
+          '👤 たろう',
+          '👤 はなこ'
+        ].join('\n')
+      );
     });
   });
 });
