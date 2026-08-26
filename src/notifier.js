@@ -17,15 +17,15 @@ const MAX_MESSAGE_LENGTH = 5000;
 const MAX_LISTED_COURSES = 10;
 
 // 学習件数がしきい値に届かないときに出す警告文言。
-// 使うのは前日確定の結果を伝える朝通知だけなので過去形にする。
+// 夜通知(today)は当日中に挽回できるため励まし、朝通知(past)は前日確定の結果報告なので過去形にする。
 // 残り件数だけを出すため、コース別の単位ラベル(学習/講座)は使わない。
-const formatMissionWarning = remaining => `😢😢 あと${remaining}件たりなかった… 😢😢`;
+const MISSION_WARNING_STYLES = {
+  today: remaining => `🚨🚨 あと${remaining}件! がんばろう! 🚨🚨`,
+  past: remaining => `😢😢 あと${remaining}件たりなかった… 😢😢`
+};
 
-// 免除日(おやすみ)の見出し。夜通知だけが出す(朝はストリーク行が伝えるため)
+// 免除日(おやすみ)の告知行。夜通知だけが出す(朝はストリーク行が伝えるため)
 const EXEMPT_NOTICE = '🏝️ 今日はおやすみ（免除日）';
-
-// 夜通知の名前一覧。1行1名で並べる
-const listUserNames = names => names.map(name => `👤 ${name}`).join('\n');
 
 /**
  * LINE通知を送信する
@@ -309,17 +309,23 @@ function formatMessage(changes) {
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} userData - ユーザーデータ配列（v2.0形式）
  * @param {Array<{userName: string, missionCount: number, date: string, studyTime: {hours: number, minutes: number}, totalScore: number, missions: Array<{name: string, score: number, completed: boolean}>}>} [previousData] - 前回のユーザーデータ配列（v2.0形式、オプション）
  * @param {object} [options] - 表示オプション
+ * @param {boolean} [options.showStudyTime=true] - 勉強時間行を表示するか(夜通知は false)
+ * @param {'today'|'past'} [options.missionWarningStyle='past'] - 未達警告の文言(夜通知は 'today')
  * @param {string[]} [options.exemptUserNames=null] - 免除日のユーザー名。未達警告を出さない
+ * @param {boolean} [options.showExemptNotice=false] - 免除ユーザーに「おやすみ」行を出すか(夜通知は true)
  * @returns {string} - フォーマットされたメッセージ
  */
 function formatDetailedMessage(userData, missionChanges = null, options = {}) {
   const {
     dateLabel = null,
     showNoStudyWarning = false,
+    showStudyTime = true,
     streaks = null,
     missionWarningThreshold = null,
     missionWarningThresholds = null,
-    exemptUserNames = null
+    missionWarningStyle = 'past',
+    exemptUserNames = null,
+    showExemptNotice = false
   } = options;
 
   // ヘッダー（dateLabel 指定時は「昨日(MM/DD)の学習状況」等になる）
@@ -361,10 +367,12 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
       message += '⚠️ データを取得できませんでした\n';
     }
 
-    // 勉強時間
+    // 勉強時間(夜通知は翌朝の確定通知でカバーするため出さない)
     const hours = user.studyTime?.hours ?? 0;
     const minutes = user.studyTime?.minutes ?? 0;
-    message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
+    if (showStudyTime) {
+      message += `⏱️ 勉強時間: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}\n`;
+    }
 
     // コース種別: course フィールド優先、なければ名前サフィックスで判定
     const course = user.course || (user.userName.includes('中学生コース') ? 'juniorHigh' : 'elementary');
@@ -398,10 +406,17 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
 
     const isExempt = Array.isArray(exemptUserNames) && exemptUserNames.includes(user.userName);
 
-    if (!isExempt && warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
+    if (isExempt) {
+      if (showExemptNotice) {
+        message += `${EXEMPT_NOTICE}\n`;
+      }
+    } else if (warnThreshold && user.dataReliable !== false && !(showNoStudyWarning && isNoStudy)) {
       const completedCount = countStudyItems(user);
       if (completedCount < warnThreshold) {
-        message += `${formatMissionWarning(warnThreshold - completedCount)}\n`;
+        const formatWarning = Object.hasOwn(MISSION_WARNING_STYLES, missionWarningStyle)
+          ? MISSION_WARNING_STYLES[missionWarningStyle]
+          : MISSION_WARNING_STYLES.past;
+        message += `${formatWarning(warnThreshold - completedCount)}\n`;
       }
     }
 
@@ -508,59 +523,6 @@ function formatDetailedMessage(userData, missionChanges = null, options = {}) {
 }
 
 /**
- * 夜通知用のメッセージを組み立てる
- *
- * 夜通知は速報であり、当日中に挽回してほしいユーザーを知らせることだけが目的のため、
- * 学習件数・ミッション詳細・勉強時間は出さず名前だけを並べる(翌朝の確定通知が詳細をカバーする)。
- * データ取得に失敗したユーザーは未達と断定できないため、別枠に分けて並べる。
- *
- * @param {object} [params]
- * @param {Array<string>} [params.unqualifiedNames=[]] - 当日のストリーク要件が未達のユーザー名
- * @param {Array<string>} [params.qualifiedNames=[]] - 当日のストリーク要件を達成したユーザー名
- * @param {Array<string>} [params.unreliableNames=[]] - データ取得に失敗したユーザー名
- * @param {Array<string>} [params.exemptNames=[]] - 免除日(おやすみ)のユーザー名
- * @returns {string} - フォーマットされたメッセージ
- */
-function formatUnqualifiedMessage({
-  unqualifiedNames = [],
-  qualifiedNames = [],
-  unreliableNames = [],
-  exemptNames = []
-} = {}) {
-  const sections = ['📊 スマイルゼミ 学習状況'];
-
-  if (unqualifiedNames.length > 0) {
-    sections.push('🚨 まだ今日の学習が終わっていません');
-    sections.push(listUserNames(unqualifiedNames));
-  }
-
-  if (unreliableNames.length > 0) {
-    sections.push('⚠️ データを取得できませんでした');
-    sections.push(listUserNames(unreliableNames));
-  }
-
-  // 達成した子も並べる。呼びかける相手が誰もいない日は「全員達成」とまとめて伝える
-  if (qualifiedNames.length > 0) {
-    const allDone = unqualifiedNames.length === 0 && unreliableNames.length === 0;
-    if (allDone) {
-      sections.push(exemptNames.length > 0
-        ? '✅ おやすみの人以外は本日の学習を終えました'
-        : '✅ 全員が本日の学習を終えました');
-    } else {
-      sections.push('✅ 今日の学習が終わりました');
-    }
-    sections.push(listUserNames(qualifiedNames));
-  }
-
-  if (exemptNames.length > 0) {
-    sections.push(EXEMPT_NOTICE);
-    sections.push(listUserNames(exemptNames));
-  }
-
-  return sections.join('\n\n');
-}
-
-/**
  * メッセージを指定文字数以内に切り詰める
  *
  * 上限は宛先ごとに異なる（LINE=5000, Discord=2000）ため引数で受け取る。
@@ -602,6 +564,5 @@ module.exports = {
   sendPushMessage,
   formatMessage,
   formatDetailedMessage,
-  formatUnqualifiedMessage,
   truncateToLimit
 };

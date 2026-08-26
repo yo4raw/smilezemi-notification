@@ -7,8 +7,8 @@ const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
 const { getAllUsersDetailedData, getAllUsersMissionCounts, getUserList, getTargetDates } = require('./crawler');
-const { loadPreviousData, compareData, saveData } = require('./data');
-const { formatMessage, formatUnqualifiedMessage, truncateToLimit } = require('./notifier');
+const { loadPreviousData, compareData, compareMissionDetails, saveData } = require('./data');
+const { formatMessage, formatDetailedMessage, truncateToLimit } = require('./notifier');
 const { broadcastToAll, broadcastToDiscordOnly, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
 const { isStudied, getRequirementForCourse, loadStreakData } = require('./streak');
 const fs = require('fs').promises;
@@ -248,8 +248,6 @@ async function main() {
     // 6.5 当日のストリーク要件の達成判定
     // 夜通知はストリーク・おたすけ・ボーナスを表示しない(翌朝の確定通知がカバーする)ため
     // ストリーク値そのものは使わない。免除日(おやすみ)の判定にだけデータを読む。
-    // 通知本文と送信先の判定には達成状況を使い、データ取得に失敗したユーザーは
-    // 未達と断定できないため判定にかけず別枠に分ける。
     const todayDateString = getTargetDates(0).dateString;
 
     const streakLoadResult = await loadStreakData();
@@ -259,37 +257,34 @@ async function main() {
     }
     const streakUsers = streakLoadResult.success ? streakLoadResult.data : {};
 
-    const exemptNames = [];
-    const unqualifiedNames = [];
-    const qualifiedNames = [];
-    const unreliableNames = [];
+    const exemptUserNames = currentData
+      .filter(user => (streakUsers[user.userName]?.exemptDates ?? []).includes(todayDateString))
+      .map(user => user.userName);
+
+    if (exemptUserNames.length > 0) {
+      console.log(`🏝️ 免除日のユーザー: ${exemptUserNames.join(', ')}`);
+    }
+
+    let hasUnqualifiedUser = false;
     currentData.forEach(user => {
       // 免除日のユーザーは未達に数えない(免除日のためにLINEを消費しない)
-      if ((streakUsers[user.userName]?.exemptDates ?? []).includes(todayDateString)) {
-        exemptNames.push(user.userName);
-        return;
-      }
-      if (user.dataReliable === false) {
-        unreliableNames.push(user.userName);
+      if (exemptUserNames.includes(user.userName)) {
         return;
       }
       const threshold = getRequirementForCourse(user.course);
-      if (isStudied(user, { minCompletedMissions: threshold })) {
-        qualifiedNames.push(user.userName);
-      } else {
-        unqualifiedNames.push(user.userName);
+      if (!isStudied(user, { minCompletedMissions: threshold })) {
+        hasUnqualifiedUser = true;
       }
     });
-
-    if (exemptNames.length > 0) {
-      console.log(`🏝️ 免除日のユーザー: ${exemptNames.join(', ')}`);
-    }
 
     // 7. データ比較（変更検出）
     console.log('🔄 データを比較しています...');
 
-    // ミッション数の変化（ログ用。夜通知の本文には使わない）
+    // ミッション数の変化（既存機能）
     const compareResult = compareData(previousData, currentData);
+
+    // ミッション詳細の変化（新機能）
+    const missionChangesResult = compareMissionDetails(previousData, currentData);
 
     if (compareResult.success) {
       console.log(`✅ データ比較が完了しました（${compareResult.changes.length}件の変更）`);
@@ -302,10 +297,18 @@ async function main() {
     // Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
     console.log('📤 通知を送信しています...');
 
-    // 夜通知は「まだ今日の学習が終わっていない人」を知らせるのが目的のため、
-    // 学習件数・ミッション詳細・勉強時間は出さず名前だけを並べる(翌朝の確定通知が詳細をカバーする)。
-    // 終わった子もついでに並べて、誰が済んでいるかが一目で分かるようにする
-    const message = formatUnqualifiedMessage({ unqualifiedNames, qualifiedNames, unreliableNames, exemptNames });
+    // 詳細メッセージをフォーマット（ミッション変化情報・コース別しきい値未達警告を含む）
+    // ストリーク行と勉強時間は翌朝の確定通知でカバーするため夜は出さない
+    const message = formatDetailedMessage(currentData, missionChangesResult, {
+      showStudyTime: false,
+      missionWarningStyle: 'today',
+      missionWarningThresholds: {
+        elementary: getRequirementForCourse('elementary'),
+        juniorHigh: getRequirementForCourse('juniorHigh')
+      },
+      exemptUserNames,
+      showExemptNotice: true
+    });
 
     // 送信先の決定
     // 夜通知は速報のため、全員が当日のストリーク要件を達成済みの日はLINEに送らない。
@@ -314,8 +317,8 @@ async function main() {
     // ただしDiscordには月間送信数の上限がないため、全員達成の日も記録として必ず送る。
     // 確定通知は翌朝の朝通知が毎日必ず送る。
     // 詳細: docs/superpowers/specs/2026-07-31-night-notification-discord-record-design.md
-    const discordOnly = unqualifiedNames.length === 0 && unreliableNames.length === 0;
-    const discordOnlyNotice = exemptNames.length > 0 ? DISCORD_ONLY_NOTICE_EXEMPT : DISCORD_ONLY_NOTICE;
+    const discordOnly = !hasUnqualifiedUser;
+    const discordOnlyNotice = exemptUserNames.length > 0 ? DISCORD_ONLY_NOTICE_EXEMPT : DISCORD_ONLY_NOTICE;
     const outgoingMessage = discordOnly ? `${discordOnlyNotice}\n\n${message}` : message;
 
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信・保存しない

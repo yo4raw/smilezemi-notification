@@ -540,12 +540,46 @@ describe('通知モジュール (src/notifier.js)', () => {
       ]
     };
 
-    it('完了ミッションが閾値未満なら残り件数つきの警告行が表示される', () => {
+    it('完了ミッションが閾値未満なら警告行が表示される(today)', () => {
       const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5
+        missionWarningThreshold: 5,
+        missionWarningStyle: 'today'
       });
 
-      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '残り件数つきの警告文言が出ること');
+      assert.match(message, /🚨🚨 あと2件! がんばろう! 🚨🚨/, '残り件数つきの励まし文言が出ること');
+    });
+
+    it('missionWarningStyle: past は過去形の文言になる', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, {
+        missionWarningThreshold: 5,
+        missionWarningStyle: 'past'
+      });
+
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '過去形の文言が出ること');
+    });
+
+    it('missionWarningStyle 省略時は past 扱いになる', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, { missionWarningThreshold: 5 });
+
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '既定は past であること');
+    });
+
+    it('missionWarningStyle が未知の値のときは past にフォールバックする', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, {
+        missionWarningThreshold: 5,
+        missionWarningStyle: 'unknown'
+      });
+
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '未知の値は past にフォールバックすること');
+    });
+
+    it('missionWarningStyle が "constructor" のような Object.prototype のプロパティ名でも past にフォールバックする', () => {
+      const message = notifier.formatDetailedMessage([baseUser], null, {
+        missionWarningThreshold: 5,
+        missionWarningStyle: 'constructor'
+      });
+
+      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, 'prototype汚染を拾わずpastにフォールバックすること');
     });
 
     it('完了ミッションが閾値以上なら警告行は表示されない', () => {
@@ -581,6 +615,8 @@ describe('通知モジュール (src/notifier.js)', () => {
         dataReliable: false
       };
       const message = notifier.formatDetailedMessage([user], null, {
+        showStudyTime: false,
+        missionWarningStyle: 'today',
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
 
@@ -628,10 +664,11 @@ describe('通知モジュール (src/notifier.js)', () => {
         ]
       };
       const message = notifier.formatDetailedMessage([juniorUser], null, {
-        missionWarningThreshold: 4
+        missionWarningThreshold: 4,
+        missionWarningStyle: 'today'
       });
 
-      assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '小学生と同じ文言になること');
+      assert.match(message, /🚨🚨 あと2件! がんばろう! 🚨🚨/, '小学生と同じ文言になること');
       assert.doesNotMatch(message, /講座完了/, '旧表記が残っていないこと');
       assert.doesNotMatch(message, /連続学習/, '「連続学習」への言及が消えていること');
     });
@@ -787,7 +824,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
-  describe('formatDetailedMessage - 勉強時間の表示', () => {
+  describe('formatDetailedMessage - 勉強時間の表示切り替え', () => {
     const { formatDetailedMessage } = require('../src/notifier');
 
     const userData = [{
@@ -801,13 +838,18 @@ describe('通知モジュール (src/notifier.js)', () => {
       missions: [{ name: '国語テスト(2年生：夏)', score: 20, completed: true }]
     }];
 
-    it('勉強時間行を出す', () => {
-      const message = formatDetailedMessage(userData, null, {});
-      assert.ok(message.includes('⏱️ 勉強時間: 00:13'), message);
-      assert.ok(message.includes('✅ 学習4件'), '学習件数行も出ること');
+    it('showStudyTime: false で勉強時間行を出さない', () => {
+      const message = formatDetailedMessage(userData, null, { showStudyTime: false });
+      assert.ok(!message.includes('勉強時間'), message);
+      assert.ok(message.includes('✅ 学習4件'), '学習件数行は残ること');
     });
 
-    it('完全未学習の日は「学習していません」を表示する', () => {
+    it('showStudyTime 省略時は従来どおり勉強時間行を出す', () => {
+      const message = formatDetailedMessage(userData, null, {});
+      assert.ok(message.includes('⏱️ 勉強時間: 00:13'), message);
+    });
+
+    it('showStudyTime: false でも朝通知の完全未学習判定は勉強時間を見る', () => {
       const noStudy = [{
         userName: 'はなこ (小学生コース)',
         course: 'elementary',
@@ -819,6 +861,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         missions: []
       }];
       const message = formatDetailedMessage(noStudy, null, {
+        showStudyTime: false,
         showNoStudyWarning: true
       });
       assert.ok(message.includes('⚠️ 昨日は学習していません'), message);
@@ -1084,12 +1127,23 @@ describe('通知モジュール (src/notifier.js)', () => {
     it('免除ユーザーには未達警告を出さない', () => {
       const message = notifier.formatDetailedMessage([user], null, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        missionWarningStyle: 'today',
         exemptUserNames: ['たろう']
       });
       assert.ok(!message.includes('あと'), `未達警告が出ている: ${message}`);
     });
 
-    it('朝通知はおやすみ行を出さない(ストリーク行で伝えるため)', () => {
+    it('showExemptNotice が true ならおやすみ行を出す', () => {
+      const message = notifier.formatDetailedMessage([user], null, {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        missionWarningStyle: 'today',
+        exemptUserNames: ['たろう'],
+        showExemptNotice: true
+      });
+      assert.ok(message.includes('🏝️ 今日はおやすみ（免除日）'), message);
+    });
+
+    it('showExemptNotice を省略するとおやすみ行は出ない(朝通知はストリーク行で伝える)', () => {
       const message = notifier.formatDetailedMessage([user], null, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
         exemptUserNames: ['たろう']
@@ -1101,6 +1155,7 @@ describe('通知モジュール (src/notifier.js)', () => {
       const others = [user, { ...user, userName: 'はなこ' }];
       const message = notifier.formatDetailedMessage(others, null, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
+        missionWarningStyle: 'today',
         exemptUserNames: ['たろう']
       });
       assert.ok(message.includes('あと4件'), `はなこの警告が出ていない: ${message}`);
@@ -1160,208 +1215,6 @@ describe('通知モジュール (src/notifier.js)', () => {
       assert.ok(
         !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(result),
         '孤立した高サロゲートが残らないこと'
-      );
-    });
-  });
-
-  describe('formatUnqualifiedMessage - 夜通知(未達ユーザー名のみ)', () => {
-    it('未達ユーザーの名前を見出しの下に並べる', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: ['たろう', 'はなこ'],
-        unreliableNames: []
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '🚨 まだ今日の学習が終わっていません',
-          '',
-          '👤 たろう',
-          '👤 はなこ'
-        ].join('\n')
-      );
-    });
-
-    it('学習件数やミッション詳細は含めない', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: ['たろう'],
-        unreliableNames: []
-      });
-
-      assert.ok(!message.includes('件'), '学習件数の行を含まないこと');
-      assert.ok(!message.includes('ミッション詳細'), 'ミッション詳細を含まないこと');
-      assert.ok(!message.includes('勉強時間'), '勉強時間を含まないこと');
-    });
-
-    it('データ取得に失敗したユーザーは未達とは別枠で並べる', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: ['たろう'],
-        unreliableNames: ['じろう']
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '🚨 まだ今日の学習が終わっていません',
-          '',
-          '👤 たろう',
-          '',
-          '⚠️ データを取得できませんでした',
-          '',
-          '👤 じろう'
-        ].join('\n')
-      );
-    });
-
-    it('未達が0人でも取得失敗がいれば未達の見出しは出さない', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: [],
-        unreliableNames: ['じろう']
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '⚠️ データを取得できませんでした',
-          '',
-          '👤 じろう'
-        ].join('\n')
-      );
-      assert.ok(!message.includes('まだ今日の学習'), '未達の見出しを含まないこと');
-    });
-
-    it('引数を省略しても見出しだけを返して例外にしない', () => {
-      assert.strictEqual(notifier.formatUnqualifiedMessage(), '📊 スマイルゼミ 学習状況');
-    });
-
-    it('免除日のユーザーは未達とは別枠で並べる', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: ['たろう'],
-        unreliableNames: [],
-        exemptNames: ['はなこ']
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '🚨 まだ今日の学習が終わっていません',
-          '',
-          '👤 たろう',
-          '',
-          '🏝️ 今日はおやすみ（免除日）',
-          '',
-          '👤 はなこ'
-        ].join('\n')
-      );
-    });
-
-    it('未達ユーザーがいる日は達成したユーザーも並べる', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: ['たろう'],
-        qualifiedNames: ['はなこ', 'じろう'],
-        unreliableNames: [],
-        exemptNames: []
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '🚨 まだ今日の学習が終わっていません',
-          '',
-          '👤 たろう',
-          '',
-          '✅ 今日の学習が終わりました',
-          '',
-          '👤 はなこ',
-          '👤 じろう'
-        ].join('\n')
-      );
-    });
-
-    it('全員が達成した日は達成の見出しの下に全員を並べる', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: [],
-        qualifiedNames: ['たろう', 'はなこ'],
-        unreliableNames: [],
-        exemptNames: []
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '✅ 全員が本日の学習を終えました',
-          '',
-          '👤 たろう',
-          '👤 はなこ'
-        ].join('\n')
-      );
-    });
-
-    it('免除日以外の全員が達成した日はおやすみを除いた達成として並べる', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: [],
-        qualifiedNames: ['たろう'],
-        unreliableNames: [],
-        exemptNames: ['はなこ']
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '✅ おやすみの人以外は本日の学習を終えました',
-          '',
-          '👤 たろう',
-          '',
-          '🏝️ 今日はおやすみ（免除日）',
-          '',
-          '👤 はなこ'
-        ].join('\n')
-      );
-    });
-
-    it('達成したユーザーがいなければ達成の見出しを出さない', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: ['たろう'],
-        qualifiedNames: [],
-        unreliableNames: [],
-        exemptNames: []
-      });
-
-      assert.ok(!message.includes('✅'), `達成の見出しが出ている: ${message}`);
-    });
-
-    it('全員が免除日なら達成の見出しを出さずおやすみだけを並べる', () => {
-      const message = notifier.formatUnqualifiedMessage({
-        unqualifiedNames: [],
-        qualifiedNames: [],
-        unreliableNames: [],
-        exemptNames: ['たろう', 'はなこ']
-      });
-
-      assert.strictEqual(
-        message,
-        [
-          '📊 スマイルゼミ 学習状況',
-          '',
-          '🏝️ 今日はおやすみ（免除日）',
-          '',
-          '👤 たろう',
-          '👤 はなこ'
-        ].join('\n')
       );
     });
   });
