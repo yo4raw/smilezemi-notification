@@ -261,6 +261,7 @@ async function main() {
 
     const exemptNames = [];
     const unqualifiedNames = [];
+    const qualifiedNames = [];
     const unreliableNames = [];
     currentData.forEach(user => {
       // 免除日のユーザーは未達に数えない(免除日のためにLINEを消費しない)
@@ -273,7 +274,9 @@ async function main() {
         return;
       }
       const threshold = getRequirementForCourse(user.course);
-      if (!isStudied(user, { minCompletedMissions: threshold })) {
+      if (isStudied(user, { minCompletedMissions: threshold })) {
+        qualifiedNames.push(user.userName);
+      } else {
         unqualifiedNames.push(user.userName);
       }
     });
@@ -300,8 +303,9 @@ async function main() {
     console.log('📤 通知を送信しています...');
 
     // 夜通知は「まだ今日のノルマが終わっていない人」を知らせるのが目的のため、
-    // 学習件数・ミッション詳細・勉強時間は出さず名前だけを並べる(翌朝の確定通知が詳細をカバーする)
-    const message = formatUnqualifiedMessage({ unqualifiedNames, unreliableNames, exemptNames });
+    // 学習件数・ミッション詳細・勉強時間は出さず名前だけを並べる(翌朝の確定通知が詳細をカバーする)。
+    // 終わった子もついでに並べて、誰が済んでいるかが一目で分かるようにする
+    const message = formatUnqualifiedMessage({ unqualifiedNames, qualifiedNames, unreliableNames, exemptNames });
 
     // 送信先の決定
     // 夜通知は速報のため、全員が当日のストリーク要件を達成済みの日はLINEに送らない。

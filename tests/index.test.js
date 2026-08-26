@@ -807,6 +807,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
       assert.ok(capturedParams, 'formatUnqualifiedMessageが呼ばれること');
       assert.deepStrictEqual(capturedParams.unqualifiedNames, ['次郎'], '未達ユーザーだけを渡すこと');
+      assert.deepStrictEqual(capturedParams.qualifiedNames, ['太郎'], '達成ユーザーも渡すこと');
       assert.deepStrictEqual(capturedParams.unreliableNames, [], '取得失敗ユーザーはいないこと');
     });
 
@@ -828,6 +829,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
       assert.deepStrictEqual(capturedParams.exemptNames, ['太郎'], '免除日のユーザーを渡すこと');
       assert.deepStrictEqual(capturedParams.unqualifiedNames, [], '免除日のユーザーを未達に数えないこと');
+      assert.deepStrictEqual(capturedParams.qualifiedNames, [], '免除日のユーザーを達成にも数えないこと');
     });
 
     it('データ取得に失敗したユーザーは未達ではなくunreliableNamesに入る', async () => {
@@ -852,6 +854,7 @@ describe('オーケストレーション (src/index.js)', () => {
 
       assert.deepStrictEqual(capturedParams.unqualifiedNames, [], '取得失敗ユーザーを未達に混ぜないこと');
       assert.deepStrictEqual(capturedParams.unreliableNames, ['次郎'], '取得失敗ユーザーを別枠に渡すこと');
+      assert.deepStrictEqual(capturedParams.qualifiedNames, ['太郎'], '取得失敗ユーザーを達成に混ぜないこと');
     });
 
     it('データ取得に失敗したユーザーがいる日はLINEにも送る', async () => {
