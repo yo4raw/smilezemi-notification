@@ -55,7 +55,22 @@ create table if not exists state_audit (
   value      text not null,
   written_at text not null      -- ISO 8601
 );
+
+-- 監査行はトリガーで自動的に積む。アプリは app_state の upsert 1文だけを送る
+create trigger if not exists app_state_audit_insert
+after insert on app_state
+begin
+  insert into state_audit (key, value, written_at) values (new.key, new.value, new.updated_at);
+end;
+
+create trigger if not exists app_state_audit_update
+after update on app_state
+begin
+  insert into state_audit (key, value, written_at) values (new.key, new.value, new.updated_at);
+end;
 ```
+
+監査行をトリガーで積むのは原子性のためである。Turso の pipeline は**文ごとに独立して実行され、途中の文がエラーでも HTTP 200 を返して後続の文を実行する**（実測で確認）。したがって「upsert と insert を同一リクエストで送る」だけでは、片方だけ成立する状態を防げない。トリガーは元の文と同じ暗黙のトランザクションで動くため、`app_state` の更新と `state_audit` の追記が必ず揃う。アプリ側が送る文は1つだけになり、部分成功の分岐も不要になる。
 
 JSON の構造は一切変更しない。`streak_data` の v1.4 バージョン管理と移行ロジック、`replayStreak()` はそのまま機能する。正規化しないのは、このアプリが状態を丸ごと読んで丸ごと書くだけで SQL のクエリを必要としないためである。正規化すると `streak.js` の内部構造と `streak.test.js`（1250行）の大規模な書き換えが発生し、得られるものが要件に見合わない。
 
@@ -87,7 +102,8 @@ writeState(key, value)        // → {success, error?}
 
 - 認証: `Authorization: Bearer ${TURSO_AUTH_TOKEN}`、接続先は `TURSO_DATABASE_URL` から導出
 - タイムアウト: `AbortController` で10秒（`notifier.js` の既定値に揃える）
-- 書き込みは `app_state` の upsert と `state_audit` の insert を**同一 pipeline リクエスト**で送り、片方だけ残る状態を避ける
+- **HTTP ステータスだけでは成否を判定できない。** pipeline は文がエラーでも 200 を返し、`results[i].type` が `'error'` になる。各結果を検査し、1つでもエラーがあれば失敗として扱う
+- 書き込みは `app_state` の upsert 1文のみを送る。`state_audit` への追記はトリガーが行う（前節のとおり原子性のため）
 - 書き込み失敗時は1秒後に1度だけリトライする。`bonus` は実際のお小遣いであり、一瞬のネットワーク断で1日分を取りこぼすのは実損になる。それでも失敗したら諦める（方針どおり）
 - `store.js` は `DRY_RUN` を参照しない。ドライランでの保存スキップは各エントリポイントが既に判定している
 - **`writeState` はテーブルを作成してはならない。** スキーマ作成は移行スクリプトだけが行う。`writeState` に `create table if not exists` を持たせると、未移行の状態で夜通知の `saveData` がテーブルを作ってしまい、翌朝の `readState` が `'uninitialized'` ではなく `'empty'` を返す。その結果ストリークが初回実行として 0 にリセットされる。テーブルがない状態での書き込みは失敗させ、終了コード1で気づかせる
@@ -180,7 +196,7 @@ writeState(key, value)        // → {success, error?}
 
 1. checkout → `actions/cache/restore@v6` で `smilezemi-data-` を復元
 2. `scripts/migrate-to-turso.js` を実行
-   - `create table if not exists` でスキーマを作成
+   - `create table if not exists` と `create trigger if not exists` でスキーマとトリガーを作成
    - `data/streak_data.json` と `data/mission_data.json` を `app_state` に upsert し、`state_audit` にも記録
    - 既に `app_state` に該当キーの行があれば上書きしない。上書きは `--force` を明示したときだけ（二重実行の事故防止）
 3. 書いた内容を読み戻し、ユーザー数と `streak` / `grace` / `bonus` を表示して照合する。実名はマスクして出力する
@@ -198,7 +214,7 @@ writeState(key, value)        // → {success, error?}
 
 ## テスト
 
-- `tests/store.test.js`（新規）: `resolveEndpoint` の URL 変換、`fetch` をモックした pipeline リクエストの内容、`no such table` を `'uninitialized'` に分類する分岐、行なしを `'empty'` に分類する分岐、タイムアウト、書き込みの1回リトライ
+- `tests/store.test.js`（新規）: `resolveEndpoint` の URL 変換、`fetch` をモックした pipeline リクエストの内容、`no such table` を `'uninitialized'` に分類する分岐、行なしを `'empty'` に分類する分岐、**HTTP 200 でも `results[i].type === 'error'` なら失敗にする分岐**、タイムアウト、書き込みの1回リトライ
 - `tests/data.test.js` / `tests/streak.test.js`: 実ファイル I/O を前提した箇所を store のモックに差し替える。`beforeEach` / `afterEach` のファイル掃除は不要になる
 - `tests/index.test.js`: `MODULE_PATHS` に `../src/store` を追加する（追加漏れるとモック注入が効かず落ちる）
 - `tests/morning-index.test.js`: 現状13行で `main` のエクスポート確認のみであり、確定処理のテストがない。今回変更するのがその永続化経路そのものであるため、`index.test.js` と同じ `require.cache` 注入パターンで、確定・免除日・未初期化時のスキップ・保存失敗時の挙動を追加する
