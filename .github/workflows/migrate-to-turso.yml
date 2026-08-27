@@ -3,6 +3,20 @@ name: Turso移行 (使い捨て)
 # actions/cache に残っている data/*.json を Turso に投入する一度きりのワークフロー。
 # 移行が完了し、夜通知と朝通知が Turso から正しく読み書きできることを確認したら、
 # このワークフローと scripts/migrate-to-turso.js を削除する。
+#
+# 【期限】マージ後すみやかに(遅くとも7日以内に)実行する。
+# マージ後はどのワークフローも actions/cache に触らないため、7日間アクセスがないと
+# GitHub がキャッシュを自動削除する。復元元そのものが消えると streak / bonus(現金)を
+# 取り戻す手段がなくなる。
+#
+# 【失敗したときの最重要事項】ログに「[migrate-to-turso] スキーマの作成が完了しました」が
+# 出た後に失敗した場合(スクリプトの異常終了だけでなく、timeout-minutes 超過や runner 障害で
+# ジョブ自体が死んだ場合も含む)、app_state テーブルは実在し streak_data の行が無い状態に
+# なっている可能性がある。この状態で翌 JST 7:00 の朝通知が走ると、Turso 側が「初回実行」と
+# 誤認されて全ユーザーの streak / grace / bonus が上書きされる(復元手段なし)。
+# 翌 JST 7:00 までに移行を完了させるか、morning-crawler ワークフローを一時的に無効化する。
+# 朝通知が既に走ってしまった場合、再実行は「既に存在します(スキップ)」になるため
+# force オプション(--force)が必要。
 
 on:
   workflow_dispatch:
@@ -58,3 +72,37 @@ jobs:
           else
             node scripts/migrate-to-turso.js
           fi
+
+      # ワークフロー失敗を通知（最後の砦。LINE→失敗時のみDiscord。この通知自体の失敗はジョブを落とさない）
+      # 一度きりの操作であり、失敗を見落とすと不可逆の被害につながるため他のワークフローと同じ通知を入れる
+      - name: 失敗を通知（LINE→失敗時のみDiscord）
+        if: failure()
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER: ${{ secrets.LINE_USER_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          message=$(printf '⚠️ GitHub Actions ワークフローが失敗しました\n\nワークフロー: %s\n実行ログ: %s' "$WORKFLOW_NAME" "$RUN_URL")
+          payload=$(jq -n --arg to "$LINE_USER" --arg text "$message" '{to: $to, messages: [{type: "text", text: $text}]}')
+
+          if curl -sS --fail-with-body -X POST https://api.line.me/v2/bot/message/push \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LINE_TOKEN" \
+            -d "$payload"; then
+            exit 0
+          fi
+
+          echo "::warning::LINEへの失敗通知に失敗しました"
+
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL が未設定のためDiscordへの転送をスキップします"
+            exit 0
+          fi
+
+          discord_message=$(printf '⚠️ LINEへの送信に失敗したためDiscordに転送しました\n\n%s' "$message")
+          discord_payload=$(jq -n --arg content "$discord_message" '{content: $content}')
+          curl -sS --fail-with-body -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$discord_payload" || echo "::warning::Discordへの失敗通知の送信にも失敗しました"

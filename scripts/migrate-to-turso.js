@@ -18,8 +18,9 @@
  *   streak/grace/bonus(現金)が消える。そのためこのスクリプトは
  *   (1) ファイルの読み込み・parse・正規化を全件済ませてからでないとcreateSchema
  *       を呼ばない(ファイル欠落やJSON破損ではテーブルを作らない)
- *   (2) createSchema失敗時は実際のテーブル有無をreadStateで確認し、
- *       危険な場合は運用者に翌朝7時までの対応を明示する
+ *   (2) createSchema失敗時、およびcreateSchema成功後にstreak_dataを投入できずに
+ *       失敗した場合(既存確認の失敗・書き込みの失敗)は、実際のテーブル/行の有無を
+ *       readStateで確認し、危険な場合は運用者に翌朝7時までの対応を明示する
  *   (3) 書き込み後にラウンドトリップ照合と本番の読み出し経路での検証を行い、
  *       空データを成功として通さない
  * という設計にしている。
@@ -28,12 +29,13 @@
  *
  * 使い方:
  *   node scripts/migrate-to-turso.js [--force]
+ *   (--force は値なしで指定する。`--force true` のような値付きはエラーで止める)
  */
 
 const fs = require('fs').promises;
 const path = require('path');
 
-const { createSchema, readState, writeState } = require('../src/store');
+const { createSchema, readState, writeState, sanitizeParseError } = require('../src/store');
 const { loadStreakData } = require('../src/streak');
 const { loadPreviousData } = require('../src/data');
 
@@ -47,6 +49,9 @@ const TARGETS = [
 
 /**
  * `--force` のようなフラグを素朴にパースする
+ *
+ * 値付きトークン(`--force true`)は文字列として拾う。真偽フラグとしての解釈は
+ * resolveForce() が担い、値付きの --force はそこで拒否する。
  *
  * @param {string[]} argv - process.argv.slice(2)
  * @returns {Record<string, string|boolean>}
@@ -85,6 +90,31 @@ function maskUserName(name) {
 }
 
 /**
+ * 「app_state テーブルが実在し、streak_data の行が無い」危険状態の共通文面。
+ *
+ * この状態は readState('streak_data') が 'uninitialized' ではなく 'empty' を返すため、
+ * 朝通知の安全装置(uninitializedならストリーク確定をスキップ)が素通りして
+ * 全ユーザーが新規扱いになる。createSchema()が失敗した場合(トリガー作成だけ失敗)と、
+ * createSchema()成功後にstreak_dataを投入できなかった場合の両方で起こりうるため、
+ * 文面を1つに集約する。
+ *
+ * @param {string} stateLabel - probeで観測したstate(または「確認不能(理由)」)
+ * @returns {string}
+ * @private
+ */
+function dangerousGapMessage(stateLabel) {
+  return `🚨🚨🚨 [migrate-to-turso] 危険: app_state テーブルは作成済みで、streak_data の行がない状態です(state=${stateLabel})。\n`
+    + 'このまま翌JST 7:00の朝通知が実行されると、Turso側が"初回実行"と誤認され'
+    + '全ユーザーの streak / grace / bonus が新規状態で上書きされます(復元手段はありません)。\n'
+    + '【今すぐ行うこと】\n'
+    + '  1. 原因(トリガー作成の失敗・ネットワーク障害など)を調査する\n'
+    + '  2. 翌朝7:00までに本スクリプトを再実行して streak_data / mission_data の投入を完了させる\n'
+    + '  3. 翌朝7:00までに間に合わない場合は morning-crawler ワークフローを一時的に無効化する\n'
+    + '  4. 既に朝通知が走ってしまった場合は app_state に行ができているため、'
+    + '再実行が「既に存在します(スキップ)」になる。上書きして正しい値を投入するには --force が必要';
+}
+
+/**
  * createSchema()失敗時に、実際に危険な状態(テーブルが作成済みの可能性)かを
  * probe(readStateの結果)から判定し、運用者への具体的なメッセージを組み立てる。
  *
@@ -109,40 +139,68 @@ function describeSchemaFailure(schemaError, probe) {
     };
   }
 
+  // 行が既にある(state=ok)場合、朝通知は既存値を読むため0リセットは起きない。
+  // ただしトリガーなどスキーマが不完全な可能性があるので放置はできない
+  if (probe.success && probe.state === 'ok') {
+    return {
+      dangerous: true,
+      message: `${header}\n`
+        + '⚠️ [migrate-to-turso] app_state に streak_data の行が既に存在します(state=ok)。'
+        + '行があるため朝通知でストリークが0にリセットされることはありません。'
+        + 'ただしトリガーなどスキーマが不完全な可能性があるため、原因を調査して再実行してください'
+        + '(既存値を上書きして投入し直す場合のみ --force を付けます)。'
+    };
+  }
+
   // probe.success===false(接続不能など)は「テーブルが無い」と確認できていないだけであり、
   // 「ある」とも断定できない。判断がつかない以上、安全側に倒して危険とみなす。
   const stateLabel = probe.success ? probe.state : `確認不能(${probe.error})`;
   return {
     dangerous: true,
-    message: `${header}\n`
-      + `🚨🚨🚨 [migrate-to-turso] 危険: app_state テーブルが作成済みの可能性があります(state=${stateLabel})。\n`
-      + 'このままJST 7:00の朝通知が実行されると、Turso側が"初回実行"と誤認され全ユーザーのストリークが0にリセットされます。\n'
-      + '【今すぐ行うこと】\n'
-      + '  1. 原因(トリガー作成の失敗など)を調査する\n'
-      + '  2. 朝7:00までに --force を付けて本スクリプトを再実行し、streak_data/mission_dataを投入する\n'
-      + '  3. 対応が朝7:00までに間に合わない場合は、朝通知ワークフローを手動で無効化する'
+    message: `${header}\n${dangerousGapMessage(stateLabel)}`
   };
 }
 
 /**
- * JSON.parseの失敗メッセージから入力断片を取り除く。
+ * createSchema()が成功した後に、streak_dataを投入できずに失敗したときの危険度を
+ * probe(readStateの結果)から判定する。
  *
- * V8はJSON.parseに失敗すると `Unexpected token 'u', ..."<入力の断片>"... is not
- * valid JSON` のように、前後の生テキストをメッセージにそのまま埋め込む
- * (断片の長さや"..."の有無は入力の長さ・エラー位置によって変わる)。
- * streak_data.json/mission_data.jsonのトップレベルキーはユーザーの実名なので、
- * ファイルやTurso側の値が壊れているとこの断片に実名がそのまま乗り、公開
- * リポジトリのワークフローログに漏れる。"Unexpected token 'u'," のような
- * 診断情報は残しつつ、二重引用符で囲まれた断片(先頭〜末尾の"の間)だけを除去する。
+ * この経路(既存確認の一過性失敗 / writeStateのリトライ後の失敗)は
+ * 「app_stateが実在し、streak_data行が無い」というファイル冒頭のコメントが
+ * 最重要として警告している状態そのものになりうる。createSchema失敗時と同じ
+ * 🚨 文面で、翌朝7:00までの対応と --force の必要性を運用者に伝える。
  *
- * @param {string} message - error.message などの生メッセージ
- * @returns {string}
+ * @param {string} baseError - 失敗そのものの説明(既存確認の失敗・書き込みの失敗)
+ * @param {{success: boolean, state?: string, error?: string}} probe - readState('streak_data')の結果
+ * @returns {{dangerous: boolean, message: string}}
  */
-function sanitizeParseError(message) {
-  if (typeof message !== 'string') {
-    return message;
+function describePostSchemaFailure(baseError, probe) {
+  if (probe.success && probe.state === 'ok') {
+    return {
+      dangerous: false,
+      message: `${baseError}\n`
+        + '[migrate-to-turso] app_state に streak_data の行は存在します(state=ok)。'
+        + '朝通知が新規扱いで上書きする状態ではありません。原因を解消してから再実行してください'
+        + '(既存値を上書きして投入し直す場合のみ --force を付けます)。'
+    };
   }
-  return message.replace(/\.{0,3}"[\s\S]*"\.{0,3}/, '(内容省略)');
+
+  if (probe.success && probe.state === 'uninitialized') {
+    return {
+      dangerous: false,
+      message: `${baseError}\n`
+        + '[migrate-to-turso] app_state テーブルが存在しません(uninitialized)。'
+        + 'スキーマ作成は成功したはずなので想定外ですが、テーブルが無い間は朝通知が'
+        + 'ストリークの確定処理をスキップするため上書き被害は起きません。'
+        + '原因を解消してから再実行してください。'
+    };
+  }
+
+  const stateLabel = probe.success ? probe.state : `確認不能(${probe.error})`;
+  return {
+    dangerous: true,
+    message: `${baseError}\n${dangerousGapMessage(stateLabel)}`
+  };
 }
 
 /**
@@ -248,11 +306,36 @@ function warnBeforeOverwrite(key, rawValue) {
 }
 
 /**
+ * createSchema()成功後の失敗を、危険度の判定込みで戻り値に組み立てる。
+ *
+ * streak_dataが投入済みなら朝通知が新規扱いで上書きする余地はないので、そのまま返す。
+ * まだ投入できていない場合だけ readState('streak_data') で実際の行の有無をprobeし、
+ * 危険なら 🚨 文面(翌朝7:00までの対応・--forceの必要性)を error に載せる。
+ *
+ * @param {string} baseError - 失敗そのものの説明
+ * @param {{migrated: string[], skipped: string[], writtenContent: Record<string,string>}} progress
+ * @returns {Promise<{success: false, migrated: string[], skipped: string[], writtenContent: Record<string,string>, schemaCreated: true, dangerous?: boolean, error: string}>}
+ * @private
+ */
+async function failAfterSchema(baseError, progress) {
+  const { migrated, skipped, writtenContent } = progress;
+  const base = { success: false, migrated, skipped, writtenContent, schemaCreated: true };
+
+  if (migrated.includes('streak_data')) {
+    return { ...base, error: baseError };
+  }
+
+  const probe = await readState('streak_data');
+  const { dangerous, message } = describePostSchemaFailure(baseError, probe);
+  return { ...base, dangerous, error: message };
+}
+
+/**
  * 移行を実行する
  *
  * @param {object} [options]
  * @param {boolean} [options.force=false] - 既存の行を上書きするか
- * @returns {Promise<{success: boolean, migrated: string[], skipped: string[], writtenContent?: Record<string,string>, dangerous?: boolean, error?: string}>}
+ * @returns {Promise<{success: boolean, migrated: string[], skipped: string[], schemaCreated: boolean, writtenContent?: Record<string,string>, dangerous?: boolean, error?: string}>}
  */
 async function migrate(options = {}) {
   const { force = false } = options;
@@ -276,10 +359,12 @@ async function migrate(options = {}) {
     try {
       normalized = JSON.stringify(JSON.parse(content));
     } catch (error) {
+      // createSchema()より前なのでテーブルは作られていない(schemaCreated:false)
       return {
         success: false,
         migrated,
         skipped,
+        schemaCreated: false,
         error: `${target.file} のJSONが壊れています: ${sanitizeParseError(error.message)}`
       };
     }
@@ -289,7 +374,7 @@ async function migrate(options = {}) {
 
   if (prepared.length === 0) {
     console.warn('[migrate-to-turso] 投入対象のファイルが1件もありません。スキーマは作成しません');
-    return { success: true, migrated, skipped, writtenContent };
+    return { success: true, migrated, skipped, schemaCreated: false, writtenContent };
   }
 
   // streak_dataが無いままcreateSchema()を呼ぶと、テーブルだけ存在してstreak_data行が
@@ -301,6 +386,7 @@ async function migrate(options = {}) {
       success: false,
       migrated,
       skipped,
+      schemaCreated: false,
       error: 'streak_data.json が無いため中断しました(mission_dataだけでcreateSchemaを呼ぶと、'
         + 'streak_data行の無いテーブルができてしまい危険です)'
     };
@@ -313,19 +399,18 @@ async function migrate(options = {}) {
     // 危険度に応じたメッセージを組み立てる
     const probe = await readState('streak_data');
     const { dangerous, message } = describeSchemaFailure(schemaResult.error, probe);
-    return { success: false, migrated, skipped, error: message, dangerous };
+    return { success: false, migrated, skipped, schemaCreated: false, error: message, dangerous };
   }
   console.log('[migrate-to-turso] スキーマの作成が完了しました');
 
   for (const target of prepared) {
     const existing = await readState(target.key);
     if (!existing.success) {
-      return {
-        success: false,
-        migrated,
-        skipped,
-        error: `${target.key} の既存確認に失敗しました: ${existing.error}`
-      };
+      // ここはテーブルが実在した状態での失敗なので、危険度をprobeで判定する
+      return await failAfterSchema(
+        `${target.key} の既存確認に失敗しました: ${existing.error}`,
+        { migrated, skipped, writtenContent }
+      );
     }
 
     if (existing.state === 'ok' && !force) {
@@ -340,12 +425,11 @@ async function migrate(options = {}) {
 
     const writeResult = await writeState(target.key, target.normalized);
     if (!writeResult.success) {
-      return {
-        success: false,
-        migrated,
-        skipped,
-        error: `${target.key} の書き込みに失敗しました: ${writeResult.error}`
-      };
+      // 同上。streak_dataが未投入のままここに来ると最も危険な状態になりうる
+      return await failAfterSchema(
+        `${target.key} の書き込みに失敗しました: ${writeResult.error}`,
+        { migrated, skipped, writtenContent }
+      );
     }
 
     console.log(`[migrate-to-turso] ${target.key} を投入しました (${target.normalized.length}文字)`);
@@ -353,7 +437,64 @@ async function migrate(options = {}) {
     writtenContent[target.key] = target.normalized;
   }
 
-  return { success: true, migrated, skipped, writtenContent };
+  return { success: true, migrated, skipped, schemaCreated: true, writtenContent };
+}
+
+/**
+ * --force の指定を厳密に解釈する。
+ *
+ * parseArgs は値付きトークンを拾うため `--force true` は args.force === 'true'
+ * (文字列)になる。これを黙って「forceなし」に倒すと、--forceを打ったのに上書きが
+ * 効かない取り違えが起きる。C1の復旧経路(朝通知が走ってしまい、時間に追われて
+ * --force を打つ場面)で最も起きてはいけない誤動作なので、値付きは受け付けず
+ * エラーで止める(`--force false` を真に解釈してしまう逆の事故も同時に防ぐ)。
+ *
+ * @param {Record<string, string|boolean>} args - parseArgs の戻り値
+ * @returns {{ok: boolean, force: boolean, error?: string}}
+ */
+function resolveForce(args) {
+  if (!Object.prototype.hasOwnProperty.call(args, 'force')) {
+    return { ok: true, force: false };
+  }
+  if (args.force === true) {
+    return { ok: true, force: true };
+  }
+  return {
+    ok: false,
+    force: false,
+    error: '[migrate-to-turso] --force に値を付けないでください'
+      + `(受け取った値: "${args.force}")。上書きするときは値なしの --force だけを指定します`
+  };
+}
+
+/**
+ * 失敗時に運用者へ出す追加の案内を組み立てる(純粋関数)。
+ *
+ * 「この時点ではTursoに何も投入されていません」は schemaCreated が false の
+ * ときだけ出す。createSchema が成功した後の失敗でこの文を出すと、
+ * 「app_stateが実在し streak_data 行が無い」という最も危険な状態を
+ * 「安全」と誤報することになる(C1)。
+ *
+ * @param {{migrated: string[], schemaCreated?: boolean, dangerous?: boolean}} result - migrate()の戻り値
+ * @returns {string[]} 出力する行
+ */
+function buildFailureAdvice(result) {
+  const lines = [];
+
+  if (result.migrated.length > 0) {
+    lines.push(
+      `[migrate-to-turso] 注意: ${result.migrated.join(', ')} は投入済みです。`
+      + '残りの原因を解消し、必要なら --force で再実行してください。'
+    );
+  } else if (!result.schemaCreated) {
+    lines.push('[migrate-to-turso] この時点ではTursoに何も投入されていません。原因を解消してから再実行してください。');
+  }
+
+  if (result.dangerous) {
+    lines.push('[migrate-to-turso] 🚨 上記のとおり危険な状態です。翌JST7:00までに対応してください。');
+  }
+
+  return lines;
 }
 
 /**
@@ -429,7 +570,13 @@ async function verify(migrateResult) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const force = args.force === true;
+  const forceOption = resolveForce(args);
+  if (!forceOption.ok) {
+    console.error(forceOption.error);
+    process.exitCode = 1;
+    return;
+  }
+  const force = forceOption.force;
 
   if (force) {
     console.warn('[migrate-to-turso] --force が指定されました。既存の値を上書きします');
@@ -439,20 +586,25 @@ async function main() {
 
   if (!result.success) {
     console.error(`[migrate-to-turso] 移行に失敗しました: ${result.error}`);
-    if (result.migrated.length > 0) {
-      console.error(`[migrate-to-turso] 注意: ${result.migrated.join(', ')} は投入済みです。残りの原因を解消し、必要なら --force で再実行してください。`);
-    } else if (!result.dangerous) {
-      console.error('[migrate-to-turso] この時点ではTursoに何も投入されていません。原因を解消してから再実行してください。');
-    }
-    if (result.dangerous) {
-      console.error('[migrate-to-turso] 🚨 上記のとおり危険な状態です。翌JST7:00までに対応してください。');
-    }
+    buildFailureAdvice(result).forEach(line => console.error(line));
     process.exitCode = 1;
     return;
   }
 
   console.log(`[migrate-to-turso] 投入: ${result.migrated.length > 0 ? result.migrated.join(', ') : '(なし)'}`);
   console.log(`[migrate-to-turso] スキップ: ${result.skipped.length > 0 ? result.skipped.join(', ') : '(なし)'}`);
+
+  // 今回書き込んだキーが1つもない場合(ローカルにファイルが無い、既存値をスキップした)は
+  // 照合するものがない。ここでverifyを走らせるとTursoが未初期化のまま
+  // 「照合に失敗しました」と誤報するため、明示的にスキップする
+  if (Object.keys(result.writtenContent ?? {}).length === 0) {
+    console.warn(
+      '[migrate-to-turso] 今回Tursoに書き込んだキーはないため照合(verify)を行いません'
+      + '(投入対象のファイルが無い、または既存値があってスキップしました)。'
+      + '移行が完了しているかは上の「投入」「スキップ」の行で確認してください。'
+    );
+    return;
+  }
 
   const verified = await verify(result);
   if (!verified) {
@@ -477,11 +629,13 @@ if (require.main === module) {
 
 module.exports = {
   parseArgs,
+  resolveForce,
   maskUserName,
   migrate,
   describeSchemaFailure,
+  describePostSchemaFailure,
+  buildFailureAdvice,
   compareRoundTrip,
   formatUserSummaryLine,
-  sanitizeParseError,
   hasStreakData
 };
