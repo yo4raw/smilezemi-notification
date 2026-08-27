@@ -118,6 +118,45 @@ describe('データ管理モジュール - Turso永続化', () => {
     assert.deepStrictEqual(result, { success: true, data: [] });
   });
 
+  it('v1.0のJSONは自動マイグレーションしてv2.0形式のusersを返す', async () => {
+    // v1.0形式には studyTime / totalScore / missions が存在しない。
+    // migrateDataV1toV2 (src/data.js) がこれらを補って初期値を埋める経路を検証する。
+    const stored = JSON.stringify({
+      version: '1.0',
+      timestamp: '2025-12-24T09:00:00.000Z',
+      users: [{ userName: 'たろう', missionCount: 5, date: '2025-12-24' }]
+    });
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data.length, 1);
+    assert.strictEqual(result.data[0].userName, 'たろう');
+    assert.strictEqual(result.data[0].missionCount, 5);
+    // migrateDataV1toV2 が補う3フィールド
+    assert.deepStrictEqual(result.data[0].studyTime, { hours: 0, minutes: 0 });
+    assert.strictEqual(result.data[0].totalScore, 0);
+    assert.deepStrictEqual(result.data[0].missions, []);
+  });
+
+  it('v1.0でusersが空配列の場合も空配列を返す', async () => {
+    const stored = JSON.stringify({
+      version: '1.0',
+      timestamp: '2025-12-24T09:00:00.000Z',
+      users: []
+    });
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.deepStrictEqual(result, { success: true, data: [] });
+  });
+
   it('壊れたJSONはパースエラーとして返す', async () => {
     const { dataModule } = loadDataWithStore({
       readState: async () => ({ success: true, state: 'ok', value: '{ broken' })
