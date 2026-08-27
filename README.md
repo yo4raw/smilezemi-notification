@@ -23,7 +23,7 @@
   - ☀️ **朝通知（毎日7:00）**: 中学生コースの昨日の学習実績（0件でも必ず届く）
   - 📅 **週間レポート（毎週月曜17:00）**: 週間学習ガイダンスレポート
 - **データ保存**: v2.0形式で詳細データを保存🗃️☁️（履歴追跡も完璧）
-  - GitHub Actions間は actions/cache で `data/` を引き継ぎ🔄（ストリークも差分比較もちゃんと繋がる）
+  - 保存先は **Turso(libSQL)** のクラウドDB🗄️✨（ストリークも差分比較も実行をまたいでちゃんと繋がる）
 - **グレースフルデグラデーション**: 詳細取得失敗時は基本モード（ミッション数のみ）にフォールバック🛡️✨
 - **エラーハンドリング**: エラー時はスクショ残す📸😵‍💫（原因追跡ラク）
 
@@ -47,6 +47,8 @@
 | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Messaging APIのチャネルアクセストークン🎫 |
 | `LINE_USER_ID` | LINE通知の送信先ユーザーID👤 |
 | `DISCORD_WEBHOOK_URL` | 任意: LINE送信失敗時のフォールバック先Webhook💬 |
+| `TURSO_DATABASE_URL` | Turso(libSQL)データベースのURL🗄️（`libsql://xxx.turso.io`） |
+| `TURSO_AUTH_TOKEN` | Tursoの認証トークン🔑 |
 
 ### LINE Messaging APIの設定💚📲（通知の心臓）
 
@@ -80,6 +82,8 @@ SMILEZEMI_PASSWORD=your_password
 LINE_CHANNEL_ACCESS_TOKEN=your_line_token
 LINE_USER_ID=your_line_user_id
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxxxx/yyyyy
+TURSO_DATABASE_URL=libsql://your-db.turso.io
+TURSO_AUTH_TOKEN=your_turso_auth_token
 ```
 
 ### 3. Docker環境でのテスト🐳💙（環境差を消す）
@@ -129,19 +133,18 @@ GitHub ActionsのcronはUTC設定な上に、実測1〜5.5時間も遅延する�
 
 ### データの引き継ぎ🔄☁️（ストリークの命綱）
 
-`data/`（`mission_data.json` + `streak_data.json`）は **actions/cache** で実行間を引き継いでるよ🧵✨
+学習データ（`mission_data`）とストリークデータ（`streak_data`）は **Turso(libSQL)** に保存してるよ🗄️✨
 
-- 実行前: `smilezemi-data-` プレフィックスで最新キャッシュを復元
-- 実行後: `smilezemi-data-<run_id>` で毎回新規保存（通知失敗でも保存される`if: always()`仕様）
-- 夜→翌朝→翌夜…と両ワークフローが同じキャッシュ系列をリレーする駅伝方式🏃‍♀️🎽
-- キャッシュ消えたらストリークは0から再スタート（毎日実行されるから7日失効は実質ノーダメ）
+- `src/store.js` がTursoのHTTP API（`/v2/pipeline`）を直接叩いて1行読んで1行書くだけのシンプル構成🧵
+- 書き込みは監査テーブル（`state_audit`）にもトリガーで履歴が残るから、いつ何を書いたか追える👀
+- ワークフローのログ・アーティファクト・キャッシュに学習データを残さないから、実名が公開されない🔒✨
+- テーブルが無い状態（移行前）は「初回実行」と区別されて、朝通知はストリークの確定処理をスキップするよ🛡️（0リセット防止）
 
-### アーティファクト📦☁️（証拠保全も完璧）
+### アーティファクト📦☁️（証拠保全は最小限）
 
-- **スクリーンショット**: エラー時のスクリーンショット（90日保存）📸🗓️
-- **学習データ（v2.0）**: 詳細な学習状況データJSON（90日保存）🧾🗓️
-  - 勉強時間、ミッション詳細、点数、完了状態を全部保存
-  - v1.0データからの自動マイグレーション対応✨
+- **スクリーンショット**: エラー時のスクリーンショット（3日保存）📸🗓️
+  - 中身はみまもるネットの画面そのもの（実名・成績）だから、長く公開しないよう短期保存にしてる🔒
+- 学習データのJSONはアーティファクトに出さないよ（実名の露出源になるし、Tursoに入ってるから重複）🚫🧾
 
 ## 検証とテスト（不安ゼロにしたい人向け）✅🧪
 
@@ -194,6 +197,7 @@ smilezemi-notification/
 │   │   └── selectors.js        # DOMセレクタ定義
 │   ├── auth.js                 # 認証モジュール
 │   ├── crawler.js              # クローリングモジュール
+│   ├── store.js                # Turso(libSQL)状態ストア🗄️（mission_data / streak_dataの読み書き）
 │   ├── data.js                 # ミッションデータ管理モジュール
 │   ├── streak.js               # ストリーク（連続学習日数）管理モジュール🔥
 │   ├── notifier.js             # 通知モジュール
@@ -223,9 +227,6 @@ smilezemi-notification/
 │   ├── API_NOTIFIER.md         # Notifier APIリファレンス
 │   ├── VALIDATION_CHECKLIST.md # 統合テスト・本番検証チェックリスト
 │   └── DOCKER_TESTING.md       # Docker環境テスト詳細手順
-├── data/                       # データ保存ディレクトリ（actions/cacheで実行間引き継ぎ）
-│   ├── mission_data.json       # 学習データ v2.0形式（勉強時間・ミッション詳細・点数を含む）
-│   └── streak_data.json        # ストリークデータ（連続日数・おたすけ残数・最終確定日）🔥
 ├── screenshots/                # スクリーンショット保存ディレクトリ
 ├── .env.example                # 環境変数テンプレート
 ├── .gitignore                  # Gitignore設定

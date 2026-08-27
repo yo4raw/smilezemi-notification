@@ -121,7 +121,7 @@ writeState(key, value)        // → {success, error?}
 
 | 関数 | 変更 |
 |---|---|
-| `loadStreakData()` | `readState('streak_data')`。`'uninitialized'` は `{success: false, uninitialized: true, error}` を返す。JSON パース失敗時は現状どおり「エラーを記録しつつ空状態で続行、次回保存で自己修復」 |
+| `loadStreakData()` | `readState('streak_data')`。`'uninitialized'` は `{success: false, uninitialized: true, error}` を返す。JSON パース失敗も含め読み取りに失敗したら `{success: false, error}` を返し、**朝通知は理由を問わず確定処理をスキップする**（空状態で続行して次回保存で自己修復する従来の挙動は取らない。詳細は「障害時の挙動」の節） |
 | `saveStreakData()` | `writeState('streak_data', ...)` |
 
 `DATA_DIR` / `STREAK_FILE` / `DATA_FILE` の定数と `fs.mkdir` は削除する。
@@ -192,6 +192,10 @@ writeState(key, value)        // → {success, error?}
 
 ## 移行手順
 
+### 期限（マージ後7日以内）
+
+**マージ後すみやかに、遅くとも7日以内に移行ワークフローを実行する。** actions/cache は7日間アクセスがないと GitHub が自動削除する。マージ後はどのワークフローもキャッシュに触らないため、移行を先延ばしにすると復元元そのものが消え、`streak` と `bonus`（実際に現金で支給する値）を取り戻す手段がなくなる。
+
 本番の `streak_data.json` は actions/cache 内にのみ存在し、キャッシュには公開ダウンロード API がない（アーティファクトに含まれるのは `mission_data.json` だけで、`history` を持つ streak データは入っていない）。そのため使い捨ての移行ワークフローを1本作る。
 
 ### `migrate-to-turso.yml`（`workflow_dispatch`）
@@ -207,7 +211,7 @@ writeState(key, value)        // → {success, error?}
 
 1. **Pull Request を作成する（今回の作業範囲はここまで）**
 2. ユーザーがマージする
-3. マージ後に `migrate-to-turso.yml` を実行し、照合する。この間に定期実行が走っても確定をスキップするだけで無害
+3. マージ後すみやかに（遅くとも7日以内に）`migrate-to-turso.yml` を実行し、照合する。この間に定期実行が走っても確定をスキップするだけで無害。7日を過ぎると actions/cache が自動削除され復元元が失われる
 4. 夜通知と翌朝の朝通知で読み書きが成立したことを確認する
 5. キャッシュ15件とアーティファクト454件（`mission-data` 239 / `screenshots` 200 / `morning-screenshots` 15）を削除する
 6. `migrate-to-turso.yml` と `scripts/migrate-to-turso.js` を削除する
