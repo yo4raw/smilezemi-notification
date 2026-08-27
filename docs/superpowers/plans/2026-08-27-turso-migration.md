@@ -1713,7 +1713,7 @@ describe('朝通知エントリポイント (src/morning-index.js)', () => {
     assert.deepStrictEqual(formatCall.options.exemptUserNames, [], '免除日も空にすること');
   });
 
-  it('通常の読み取り失敗は空状態で確定を続行する(自己修復のため)', async () => {
+  it('通常の読み取り失敗でも確定処理をスキップする(空状態での上書きを防ぐ)', async () => {
     setupMocks({
       loadStreakData: async () => {
         callLog.push({ type: 'loadStreakData' });
@@ -1724,8 +1724,16 @@ describe('朝通知エントリポイント (src/morning-index.js)', () => {
     const result = await morningModule.main();
 
     assert.strictEqual(
-      callLog.filter(c => c.type === 'updateStreaksByCourse').length, 1,
-      '一時的な障害では確定処理を続行すること'
+      callLog.filter(c => c.type === 'updateStreaksByCourse').length, 0,
+      '一時的な障害でも空データで確定してはならない(streak/grace/bonusを上書きしてしまう)'
+    );
+    assert.strictEqual(
+      callLog.filter(c => c.type === 'saveStreakData').length, 0,
+      '読めなかったデータを上書き保存しないこと'
+    );
+    assert.strictEqual(
+      callLog.filter(c => c.type === 'broadcastToAll').length, 1,
+      '通知は送ること'
     );
     assert.strictEqual(result.exitCode, 1, '読み取り失敗はerrorsに積まれるため赤くなること');
   });
@@ -1794,24 +1802,17 @@ Expected: FAIL。未初期化のテストで `updateStreaksByCourse` が呼ば�
     console.log('🔥 ストリークを更新しています...');
     const streakLoadResult = await loadStreakData();
 
-    if (streakLoadResult.uninitialized) {
-      // 移行前(Tursoにapp_stateテーブルがない)。空データで確定すると全ユーザーが
-      // 新規扱いになり連続日数が0にリセットされるため、確定処理そのものを行わない。
-      // 通知はストリーク行なしで出し、終了コード1で移行漏れに気づけるようにする
-      console.error('❌ ストリークデータの保存先が未初期化のため、確定処理をスキップします:', streakLoadResult.error);
+    if (!streakLoadResult.success) {
+      // 読み込めなかったときは理由を問わず確定処理そのものを行わない。
+      // 空データで確定すると全ユーザーが新規扱いになり、streak / grace / bonus を
+      // 上書き保存して恒久的に失う(bonus は実際に支給するお小遣いで復元手段がない)。
+      // 未判定の日は中立扱い(ペナルティなし)なので、スキップしても子供は損をしない。
+      // 通知はストリーク行なしで出し、終了コード1で気づけるようにする。
+      // 移行前(uninitialized)も一過性のネットワーク障害もこの経路に入る
+      console.error('❌ ストリークデータを読み込めなかったため、確定処理をスキップします:', streakLoadResult.error);
       errors.push(streakLoadResult.error);
     } else {
-      let previousStreakUsers;
-      if (streakLoadResult.success) {
-        previousStreakUsers = streakLoadResult.data;
-      } else {
-        // 読み込み失敗はエラーとして記録しつつ、空状態で続行して次回保存時に自己修復させる
-        // (システム側の問題で子供にペナルティを与えず、通知処理も止め続けないため)
-        console.error('❌ ストリークデータの読み込みに失敗しました:', streakLoadResult.error);
-        errors.push(streakLoadResult.error);
-        console.warn('⚠️ ストリークデータを初期化して続行します');
-        previousStreakUsers = {};
-      }
+      const previousStreakUsers = streakLoadResult.data;
 
       // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生3)
       const { streakUsers, results } = updateStreaksByCourse(
