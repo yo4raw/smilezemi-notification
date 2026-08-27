@@ -17,7 +17,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      actions: read # キャッシュ整合性チェック(gh api)に必要
 
     steps:
       # 1. リポジトリのチェックアウト
@@ -51,6 +50,8 @@ jobs:
           echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" >> .env
           echo "LINE_USER_ID=${{ secrets.LINE_USER_ID }}" >> .env
           echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> .env
+          echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}" >> .env
+          echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}" >> .env
 
       # 4. Dockerイメージをビルド
       - name: Dockerイメージをビルド
@@ -71,45 +72,12 @@ jobs:
             echo "既にJST 8:00を過ぎているため即実行します"
           fi
 
-      # 6. 前回データを復元(朝通知の保存(〜7:05頃)との競合を避けるため待機の後に行う)
-      - name: 前回データを復元
-        if: steps.date-guard.outputs.run == 'true'
-        id: restore-data
-        uses: actions/cache/restore@v6
-        with:
-          path: data
-          key: smilezemi-data-${{ github.run_id }}
-          restore-keys: |
-            smilezemi-data-
-
-      # キャッシュ整合性チェック: 既存エントリがあるのに復元できなかった場合は
-      # 誤清算(ボーナス0で上書き)を防ぐためジョブを中断する
-      - name: キャッシュ復元の整合性を検証
-        if: steps.date-guard.outputs.run == 'true' && steps.restore-data.outputs.cache-matched-key == ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=smilezemi-data-" --jq '.total_count')
-          if [ "$count" -gt 0 ]; then
-            echo "::error::既存のキャッシュエントリ(${count}件)があるのに復元できませんでした。データ保護のためジョブを中断します。キャッシュサービス回復後に手動で再実行してください。"
-            exit 1
-          fi
-          echo "キャッシュエントリなし(初回実行またはエビクション後)のため、初期状態で続行します"
-
-      # 7. 月次ボーナス清算を実行
+      # 6. 月次ボーナス清算を実行
       - name: 月次ボーナス清算を実行
         if: steps.date-guard.outputs.run == 'true'
         run: docker compose run --rm crawler node src/monthly-bonus-index.js
 
-      # 8. データをキャッシュに保存(清算後のリセット状態を次回実行に引き継ぐ)
-      - name: データをキャッシュに保存
-        if: always() && steps.date-guard.outputs.run == 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: data
-          key: smilezemi-data-${{ github.run_id }}
-
-      # 9. .envファイルを削除(セキュリティ対策)
+      # 7. .envファイルを削除(セキュリティ対策)
       - name: .envファイルを削除
         if: always()
         run: rm -f .env
