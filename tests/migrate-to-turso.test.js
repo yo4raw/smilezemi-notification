@@ -337,6 +337,17 @@ describe('Turso移行スクリプト (scripts/migrate-to-turso.js)', () => {
         'テーブルが作成済みなら「何も投入されていません」は誤り'
       );
     });
+
+    it('schemaCreated:false かつ dangerous:true のとき「何も投入されていません」を出さない(危険状態との矛盾を防ぐ)', () => {
+      // createSchemaが部分成功で失敗した場合(某テーブルは作成済みだが他のテーブルは未作成)
+      // 🚨危険フラグが立つため、「何も投入されていません」と矛盾する
+      const lines = buildFailureAdvice({ migrated: [], schemaCreated: false, dangerous: true });
+      assert.ok(
+        lines.every(line => !/何も投入されていません/.test(line)),
+        '危険状態では「何も投入されていません」は誤り'
+      );
+      assert.ok(lines.some(line => /🚨/.test(line)), '危険フラグは出すこと');
+    });
   });
 
   describe('migrate() — I3: 一度きり・不可逆の本体', () => {

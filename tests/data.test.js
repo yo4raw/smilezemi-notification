@@ -390,6 +390,29 @@ describe('データ管理モジュール (src/data.js)', () => {
       assert.strictEqual(result.changes[0].previousCount, 0);
       assert.strictEqual(result.changes[0].diff, 2);
     });
+
+    it('JSONパースエラーのメッセージが実名をマスキングする形式であること', async () => {
+      // sanitizeParseError が呼ばれている（つまり error.message ではなく
+      // sanitizeParseError(error.message) が返されている）ことを確認する。
+      // 実装で error.message に変わると、このテストが落ちるはず。
+      const { dataModule } = loadDataWithStore({
+        readState: async () => ({
+          success: true,
+          state: 'ok',
+          // エラーメッセージシミュレーション: 実名を含む壊れたJSON
+          value: '{"version":"1.0","users":[{"userName":"やまだたろう"'
+        })
+      });
+
+      const result = await dataModule.loadPreviousData();
+
+      assert.strictEqual(result.success, false);
+      // JSONパースエラーとしてのエラー行は出力されること
+      assert.match(result.error, /JSONパースエラー/);
+      // 実装で sanitizeParseError が呼ばれている場合、実名は含まれない
+      // 実装で error.message が直接返されると、この行で落ちる
+      assert.doesNotMatch(result.error, /やまだたろう/, 'JSONパースエラーメッセージに実名が含まれている (sanitizeParseError が呼ばれていない可能性)');
+    });
   });
 
 });

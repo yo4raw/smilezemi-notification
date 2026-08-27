@@ -486,7 +486,7 @@ function buildFailureAdvice(result) {
       `[migrate-to-turso] 注意: ${result.migrated.join(', ')} は投入済みです。`
       + '残りの原因を解消し、必要なら --force で再実行してください。'
     );
-  } else if (!result.schemaCreated) {
+  } else if (!result.schemaCreated && !result.dangerous) {
     lines.push('[migrate-to-turso] この時点ではTursoに何も投入されていません。原因を解消してから再実行してください。');
   }
 

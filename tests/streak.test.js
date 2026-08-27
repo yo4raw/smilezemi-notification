@@ -1374,4 +1374,27 @@ describe('ストリークモジュール - Turso永続化', () => {
     assert.strictEqual(loadResult.success, true);
     assert.deepStrictEqual(loadResult.data, users);
   });
+
+  it('JSONパースエラーのメッセージが実名をマスキングする形式であること', async () => {
+    // sanitizeParseError が呼ばれている（つまり error.message ではなく
+    // sanitizeParseError(error.message) が返されている）ことを確認する。
+    // 実装で error.message に変わると、このテストが落ちるはず。
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({
+        success: true,
+        state: 'ok',
+        // エラーメッセージシミュレーション: 実名を含む壊れたJSON
+        value: '{"version":"1.4","users":{"やまだたろう":{"streak":5'
+      })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, false);
+    // JSONパースエラーとしての エラー行は出力されること
+    assert.match(result.error, /JSONパースエラー/);
+    // 実装で sanitizeParseError が呼ばれている場合、実名は含まれない
+    // 実装で error.message が直接返されると、この行で落ちる
+    assert.doesNotMatch(result.error, /やまだたろう/, 'JSONパースエラーメッセージに実名が含まれている (sanitizeParseError が呼ばれていない可能性)');
+  });
 });
