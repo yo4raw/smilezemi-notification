@@ -84,4 +84,70 @@ describe('Turso状態ストア (src/store.js)', () => {
       assert.throws(() => store.resolveEndpoint(''), /TURSO_DATABASE_URL/);
     });
   });
+
+  describe('readState()', () => {
+    it('行があれば state=ok と値を返す', async () => {
+      mockFetchOk([okExecute([[{ type: 'text', value: '{"version":"2.0"}' }]]), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.readState('mission_data');
+
+      assert.deepStrictEqual(result, { success: true, state: 'ok', value: '{"version":"2.0"}' });
+    });
+
+    it('行がなければ state=empty を返す', async () => {
+      mockFetchOk([okExecute([]), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.readState('mission_data');
+
+      assert.deepStrictEqual(result, { success: true, state: 'empty', value: null });
+    });
+
+    it('no such table は state=uninitialized を返す(移行前)', async () => {
+      mockFetchOk([errorResult('SQLite error: no such table: app_state'), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.readState('streak_data');
+
+      assert.deepStrictEqual(result, { success: true, state: 'uninitialized', value: null });
+    });
+
+    it('no such table 以外のSQLエラーは失敗にする', async () => {
+      mockFetchOk([errorResult('SQLite error: database is locked'), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.readState('streak_data');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /database is locked/);
+    });
+
+    it('keyをバインド引数で渡す(文字列連結しない)', async () => {
+      mockFetchOk([okExecute([]), { type: 'ok', response: { type: 'close' } }]);
+
+      await store.readState('streak_data');
+
+      const { body, url, options } = fetchCalls[0];
+      assert.strictEqual(url, 'https://test-db.turso.io/v2/pipeline');
+      assert.strictEqual(options.headers.Authorization, 'Bearer test-token');
+      assert.deepStrictEqual(body.requests[0].stmt.args, [{ type: 'text', value: 'streak_data' }]);
+      assert.match(body.requests[0].stmt.sql, /where key = \?/);
+      assert.strictEqual(body.requests.at(-1).type, 'close', '最後にcloseを送ること');
+    });
+
+    it('HTTPステータスが200以外なら失敗にする', async () => {
+      global.fetch = async () => ({ ok: false, status: 401, statusText: 'Unauthorized', json: async () => ({}) });
+
+      const result = await store.readState('streak_data');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /401/);
+    });
+
+    it('接続情報が未設定なら失敗にする', async () => {
+      delete process.env.TURSO_AUTH_TOKEN;
+
+      const result = await store.readState('streak_data');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /TURSO_AUTH_TOKEN/);
+    });
+  });
 });
