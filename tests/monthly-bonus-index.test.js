@@ -268,6 +268,9 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       const result = await mainModule.main();
 
       assert.strictEqual(result.exitCode, 1);
+      const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
+      assert.strictEqual(pushCalls.length, 1, '障害通知が送られること');
+      assert.match(pushCalls[0].args[0], /⚠️/);
       assert.strictEqual(
         callLog.filter(c => c.type === 'saveStreakData').length, 0,
         'ボーナスをリセットしないこと(お金を配る処理なので中断する)'

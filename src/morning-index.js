@@ -133,7 +133,10 @@ async function main() {
       // 読み込めなかったときは理由を問わず確定処理そのものを行わない。
       // 空データで確定すると全ユーザーが新規扱いになり、streak / grace / bonus を
       // 上書き保存して恒久的に失う(bonus は実際に支給するお小遣いで復元手段がない)。
-      // 未判定の日は中立扱い(ペナルティなし)なので、スキップしても子供は損をしない。
+      // 確定はhistoryベース(confirmDayWithHistory/replayStreak)なので、この日を
+      // スキップしても既存の連続記録(streakチェーン)は壊れない。ただし前日分の
+      // streak +1(おたすけ満タン中はbonus +1も)はhistoryに載らないため加算されず、
+      // その日の分だけ失われる。必要なら scripts/set-streak-field.js で手動補修する。
       // 通知はストリーク行なしで出し、終了コード1で気づけるようにする。
       // 移行前(uninitialized)も一過性のネットワーク障害もこの経路に入る
       console.error('❌ ストリークデータを読み込めなかったため、確定処理をスキップします:', streakLoadResult.error);
