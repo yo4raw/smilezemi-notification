@@ -1,0 +1,60 @@
+name: Turso移行 (使い捨て)
+
+# actions/cache に残っている data/*.json を Turso に投入する一度きりのワークフロー。
+# 移行が完了し、夜通知と朝通知が Turso から正しく読み書きできることを確認したら、
+# このワークフローと scripts/migrate-to-turso.js を削除する。
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '既にTursoに値がある場合も上書きする'
+        type: boolean
+        default: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v7
+
+      # 移行元。キャッシュにしか存在しないデータを読むためここだけは restore を使う
+      - name: 前回データを復元
+        id: cache-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: data
+          key: smilezemi-data-${{ github.run_id }}
+          restore-keys: |
+            smilezemi-data-
+
+      - name: キャッシュが復元できたかを確認
+        run: |
+          if [ ! -f data/streak_data.json ]; then
+            echo "❌ data/streak_data.json が見つかりません。キャッシュが復元できていないため中止します"
+            exit 1
+          fi
+          echo "✅ キャッシュを復元しました"
+          ls -l data/
+
+      - name: Node.jsをセットアップ
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: 移行を実行
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            node scripts/migrate-to-turso.js --force
+          else
+            node scripts/migrate-to-turso.js
+          fi
