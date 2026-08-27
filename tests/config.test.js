@@ -26,6 +26,8 @@ describe('環境変数管理', () => {
       process.env.SMILEZEMI_PASSWORD = 'testpass';
       process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test_token';
       process.env.LINE_USER_ID = 'U1234567890';
+      process.env.TURSO_DATABASE_URL = 'libsql://test-db.turso.io';
+      process.env.TURSO_AUTH_TOKEN = 'test-auth-token';
 
       const config = loadConfig();
 
@@ -66,6 +68,8 @@ describe('環境変数管理', () => {
       process.env.SMILEZEMI_PASSWORD = 'testpass';
       process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test_token';
       process.env.LINE_USER_ID = 'U1234567890';
+      process.env.TURSO_DATABASE_URL = 'libsql://test-db.turso.io';
+      process.env.TURSO_AUTH_TOKEN = 'test-auth-token';
       process.env.DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/123/abc';
 
       const config = loadConfig();
@@ -78,6 +82,8 @@ describe('環境変数管理', () => {
       process.env.SMILEZEMI_PASSWORD = 'testpass';
       process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test_token';
       process.env.LINE_USER_ID = 'U1234567890';
+      process.env.TURSO_DATABASE_URL = 'libsql://test-db.turso.io';
+      process.env.TURSO_AUTH_TOKEN = 'test-auth-token';
       delete process.env.DISCORD_WEBHOOK_URL;
 
       const config = loadConfig();
@@ -90,6 +96,8 @@ describe('環境変数管理', () => {
       process.env.SMILEZEMI_PASSWORD = 'testpass';
       process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test_token';
       process.env.LINE_USER_ID = 'U1234567890';
+      process.env.TURSO_DATABASE_URL = 'libsql://test-db.turso.io';
+      process.env.TURSO_AUTH_TOKEN = 'test-auth-token';
       process.env.DISCORD_WEBHOOK_URL = '   ';
 
       const config = loadConfig();
@@ -104,7 +112,9 @@ describe('環境変数管理', () => {
         SMILEZEMI_USERNAME: 'testuser',
         SMILEZEMI_PASSWORD: 'testpass',
         LINE_CHANNEL_ACCESS_TOKEN: 'token',
-        LINE_USER_ID: 'userid'
+        LINE_USER_ID: 'userid',
+        TURSO_DATABASE_URL: 'libsql://test-db.turso.io',
+        TURSO_AUTH_TOKEN: 'test-auth-token'
       };
 
       const result = validateSecrets(secrets);
@@ -193,6 +203,64 @@ describe('環境変数管理', () => {
 
       assert.strictEqual(masked.discordWebhookUrl, '***');
       assert.strictEqual(masked.userName, 'たろう');
+    });
+  });
+
+  describe('Turso設定', () => {
+    /** 必須環境変数をすべてセットする(このファイルの他テストと同じ方式) */
+    function setAllRequired() {
+      process.env.SMILEZEMI_USERNAME = 'testuser';
+      process.env.SMILEZEMI_PASSWORD = 'testpass';
+      process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test_token';
+      process.env.LINE_USER_ID = 'U1234567890';
+      process.env.TURSO_DATABASE_URL = 'libsql://test-db.turso.io';
+      process.env.TURSO_AUTH_TOKEN = 'test-auth-token';
+    }
+
+    it('TURSO_DATABASE_URL が未設定なら loadConfig が例外を投げる', () => {
+      setAllRequired();
+      delete process.env.TURSO_DATABASE_URL;
+
+      assert.throws(() => loadConfig(), /TURSO_DATABASE_URL/);
+    });
+
+    it('TURSO_AUTH_TOKEN が未設定なら loadConfig が例外を投げる', () => {
+      setAllRequired();
+      delete process.env.TURSO_AUTH_TOKEN;
+
+      assert.throws(() => loadConfig(), /TURSO_AUTH_TOKEN/);
+    });
+
+    it('loadConfig の戻り値に Turso の設定が含まれる', () => {
+      setAllRequired();
+
+      const result = loadConfig();
+
+      assert.strictEqual(result.TURSO_DATABASE_URL, 'libsql://test-db.turso.io');
+      assert.strictEqual(result.TURSO_AUTH_TOKEN, 'test-auth-token');
+    });
+
+    it('validateSecrets が Turso の2つを必須として扱う', () => {
+      const result = validateSecrets({
+        SMILEZEMI_USERNAME: 'u',
+        SMILEZEMI_PASSWORD: 'p',
+        LINE_CHANNEL_ACCESS_TOKEN: 't',
+        LINE_USER_ID: 'g'
+      });
+
+      assert.strictEqual(result.valid, false);
+      assert.ok(result.missing.includes('TURSO_DATABASE_URL'));
+      assert.ok(result.missing.includes('TURSO_AUTH_TOKEN'));
+    });
+
+    it('maskSensitiveData が TURSO_AUTH_TOKEN の値を伏せる', () => {
+      const masked = maskSensitiveData({
+        TURSO_AUTH_TOKEN: 'eyJhbGciOi',
+        TURSO_DATABASE_URL: 'libsql://x.turso.io'
+      });
+
+      assert.strictEqual(masked.TURSO_AUTH_TOKEN, '***');
+      assert.strictEqual(masked.TURSO_DATABASE_URL, 'libsql://x.turso.io', 'URLは秘密ではないので伏せない');
     });
   });
 });

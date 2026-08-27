@@ -7,7 +7,9 @@ const REQUIRED_SECRETS = [
   'SMILEZEMI_USERNAME',
   'SMILEZEMI_PASSWORD',
   'LINE_CHANNEL_ACCESS_TOKEN',
-  'LINE_USER_ID'
+  'LINE_USER_ID',
+  'TURSO_DATABASE_URL',
+  'TURSO_AUTH_TOKEN'
 ];
 
 const SENSITIVE_FIELDS = [
@@ -33,6 +35,8 @@ function loadConfig() {
     console.log(`  SMILEZEMI_PASSWORD: ${process.env.SMILEZEMI_PASSWORD ? `存在 (長さ: ${process.env.SMILEZEMI_PASSWORD.length})` : '未設定'}`);
     console.log(`  LINE_CHANNEL_ACCESS_TOKEN: ${process.env.LINE_CHANNEL_ACCESS_TOKEN ? `存在 (長さ: ${process.env.LINE_CHANNEL_ACCESS_TOKEN.length})` : '未設定'}`);
     console.log(`  LINE_USER_ID: ${process.env.LINE_USER_ID ? `存在 (長さ: ${process.env.LINE_USER_ID.length})` : '未設定'}`);
+    console.log(`  TURSO_DATABASE_URL: ${process.env.TURSO_DATABASE_URL ? '存在' : '未設定'}`);
+    console.log(`  TURSO_AUTH_TOKEN: ${process.env.TURSO_AUTH_TOKEN ? `存在 (長さ: ${process.env.TURSO_AUTH_TOKEN.length})` : '未設定'}`);
     console.log(`  DISCORD_WEBHOOK_URL: ${process.env.DISCORD_WEBHOOK_URL ? '存在 (任意)' : '未設定 (任意: LINE失敗時のフォールバックが無効)'}`);
   }
 
@@ -40,7 +44,9 @@ function loadConfig() {
     SMILEZEMI_USERNAME: process.env.SMILEZEMI_USERNAME?.trim(),
     SMILEZEMI_PASSWORD: process.env.SMILEZEMI_PASSWORD?.trim(),
     LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim(),
-    LINE_USER_ID: process.env.LINE_USER_ID?.trim()
+    LINE_USER_ID: process.env.LINE_USER_ID?.trim(),
+    TURSO_DATABASE_URL: process.env.TURSO_DATABASE_URL?.trim(),
+    TURSO_AUTH_TOKEN: process.env.TURSO_AUTH_TOKEN?.trim()
   };
 
   const validation = validateSecrets(secrets);
@@ -60,6 +66,8 @@ function loadConfig() {
     SMILEZEMI_PASSWORD: secrets.SMILEZEMI_PASSWORD,
     LINE_CHANNEL_ACCESS_TOKEN: secrets.LINE_CHANNEL_ACCESS_TOKEN,
     LINE_USER_ID: secrets.LINE_USER_ID,
+    TURSO_DATABASE_URL: secrets.TURSO_DATABASE_URL,
+    TURSO_AUTH_TOKEN: secrets.TURSO_AUTH_TOKEN,
     DISCORD_WEBHOOK_URL: discordWebhookUrl || undefined
   };
 }
