@@ -125,6 +125,43 @@ function describeSchemaFailure(schemaError, probe) {
 }
 
 /**
+ * JSON.parseの失敗メッセージから入力断片を取り除く。
+ *
+ * V8はJSON.parseに失敗すると `Unexpected token 'u', ..."<入力の断片>"... is not
+ * valid JSON` のように、前後の生テキストをメッセージにそのまま埋め込む
+ * (断片の長さや"..."の有無は入力の長さ・エラー位置によって変わる)。
+ * streak_data.json/mission_data.jsonのトップレベルキーはユーザーの実名なので、
+ * ファイルやTurso側の値が壊れているとこの断片に実名がそのまま乗り、公開
+ * リポジトリのワークフローログに漏れる。"Unexpected token 'u'," のような
+ * 診断情報は残しつつ、二重引用符で囲まれた断片(先頭〜末尾の"の間)だけを除去する。
+ *
+ * @param {string} message - error.message などの生メッセージ
+ * @returns {string}
+ */
+function sanitizeParseError(message) {
+  if (typeof message !== 'string') {
+    return message;
+  }
+  return message.replace(/\.{0,3}"[\s\S]*"\.{0,3}/, '(内容省略)');
+}
+
+/**
+ * 投入対象にstreak_dataが含まれているかを判定する。
+ *
+ * streak_data.jsonが無いままcreateSchema()を呼ぶと、テーブルだけ存在して
+ * streak_data行が無い状態(readStateが'uninitialized'ではなく'empty'を返す)に
+ * なり、朝通知の安全装置が素通りして全ユーザーが新規扱いになる。ワークフロー側の
+ * ファイル存在チェックが通常の防波堤だが、スクリプト単体でも最後の防波堤として
+ * これを保証する。
+ *
+ * @param {Array<{key: string}>} prepared - 読み込み・parseに成功したTARGETSのサブセット
+ * @returns {boolean}
+ */
+function hasStreakData(prepared) {
+  return prepared.some(target => target.key === 'streak_data');
+}
+
+/**
  * 書き込んだ内容と読み戻した内容が一致するかを判定する(ラウンドトリップ照合)。
  *
  * @param {string} key - Turso上のキー(ログ用)
@@ -199,7 +236,7 @@ function warnBeforeOverwrite(key, rawValue) {
       console.warn(`[migrate-to-turso]   version=${parsed.version} ユーザー${keys.length}件`);
       keys.forEach(k => console.warn(formatUserSummaryLine(k, users[k])));
     } catch (error) {
-      console.warn(`[migrate-to-turso]   既存値のJSON解析に失敗しました(そのまま上書きします): ${error.message}`);
+      console.warn(`[migrate-to-turso]   既存値のJSON解析に失敗しました(そのまま上書きします): ${sanitizeParseError(error.message)}`);
     }
   } else {
     console.warn(`[migrate-to-turso]   ${rawValue.length}文字(mission_dataは件数のみ表示)`);
@@ -239,7 +276,12 @@ async function migrate(options = {}) {
     try {
       normalized = JSON.stringify(JSON.parse(content));
     } catch (error) {
-      return { success: false, migrated, skipped, error: `${target.file} のJSONが壊れています: ${error.message}` };
+      return {
+        success: false,
+        migrated,
+        skipped,
+        error: `${target.file} のJSONが壊れています: ${sanitizeParseError(error.message)}`
+      };
     }
 
     prepared.push({ ...target, normalized });
@@ -248,6 +290,20 @@ async function migrate(options = {}) {
   if (prepared.length === 0) {
     console.warn('[migrate-to-turso] 投入対象のファイルが1件もありません。スキーマは作成しません');
     return { success: true, migrated, skipped, writtenContent };
+  }
+
+  // streak_dataが無いままcreateSchema()を呼ぶと、テーブルだけ存在してstreak_data行が
+  // 無い危険な状態になる(ファイルヘッダのコメント参照)。ワークフロー側のファイル存在
+  // チェックが通常の防波堤だが、スクリプト単体でも最後の防波堤として保証する。
+  if (!hasStreakData(prepared)) {
+    console.error('[migrate-to-turso] streak_data.json が読み込めていません。安全のためスキーマを作成せず中断します');
+    return {
+      success: false,
+      migrated,
+      skipped,
+      error: 'streak_data.json が無いため中断しました(mission_dataだけでcreateSchemaを呼ぶと、'
+        + 'streak_data行の無いテーブルができてしまい危険です)'
+    };
   }
 
   console.log('[migrate-to-turso] スキーマを作成しています...');
@@ -332,7 +388,7 @@ async function verify(migrateResult) {
 
   const streakResult = await loadStreakData();
   if (!streakResult.success) {
-    console.error(`[migrate-to-turso] streak_data を本番の読み出し経路(loadStreakData)で読めませんでした: ${streakResult.error}`);
+    console.error(`[migrate-to-turso] streak_data を本番の読み出し経路(loadStreakData)で読めませんでした: ${sanitizeParseError(streakResult.error)}`);
     return false;
   }
 
@@ -357,7 +413,7 @@ async function verify(migrateResult) {
     return false;
   }
   if (!missionResult.success) {
-    console.error(`[migrate-to-turso] mission_data を本番の読み出し経路(loadPreviousData)で読めませんでした: ${missionResult.error}`);
+    console.error(`[migrate-to-turso] mission_data を本番の読み出し経路(loadPreviousData)で読めませんでした: ${sanitizeParseError(missionResult.error)}`);
     return false;
   }
 
@@ -425,5 +481,7 @@ module.exports = {
   migrate,
   describeSchemaFailure,
   compareRoundTrip,
-  formatUserSummaryLine
+  formatUserSummaryLine,
+  sanitizeParseError,
+  hasStreakData
 };

@@ -10,7 +10,9 @@ const {
   maskUserName,
   describeSchemaFailure,
   compareRoundTrip,
-  formatUserSummaryLine
+  formatUserSummaryLine,
+  sanitizeParseError,
+  hasStreakData
 } = require('../scripts/migrate-to-turso');
 
 describe('Turso移行スクリプト (scripts/migrate-to-turso.js)', () => {
@@ -88,6 +90,12 @@ describe('Turso移行スクリプト (scripts/migrate-to-turso.js)', () => {
       assert.strictEqual(result.ok, false);
       assert.match(result.message, /読み戻せませんでした/);
     });
+
+    it('長さが同じでも内容が違えばngにする(長さ比較への退化を防ぐ)', () => {
+      const result = compareRoundTrip('streak_data', '{"a":1}', '{"a":2}');
+      assert.strictEqual(result.ok, false, '同じ7文字だが中身が違うので不一致にすべき');
+      assert.match(result.message, /一致しません/);
+    });
   });
 
   describe('formatUserSummaryLine() — 実名マスクとフィールド表示', () => {
@@ -118,6 +126,74 @@ describe('Turso移行スクリプト (scripts/migrate-to-turso.js)', () => {
       assert.match(line, /lastConfirmedDate=null/);
       assert.match(line, /履歴0日/);
       assert.match(line, /免除0日/);
+    });
+  });
+
+  describe('sanitizeParseError() — JSON.parseエラーの入力断片から実名を除去する', () => {
+    it('前後に...が付く断片(V8が両側を切り詰めた場合)から実名を除去する', () => {
+      const filler = 'x'.repeat(80);
+      const trailing = 'y'.repeat(80);
+      const bad = `{"filler":"${filler}","やまだたろう":undefined,"trailing":"${trailing}"}`;
+      let raw;
+      try {
+        JSON.parse(bad);
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.match(raw, /やまだたろう/, '前提: サニタイズ前は実名が含まれる');
+
+      const sanitized = sanitizeParseError(raw);
+      assert.doesNotMatch(sanitized, /やまだたろう/);
+      assert.match(sanitized, /Unexpected token/, '診断情報(トークン種別)は残す');
+    });
+
+    it('...が付かない短い断片(V8が切り詰めない場合)からも実名を除去する', () => {
+      const bad = '{"やまだたろう":undefined}';
+      let raw;
+      try {
+        JSON.parse(bad);
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.match(raw, /やまだたろう/, '前提: サニタイズ前は実名が含まれる');
+
+      const sanitized = sanitizeParseError(raw);
+      assert.doesNotMatch(sanitized, /やまだたろう/);
+    });
+
+    it('引用符付き断片を含まないメッセージ(例: 入力終端エラー)はそのまま返す', () => {
+      let raw;
+      try {
+        JSON.parse('');
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.strictEqual(sanitizeParseError(raw), raw);
+    });
+
+    it('文字列以外はそのまま返す', () => {
+      assert.strictEqual(sanitizeParseError(undefined), undefined);
+      assert.strictEqual(sanitizeParseError(null), null);
+    });
+  });
+
+  describe('hasStreakData() — C2追加: streak_data欠落時にcreateSchemaを呼ばせない防波堤', () => {
+    it('streak_dataが含まれていればtrue', () => {
+      assert.strictEqual(
+        hasStreakData([{ file: 'streak_data.json', key: 'streak_data', normalized: '{}' }]),
+        true
+      );
+    });
+
+    it('mission_dataだけならfalse(streak_data.json欠落を検出する)', () => {
+      assert.strictEqual(
+        hasStreakData([{ file: 'mission_data.json', key: 'mission_data', normalized: '[]' }]),
+        false
+      );
+    });
+
+    it('空配列ならfalse', () => {
+      assert.strictEqual(hasStreakData([]), false);
     });
   });
 });
