@@ -125,48 +125,50 @@ async function main() {
     // 4.5 ストリーク(連続学習日数)の確定判定
     // 前日分は確定データのため、そのままストリークを確定する
     let streaks = null;
+    let exemptUserNames = [];
     console.log('🔥 ストリークを更新しています...');
     const streakLoadResult = await loadStreakData();
 
-    let previousStreakUsers;
-    if (streakLoadResult.success) {
-      previousStreakUsers = streakLoadResult.data;
-    } else {
-      // 読み込み失敗はエラーとして記録しつつ、空状態で続行して次回保存時に自己修復させる
-      // (システム側の問題で子供にペナルティを与えず、通知処理も止め続けないため)
-      console.error('❌ ストリークデータの読み込みに失敗しました:', streakLoadResult.error);
+    if (!streakLoadResult.success) {
+      // 読み込めなかったときは理由を問わず確定処理そのものを行わない。
+      // 空データで確定すると全ユーザーが新規扱いになり、streak / grace / bonus を
+      // 上書き保存して恒久的に失う(bonus は実際に支給するお小遣いで復元手段がない)。
+      // 未判定の日は中立扱い(ペナルティなし)なので、スキップしても子供は損をしない。
+      // 通知はストリーク行なしで出し、終了コード1で気づけるようにする。
+      // 移行前(uninitialized)も一過性のネットワーク障害もこの経路に入る
+      console.error('❌ ストリークデータを読み込めなかったため、確定処理をスキップします:', streakLoadResult.error);
       errors.push(streakLoadResult.error);
-      console.warn('⚠️ ストリークデータを初期化して続行します');
-      previousStreakUsers = {};
-    }
-
-    // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生3)
-    const { streakUsers, results } = updateStreaksByCourse(
-      previousStreakUsers,
-      crawlResult.data,
-      targetDates.dateString
-    );
-
-    streaks = {};
-    results.forEach(result => {
-      streaks[result.userName] = formatStreakInfo(result);
-    });
-
-    // 免除日のユーザーには未達警告を出さない(ストリーク行が「記録はそのまま」と伝える)
-    const exemptUserNames = results
-      .filter(result => result.event === 'exempt')
-      .map(result => result.userName);
-
-    // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
-    if (process.env.DRY_RUN === 'true') {
-      console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
     } else {
-      const streakSaveResult = await saveStreakData(streakUsers);
-      if (streakSaveResult.success) {
-        console.log('✅ ストリークデータの保存が完了しました');
+      const previousStreakUsers = streakLoadResult.data;
+
+      // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生3)
+      const { streakUsers, results } = updateStreaksByCourse(
+        previousStreakUsers,
+        crawlResult.data,
+        targetDates.dateString
+      );
+
+      streaks = {};
+      results.forEach(result => {
+        streaks[result.userName] = formatStreakInfo(result);
+      });
+
+      // 免除日のユーザーには未達警告を出さない(ストリーク行が「記録はそのまま」と伝える)
+      exemptUserNames = results
+        .filter(result => result.event === 'exempt')
+        .map(result => result.userName);
+
+      // ドライラン時は状態を書き換えない(再実行で二重判定になるのを防ぐ)
+      if (process.env.DRY_RUN === 'true') {
+        console.log('ℹ️ ドライランモード: ストリークデータの保存はスキップしました');
       } else {
-        console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
-        errors.push(streakSaveResult.error);
+        const streakSaveResult = await saveStreakData(streakUsers);
+        if (streakSaveResult.success) {
+          console.log('✅ ストリークデータの保存が完了しました');
+        } else {
+          console.error('❌ ストリークデータの保存に失敗しました:', streakSaveResult.error);
+          errors.push(streakSaveResult.error);
+        }
       }
     }
 

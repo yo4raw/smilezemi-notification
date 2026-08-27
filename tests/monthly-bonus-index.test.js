@@ -253,6 +253,27 @@ describe('月次ボーナス清算 (src/monthly-bonus-index.js)', () => {
       assert.strictEqual(result.exitCode, 1, 'Webhook失効に気づけるよう終了コード1にすること');
     });
 
+    it('Turso未初期化のときは清算せずエラー通知を送って異常終了する', async () => {
+      setupMocks({
+        loadStreakData: async () => {
+          callLog.push({ type: 'loadStreakData' });
+          return {
+            success: false,
+            uninitialized: true,
+            error: 'ストリークデータの保存先(Turso)が未初期化です。移行ワークフローを実行してください'
+          };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'saveStreakData').length, 0,
+        'ボーナスをリセットしないこと(お金を配る処理なので中断する)'
+      );
+    });
+
     it('正常系: Webhook未設定のときはリセットして終了コード0(任意項目のため失敗にしない)', async () => {
       setupMocks({
         broadcastToAll: async (...args) => {
