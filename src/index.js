@@ -254,6 +254,12 @@ async function main() {
     if (!streakLoadResult.success) {
       // 免除日が分からなくても通知は続ける(免除なし扱い)。子供に見える情報を止めないため
       console.warn('⚠️ ストリークデータを読めなかったため免除日なしとして続行します:', streakLoadResult.error);
+
+      // 未初期化(Tursoへの移行が未完了)は一時的な障害ではなく設定漏れなので、
+      // 気づけるように赤くする。通常の読み取り失敗は従来どおり警告だけで流す
+      if (streakLoadResult.uninitialized) {
+        errors.push(streakLoadResult.error);
+      }
     }
     const streakUsers = streakLoadResult.success ? streakLoadResult.data : {};
 
