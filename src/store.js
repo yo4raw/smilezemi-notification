@@ -238,9 +238,34 @@ async function createSchema() {
   return { success: true };
 }
 
+/**
+ * JSON.parseの失敗メッセージから入力断片を取り除く。
+ *
+ * V8はJSON.parseに失敗すると `Unexpected token 'u', ..."<入力の断片>"... is not
+ * valid JSON` のように、前後の生テキストをメッセージにそのまま埋め込む
+ * (断片の長さや"..."の有無は入力の長さ・エラー位置によって変わる)。
+ * streak_data/mission_dataのトップレベルキーやuserNameはユーザーの実名なので、
+ * Turso側の値やローカルファイルが壊れているとこの断片に実名がそのまま乗り、
+ * 公開リポジトリのワークフローログに漏れる。"Unexpected token 'u'," のような
+ * 診断情報は残しつつ、二重引用符で囲まれた断片(先頭〜末尾の"の間)だけを除去する。
+ *
+ * ランタイム(src/streak.js / src/data.js)と移行スクリプトの両方が使うため、
+ * 両者が既に依存しているこのモジュールに置いて実装を1つに保つ。
+ *
+ * @param {string} message - error.message などの生メッセージ
+ * @returns {string}
+ */
+function sanitizeParseError(message) {
+  if (typeof message !== 'string') {
+    return message;
+  }
+  return message.replace(/\.{0,3}"[\s\S]*"\.{0,3}/, '(内容省略)');
+}
+
 module.exports = {
   resolveEndpoint,
   readState,
   writeState,
-  createSchema
+  createSchema,
+  sanitizeParseError
 };

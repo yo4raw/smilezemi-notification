@@ -307,4 +307,52 @@ describe('Turso状態ストア (src/store.js)', () => {
       assert.match(result.error, /syntax error/);
     });
   });
+
+  describe('sanitizeParseError() — JSON.parseエラーの入力断片から実名を除去する', () => {
+    it('前後に...が付く断片(V8が両側を切り詰めた場合)から実名を除去する', () => {
+      const filler = 'x'.repeat(80);
+      const trailing = 'y'.repeat(80);
+      const bad = `{"filler":"${filler}","やまだたろう":undefined,"trailing":"${trailing}"}`;
+      let raw;
+      try {
+        JSON.parse(bad);
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.match(raw, /やまだたろう/, '前提: サニタイズ前は実名が含まれる');
+
+      const sanitized = store.sanitizeParseError(raw);
+      assert.doesNotMatch(sanitized, /やまだたろう/);
+      assert.match(sanitized, /Unexpected token/, '診断情報(トークン種別)は残す');
+    });
+
+    it('...が付かない短い断片(V8が切り詰めない場合)からも実名を除去する', () => {
+      const bad = '{"やまだたろう":undefined}';
+      let raw;
+      try {
+        JSON.parse(bad);
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.match(raw, /やまだたろう/, '前提: サニタイズ前は実名が含まれる');
+
+      const sanitized = store.sanitizeParseError(raw);
+      assert.doesNotMatch(sanitized, /やまだたろう/);
+    });
+
+    it('引用符付き断片を含まないメッセージ(例: 入力終端エラー)はそのまま返す', () => {
+      let raw;
+      try {
+        JSON.parse('');
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.strictEqual(store.sanitizeParseError(raw), raw);
+    });
+
+    it('文字列以外はそのまま返す', () => {
+      assert.strictEqual(store.sanitizeParseError(undefined), undefined);
+      assert.strictEqual(store.sanitizeParseError(null), null);
+    });
+  });
 });

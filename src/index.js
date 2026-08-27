@@ -268,7 +268,10 @@ async function main() {
       .map(user => user.userName);
 
     if (exemptUserNames.length > 0) {
-      console.log(`🏝️ 免除日のユーザー: ${exemptUserNames.join(', ')}`);
+      // 公開リポジトリのスケジュール実行のログは未認証で読めるため、実名は出さず件数だけを出す。
+      // 運用者がこのログから必要なのは「何人が未達判定から外れたか」であり、
+      // 「誰が免除か」はローカル実行の scripts/show-streak-data.js で確認できる
+      console.log(`🏝️ 免除日(おやすみ)のユーザー: ${exemptUserNames.length}人`);
     }
 
     let hasUnqualifiedUser = false;

@@ -1089,6 +1089,10 @@ function resolveStreakModule(p) {
 
 const STREAK_MODULE_PATHS = ['../src/streak', '../src/store'];
 
+// sanitizeParseError は実装を差し替える意図がないため、モックにも本物を通す
+// (差し替えるとJSONパースエラーのマスキングを検証できなくなる)
+const { sanitizeParseError } = require('../src/store');
+
 function clearStreakModuleCache() {
   for (const p of STREAK_MODULE_PATHS) {
     try { delete require.cache[resolveStreakModule(p)]; } catch {}
@@ -1116,7 +1120,8 @@ function loadStreakWithStore(overrides = {}) {
         return { success: true };
       }),
       resolveEndpoint: () => 'https://test-db.turso.io/v2/pipeline',
-      createSchema: async () => ({ success: true })
+      createSchema: async () => ({ success: true }),
+      sanitizeParseError
     }
   };
 
@@ -1353,8 +1358,9 @@ describe('ストリークモジュール - Turso永続化', () => {
       }
     });
 
+    // 本番のユーザーキーは素の名前(コース名は付かない)。コース依存の判定は course フィールドで行う
     const users = {
-      'たろう (中学生コース)': {
+      'たろう': {
         streak: 12, grace: 1, bonus: 0, course: 'juniorHigh',
         lastConfirmedDate: '2026-07-12', exemptDates: [], history: {},
         replayBase: { streak: 12, grace: 1, date: '2026-07-12' }

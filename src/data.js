@@ -22,7 +22,7 @@
  * }
  */
 
-const { readState, writeState } = require('./store');
+const { readState, writeState, sanitizeParseError } = require('./store');
 
 // Turso上のキー。1キー = 1JSONドキュメント
 const STATE_KEY = 'mission_data';
@@ -88,7 +88,8 @@ async function loadPreviousData() {
     return { success: true, data: users };
   } catch (error) {
     if (error instanceof SyntaxError) {
-      return { success: false, error: `JSONパースエラー: ${error.message}` };
+      // 実名がログに漏れないよう入力断片を除去する(src/store.js のコメント参照)
+      return { success: false, error: `JSONパースエラー: ${sanitizeParseError(error.message)}` };
     }
     return { success: false, error: `データ読み込みエラー: ${error.message}` };
   }

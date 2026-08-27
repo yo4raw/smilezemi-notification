@@ -15,6 +15,10 @@ function resolveModule(p) {
 
 const MODULE_PATHS = ['../src/data', '../src/store'];
 
+// sanitizeParseError は実装を差し替える意図がないため、モックにも本物を通す
+// (差し替えるとJSONパースエラーのマスキングを検証できなくなる)
+const { sanitizeParseError } = require('../src/store');
+
 function clearModuleCache() {
   for (const p of MODULE_PATHS) {
     try { delete require.cache[resolveModule(p)]; } catch {}
@@ -42,7 +46,8 @@ function loadDataWithStore(overrides = {}) {
         return { success: true };
       }),
       resolveEndpoint: () => 'https://test-db.turso.io/v2/pipeline',
-      createSchema: async () => ({ success: true })
+      createSchema: async () => ({ success: true }),
+      sanitizeParseError
     }
   };
 
