@@ -1150,6 +1150,18 @@ describe('ストリークモジュール - Turso永続化', () => {
     assert.match(result.error, /未初期化/);
   });
 
+  it('readStateの失敗はuninitializedを混入させずそのままエラーとして返す', async () => {
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: false, error: 'タイムアウト: Turso が10000ms以内に応答しませんでした' })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /タイムアウト/);
+    assert.strictEqual(result.uninitialized, undefined, 'state=uninitializedのケースと混同してはならない');
+  });
+
   it('streak_data キーで読み出す', async () => {
     const readKeys = [];
     const { streakModule } = loadStreakWithStore({

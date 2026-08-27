@@ -1,7 +1,7 @@
 /**
  * ストリーク(連続学習日数)管理モジュール
  *
- * データ構造 (data/streak_data.json):
+ * データ構造 (Turso app_state キー 'streak_data'):
  * {
  *   version: "1.4",  // 1.3未満は全ユーザーのおたすけを3にする移行、1.4未満は免除日フィールドの補完を適用
  *   timestamp: "ISO 8601",
@@ -544,7 +544,7 @@ function formatStreakInfo(result, options = {}) {
 /**
  * ストリークデータを読み込む
  *
- * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ * @returns {Promise<{success: boolean, data?: object, error?: string, uninitialized?: boolean}>}
  */
 async function loadStreakData() {
   const stateResult = await readState(STATE_KEY);
