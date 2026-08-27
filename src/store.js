@@ -191,8 +191,56 @@ async function writeState(key, value) {
   return { success: false, error: second.error };
 }
 
+/**
+ * スキーマを作成する(移行スクリプト専用)
+ *
+ * ランタイム(readState/writeState)からは絶対に呼ばない。未移行の状態を
+ * 「初回実行」と誤認させないため、テーブルの存在自体が移行完了の印になっている。
+ *
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function createSchema() {
+  const result = await pipeline([
+    {
+      sql: 'create table if not exists app_state ('
+        + ' key text primary key,'
+        + ' value text not null,'
+        + ' updated_at text not null'
+        + ')'
+    },
+    {
+      sql: 'create table if not exists state_audit ('
+        + ' id integer primary key autoincrement,'
+        + ' key text not null,'
+        + ' value text not null,'
+        + ' written_at text not null'
+        + ')'
+    },
+    {
+      sql: 'create trigger if not exists app_state_audit_insert'
+        + ' after insert on app_state'
+        + ' begin'
+        + ' insert into state_audit (key, value, written_at) values (new.key, new.value, new.updated_at);'
+        + ' end'
+    },
+    {
+      sql: 'create trigger if not exists app_state_audit_update'
+        + ' after update on app_state'
+        + ' begin'
+        + ' insert into state_audit (key, value, written_at) values (new.key, new.value, new.updated_at);'
+        + ' end'
+    }
+  ]);
+
+  if (!result.success) {
+    return { success: false, error: result.error };
+  }
+  return { success: true };
+}
+
 module.exports = {
   resolveEndpoint,
   readState,
-  writeState
+  writeState,
+  createSchema
 };
