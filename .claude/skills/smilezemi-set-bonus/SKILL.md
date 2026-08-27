@@ -1,6 +1,6 @@
 ---
 name: smilezemi-set-bonus
-description: スマイルゼミ通知システムの「ボーナスポイント(bonus)」を手動で変更するときに使う。子どものボーナスポイントを特定の値に設定したい、ボーナスを訂正・調整したい、支給前に手動でリセット(0)したいといった依頼で必ずこのスキルを使うこと。おたすけ(grace)の変更は smilezemi-set-grace、連続学習日数(streak)の変更は smilezemi-set-streak という別スキルなので、それらの依頼では使わない。変更は本番(GitHub Actions キャッシュ)に反映される。
+description: スマイルゼミ通知システムの「ボーナスポイント(bonus)」を手動で変更するときに使う。子どものボーナスポイントを特定の値に設定したい、ボーナスを訂正・調整したい、支給前に手動でリセット(0)したいといった依頼で必ずこのスキルを使うこと。おたすけ(grace)の変更は smilezemi-set-grace、連続学習日数(streak)の変更は smilezemi-set-streak という別スキルなので、それらの依頼では使わない。変更は本番(Turso)に即座に反映される。
 ---
 
 # ボーナスポイント(bonus)手動変更
@@ -14,14 +14,15 @@ description: スマイルゼミ通知システムの「ボーナスポイント(
 
 ## 前提
 
-- 実データは GitHub Actions のキャッシュ（`smilezemi-data-*`）にのみ存在し、ローカルには無い。
-  そのため確認も変更もすべて `gh` 経由のワークフロー実行で行う。
-- 変更は次回のスケジュール通知（夜 20:00 / 朝 7:00）で自動的に反映される。
+- 実データは Turso（libSQL）にあり、ローカルから直接読み書きする。
+  `.env` に `TURSO_DATABASE_URL` と `TURSO_AUTH_TOKEN` が設定されていること。
+- 変更は保存した時点で本番に反映される。次回のスケジュール通知（夜 20:00 / 朝 7:00）から
+  新しい値が使われる。
 - bonus は通常、毎月1日の月次清算（monthly-bonus）で 0 にリセットされてお小遣いとして支給される。
   このスキルはその通常フロー外での手動訂正・手動リセット用。月次清算そのものを回すものではない。
-- 通知ワークフローが動いている時間帯に実行するとキャッシュ保存が後勝ちで競合しうる。
-  スケジュールとぶつからない時間帯に実行すること。
-- `gh` CLI がこのリポジトリに対して認証済みであること。
+- 通知ワークフローが動いている時間帯（JST 20:00 前後 / 7:00 前後）に実行すると、
+  ワークフロー側の保存と後勝ちで競合しうる。時間帯をずらして実行すること。
+- スクリプトは `.env` を自動で読まないため、必ず `-r dotenv/config` を付けて実行する。
 
 ## bonus の制約
 
@@ -38,47 +39,37 @@ bonus は 0 以上の絶対値で指定する（「+1」ではなく「5 にす�
 ### 2. 現在値と正確なユーザーキーを確認する
 
 ユーザーキーは完全一致が必要で、形式は環境依存（例: `"やまだたろうさん"`）。
-推測せず、必ず読み取り専用ワークフローで実際のキーを確認してコピーする:
+推測せず、必ず読み取り専用スクリプトで実際のキーを確認してコピーする:
 
 ```bash
-gh workflow run show-streak-data.yml
-# 起動直後は run が一覧に出ないことがあるため、現れるまで数秒待って取得する
-RUN_ID=$(gh run list --workflow=show-streak-data.yml --limit 1 --json databaseId --jq '.[0].databaseId')
-gh run watch "$RUN_ID" --exit-status
-gh run view "$RUN_ID" --log | grep show-streak-data
+node -r dotenv/config scripts/show-streak-data.js
 ```
 
 出力の `"<キー>": ... bonus=...` から、正確なキーと現在の bonus を読み取る。
 
 ### 3. まず dry-run で変更内容を確認する（事故防止）
 
-いきなり保存せず、`dry_run=true` で「変更前→変更後」を確認し、ユーザーに提示して合意を得る:
+いきなり保存せず、`--dry-run` で「変更前→変更後」を確認し、ユーザーに提示して合意を得る:
 
 ```bash
-gh workflow run adjust-streak-field.yml \
-  -f field=bonus \
-  -f user="<手順2で確認した正確なキー>" \
-  -f value=<0以上> \
-  -f dry_run=true
-RUN_ID=$(gh run list --workflow=adjust-streak-field.yml --limit 1 --json databaseId --jq '.[0].databaseId')
-gh run watch "$RUN_ID" --exit-status
-gh run view "$RUN_ID" --log | grep set-streak-field
+node -r dotenv/config scripts/set-streak-field.js \
+  --user "<手順2で確認した正確なキー>" \
+  --field bonus \
+  --value <目標値> \
+  --dry-run
 ```
 
-`field` は必ず `bonus` を渡す（このスキルの責務）。
+`--field` は必ず `bonus` を渡す（このスキルの責務）。
 
 ### 4. 本番反映する
 
-dry-run の内容で問題なければ、`dry_run` を付けずに（または `false` で）実行して保存する:
+dry-run の内容で問題なければ、`--dry-run` を外して実行して保存する:
 
 ```bash
-gh workflow run adjust-streak-field.yml \
-  -f field=bonus \
-  -f user="<正確なキー>" \
-  -f value=<0以上>
-RUN_ID=$(gh run list --workflow=adjust-streak-field.yml --limit 1 --json databaseId --jq '.[0].databaseId')
-gh run watch "$RUN_ID" --exit-status
-gh run view "$RUN_ID" --log | grep set-streak-field
+node -r dotenv/config scripts/set-streak-field.js \
+  --user "<手順2で確認した正確なキー>" \
+  --field bonus \
+  --value <目標値>
 ```
 
 ### 5. 結果を報告する
@@ -90,5 +81,5 @@ gh run view "$RUN_ID" --log | grep set-streak-field
 
 - 「対象ユーザーが見つかりません」→ 手順2に戻り、候補一覧から正確なキーをコピーし直す。
 - 「bonus は 0 以上 の範囲で…」→ 指定値を 0 以上にする。
-- 整合性チェックで中断（既存キャッシュあるのに復元失敗）→ キャッシュサービス異常の可能性。
-  時間を置いて再実行する。空データを保存させないための安全機構なので、無理に回避しない。
+- 読み込み/保存エラーで中断 → まず `.env` の `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` を確認する。
+  設定に問題がなければ Turso 側の障害の可能性があるため、時間を置いて再実行する。

@@ -1,7 +1,7 @@
 /**
  * ストリーク(連続学習日数)管理モジュール
  *
- * データ構造 (data/streak_data.json):
+ * データ構造 (Turso app_state キー 'streak_data'):
  * {
  *   version: "1.4",  // 1.3未満は全ユーザーのおたすけを3にする移行、1.4未満は免除日フィールドの補完を適用
  *   timestamp: "ISO 8601",
@@ -26,11 +26,10 @@
  * }
  */
 
-const fs = require('fs').promises;
-const path = require('path');
+const { readState, writeState, sanitizeParseError } = require('./store');
 
-const DATA_DIR = path.join(__dirname, '../data');
-const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
+// Turso上のキー。1キー = 1JSONドキュメント
+const STATE_KEY = 'streak_data';
 
 const GRACE_MAX = 3;
 const GRACE_INITIAL = 1; // 初回特典。リセット後は0から再スタート(10日連続で再獲得)
@@ -545,19 +544,32 @@ function formatStreakInfo(result, options = {}) {
 /**
  * ストリークデータを読み込む
  *
- * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ * @returns {Promise<{success: boolean, data?: object, error?: string, uninitialized?: boolean}>}
  */
 async function loadStreakData() {
-  try {
-    try {
-      await fs.access(STREAK_FILE);
-    } catch {
-      // ファイルが存在しない場合(初回実行時)は空のマップを返す
-      return { success: true, data: {} };
-    }
+  const stateResult = await readState(STATE_KEY);
 
-    const fileContent = await fs.readFile(STREAK_FILE, 'utf-8');
-    const jsonData = JSON.parse(fileContent);
+  if (!stateResult.success) {
+    return { success: false, error: `ストリークデータ読み込みエラー: ${stateResult.error}` };
+  }
+
+  // 移行前(app_stateテーブルなし)。空マップと区別しないと、確定処理が
+  // 全ユーザーを新規扱いして連続日数を0にリセットしてしまう
+  if (stateResult.state === 'uninitialized') {
+    return {
+      success: false,
+      uninitialized: true,
+      error: 'ストリークデータの保存先(Turso)が未初期化です。移行ワークフローを実行してください'
+    };
+  }
+
+  // 初回実行(キーがまだ無い)
+  if (stateResult.state === 'empty') {
+    return { success: true, data: {} };
+  }
+
+  try {
+    const jsonData = JSON.parse(stateResult.value);
 
     const version = jsonData.version || '1.0';
     if (!['1.0', '1.1', '1.2', '1.3', '1.4'].includes(version)) {
@@ -596,7 +608,8 @@ async function loadStreakData() {
     return { success: true, data: users };
   } catch (error) {
     if (error instanceof SyntaxError) {
-      return { success: false, error: `JSONパースエラー: ${error.message}` };
+      // 実名がログに漏れないよう入力断片を除去する(src/store.js のコメント参照)
+      return { success: false, error: `JSONパースエラー: ${sanitizeParseError(error.message)}` };
     }
     return { success: false, error: `ストリークデータ読み込みエラー: ${error.message}` };
   }
@@ -609,27 +622,27 @@ async function loadStreakData() {
  * @returns {Promise<{success: boolean, error?: string}>}
  */
 async function saveStreakData(streakUsers) {
-  try {
-    if (typeof streakUsers !== 'object' || streakUsers === null || Array.isArray(streakUsers)) {
-      return {
-        success: false,
-        error: '不正なデータ形式: オブジェクトである必要があります'
-      };
-    }
-
-    await fs.mkdir(DATA_DIR, { recursive: true });
-
-    const saveObject = {
-      version: '1.4',
-      timestamp: new Date().toISOString(),
-      users: streakUsers
+  if (typeof streakUsers !== 'object' || streakUsers === null || Array.isArray(streakUsers)) {
+    return {
+      success: false,
+      error: '不正なデータ形式: オブジェクトである必要があります'
     };
-
-    await fs.writeFile(STREAK_FILE, JSON.stringify(saveObject, null, 2), 'utf-8');
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: `ストリークデータ保存エラー: ${error.message}` };
   }
+
+  const saveObject = {
+    version: '1.4',
+    timestamp: new Date().toISOString(),
+    users: streakUsers
+  };
+
+  // DBに入れるためインデントは付けない
+  const writeResult = await writeState(STATE_KEY, JSON.stringify(saveObject));
+
+  if (!writeResult.success) {
+    return { success: false, error: `ストリークデータ保存エラー: ${writeResult.error}` };
+  }
+
+  return { success: true };
 }
 
 module.exports = {

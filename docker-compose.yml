@@ -8,8 +8,6 @@ services:
     volumes:
       # スクリーンショット保存
       - ./screenshots:/app/screenshots
-      # データファイル保存
-      - ./data:/app/data
       # ログ保存（オプション）
       - ./logs:/app/logs
       # デバッグ用: ソースコードとスクリプト
@@ -22,6 +20,8 @@ services:
       - LINE_CHANNEL_ACCESS_TOKEN
       - LINE_USER_ID
       - DISCORD_WEBHOOK_URL
+      - TURSO_DATABASE_URL
+      - TURSO_AUTH_TOKEN
       - NODE_ENV=${NODE_ENV:-development}
     # デバッグ用: コンテナを起動したまま保持
     # command: tail -f /dev/null

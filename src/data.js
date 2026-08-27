@@ -22,12 +22,10 @@
  * }
  */
 
-const fs = require('fs').promises;
-const path = require('path');
+const { readState, writeState, sanitizeParseError } = require('./store');
 
-// データファイルのパス
-const DATA_DIR = path.join(__dirname, '../data');
-const DATA_FILE = path.join(DATA_DIR, 'mission_data.json');
+// Turso上のキー。1キー = 1JSONドキュメント
+const STATE_KEY = 'mission_data';
 
 /**
  * v1.0データをv2.0形式に移行
@@ -48,28 +46,32 @@ function migrateDataV1toV2(v1Data) {
 /**
  * 前回実行時のデータを読み込む
  *
- * @returns {Promise<{success: boolean, data?: Array, error?: string}>}
+ * @returns {Promise<{success: boolean, data?: Array, error?: string, uninitialized?: boolean}>}
  */
 async function loadPreviousData() {
+  const stateResult = await readState(STATE_KEY);
+
+  if (!stateResult.success) {
+    return { success: false, error: `データ読み込みエラー: ${stateResult.error}` };
+  }
+
+  // 移行前(app_stateテーブルなし)。初回実行と区別できるようフラグを立てる
+  if (stateResult.state === 'uninitialized') {
+    return {
+      success: false,
+      uninitialized: true,
+      error: 'ミッションデータの保存先(Turso)が未初期化です。移行ワークフローを実行してください'
+    };
+  }
+
+  // 初回実行(キーがまだ無い)
+  if (stateResult.state === 'empty') {
+    return { success: true, data: [] };
+  }
+
   try {
-    // ファイルが存在するか確認
-    try {
-      await fs.access(DATA_FILE);
-    } catch {
-      // ファイルが存在しない場合（初回実行時）は空配列を返す
-      return {
-        success: true,
-        data: []
-      };
-    }
+    const jsonData = JSON.parse(stateResult.value);
 
-    // ファイルを読み込む
-    const fileContent = await fs.readFile(DATA_FILE, 'utf-8');
-
-    // JSONをパース
-    const jsonData = JSON.parse(fileContent);
-
-    // バージョン判定と移行
     const version = jsonData.version || '1.0';
     let users = jsonData.users || [];
 
@@ -83,24 +85,13 @@ async function loadPreviousData() {
       };
     }
 
-    return {
-      success: true,
-      data: users
-    };
+    return { success: true, data: users };
   } catch (error) {
     if (error instanceof SyntaxError) {
-      // JSONパースエラー
-      return {
-        success: false,
-        error: `JSONパースエラー: ${error.message}`
-      };
+      // 実名がログに漏れないよう入力断片を除去する(src/store.js のコメント参照)
+      return { success: false, error: `JSONパースエラー: ${sanitizeParseError(error.message)}` };
     }
-
-    // その他のエラー（ファイル読み込みエラーなど）
-    return {
-      success: false,
-      error: `データ読み込みエラー: ${error.message}`
-    };
+    return { success: false, error: `データ読み込みエラー: ${error.message}` };
   }
 }
 
@@ -181,40 +172,27 @@ function compareData(previousData, currentData) {
  * @returns {Promise<{success: boolean, error?: string}>}
  */
 async function saveData(data) {
-  try {
-    // データ形式の検証
-    if (!Array.isArray(data)) {
-      return {
-        success: false,
-        error: '不正なデータ形式: 配列である必要があります'
-      };
-    }
-
-    // データディレクトリを作成（存在しない場合）
-    await fs.mkdir(DATA_DIR, { recursive: true });
-
-    // 保存用のJSONオブジェクトを構築
-    const saveObject = {
-      version: '2.0',
-      timestamp: new Date().toISOString(),
-      users: data
-    };
-
-    // JSON文字列に変換
-    const jsonString = JSON.stringify(saveObject, null, 2);
-
-    // ファイルに書き込み
-    await fs.writeFile(DATA_FILE, jsonString, 'utf-8');
-
-    return {
-      success: true
-    };
-  } catch (error) {
+  if (!Array.isArray(data)) {
     return {
       success: false,
-      error: `データ保存エラー: ${error.message}`
+      error: '不正なデータ形式: 配列である必要があります'
     };
   }
+
+  const saveObject = {
+    version: '2.0',
+    timestamp: new Date().toISOString(),
+    users: data
+  };
+
+  // DBに入れるためインデントは付けない(監査テーブルの行サイズも小さくなる)
+  const writeResult = await writeState(STATE_KEY, JSON.stringify(saveObject));
+
+  if (!writeResult.success) {
+    return { success: false, error: `データ保存エラー: ${writeResult.error}` };
+  }
+
+  return { success: true };
 }
 
 /**

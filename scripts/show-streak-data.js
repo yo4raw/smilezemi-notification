@@ -26,7 +26,7 @@ async function main() {
   const keys = Object.keys(users);
 
   if (keys.length === 0) {
-    console.log('[show-streak-data] 登録済みユーザーは0件です(キャッシュ未復元またはデータ未生成の可能性)');
+    console.log('[show-streak-data] 登録済みユーザーは0件です(テーブルはあるがまだデータがありません。初回実行前の可能性があります)');
     return;
   }
 

@@ -13,8 +13,8 @@ RUN npm ci --only=production
 # アプリケーションコードをコピー
 COPY . .
 
-# スクリーンショット、データ、ログ用ディレクトリ作成
-RUN mkdir -p screenshots data logs
+# スクリーンショット、ログ用ディレクトリ作成
+RUN mkdir -p screenshots logs
 
 # 実行コマンド
 CMD ["node", "src/index.js"]

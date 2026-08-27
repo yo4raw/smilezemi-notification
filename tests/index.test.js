@@ -16,7 +16,7 @@ function resolveModule(p) {
 
 const MODULE_PATHS = [
   '../src/index', '../src/config', '../src/auth',
-  '../src/crawler', '../src/data', '../src/notifier', '../src/broadcast', '../src/streak', 'playwright'
+  '../src/crawler', '../src/data', '../src/notifier', '../src/broadcast', '../src/streak', '../src/store', 'playwright'
 ];
 
 function clearModuleCache() {
@@ -826,6 +826,48 @@ describe('オーケストレーション (src/index.js)', () => {
         { elementary: 4, juniorHigh: 3 },
         'コース別しきい値は従来どおり渡すこと'
       );
+    });
+
+    it('Turso未初期化のときは通知を出しつつ終了コード1にする', async () => {
+      setupMocks({
+        loadStreakData: async () => {
+          callLog.push({ type: 'loadStreakData' });
+          return {
+            success: false,
+            uninitialized: true,
+            error: 'ストリークデータの保存先(Turso)が未初期化です。移行ワークフローを実行してください'
+          };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToAll').length, 1,
+        '未初期化でも通知は送ること'
+      );
+      assert.strictEqual(result.exitCode, 1, '移行前だと気づけるよう赤くすること');
+      assert.ok(
+        result.errors.some(error => /未初期化/.test(error)),
+        'errorsに未初期化の理由を積むこと'
+      );
+    });
+
+    it('通常の読み取り失敗は従来どおり警告のみで正常終了する', async () => {
+      setupMocks({
+        loadStreakData: async () => {
+          callLog.push({ type: 'loadStreakData' });
+          return { success: false, error: 'タイムアウト: Turso が10000ms以内に応答しませんでした' };
+        }
+      });
+
+      const result = await mainModule.main();
+
+      assert.strictEqual(
+        callLog.filter(c => c.type === 'broadcastToAll').length, 1,
+        '通知は送ること'
+      );
+      assert.strictEqual(result.exitCode, 0, '一時的な障害でワークフローを赤くしないこと');
     });
   });
 

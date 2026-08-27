@@ -254,6 +254,12 @@ async function main() {
     if (!streakLoadResult.success) {
       // 免除日が分からなくても通知は続ける(免除なし扱い)。子供に見える情報を止めないため
       console.warn('⚠️ ストリークデータを読めなかったため免除日なしとして続行します:', streakLoadResult.error);
+
+      // 未初期化(Tursoへの移行が未完了)は一時的な障害ではなく設定漏れなので、
+      // 気づけるように赤くする。通常の読み取り失敗は従来どおり警告だけで流す
+      if (streakLoadResult.uninitialized) {
+        errors.push(streakLoadResult.error);
+      }
     }
     const streakUsers = streakLoadResult.success ? streakLoadResult.data : {};
 
@@ -262,7 +268,10 @@ async function main() {
       .map(user => user.userName);
 
     if (exemptUserNames.length > 0) {
-      console.log(`🏝️ 免除日のユーザー: ${exemptUserNames.join(', ')}`);
+      // 公開リポジトリのスケジュール実行のログは未認証で読めるため、実名は出さず件数だけを出す。
+      // 運用者がこのログから必要なのは「何人が未達判定から外れたか」であり、
+      // 「誰が免除か」はローカル実行の scripts/show-streak-data.js で確認できる
+      console.log(`🏝️ 免除日(おやすみ)のユーザー: ${exemptUserNames.length}人`);
     }
 
     let hasUnqualifiedUser = false;

@@ -3,112 +3,236 @@
  * Requirements: 3.6, 3.9, 4.6, 4.7
  */
 
-const { describe, it, beforeEach, afterEach, mock } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert');
-const fs = require('fs').promises;
-const path = require('path');
 
-describe('データ管理モジュール (src/data.js)', () => {
-  let data;
-  const testDataDir = path.join(__dirname, '../data');
-  const testDataFile = path.join(testDataDir, 'mission_data.json');
+// src/data.js はトップレベルで store を require しているため、
+// require.cache にモックを注入してからモジュールをロードする
+// (tests/index.test.js と同じ方式)。
+function resolveModule(p) {
+  return require.resolve(p);
+}
 
-  beforeEach(async () => {
-    // モジュールを読み込む（実装後に動作）
-    data = require('../src/data');
+const MODULE_PATHS = ['../src/data', '../src/store'];
 
-    // テスト用データディレクトリを作成
-    try {
-      await fs.mkdir(testDataDir, { recursive: true });
-    } catch (error) {
-      // ディレクトリが既に存在する場合は無視
+// sanitizeParseError は実装を差し替える意図がないため、モックにも本物を通す
+// (差し替えるとJSONパースエラーのマスキングを検証できなくなる)
+const { sanitizeParseError } = require('../src/store');
+
+function clearModuleCache() {
+  for (const p of MODULE_PATHS) {
+    try { delete require.cache[resolveModule(p)]; } catch {}
+  }
+}
+
+/**
+ * storeをモックしてsrc/data.jsをロードする
+ *
+ * @param {object} overrides - readState / writeState の差し替え
+ * @returns {{dataModule: object, writes: Array<{key: string, value: string}>}}
+ */
+function loadDataWithStore(overrides = {}) {
+  clearModuleCache();
+  const writes = [];
+
+  require.cache[resolveModule('../src/store')] = {
+    id: resolveModule('../src/store'),
+    filename: resolveModule('../src/store'),
+    loaded: true,
+    exports: {
+      readState: overrides.readState || (async () => ({ success: true, state: 'empty', value: null })),
+      writeState: overrides.writeState || (async (key, value) => {
+        writes.push({ key, value });
+        return { success: true };
+      }),
+      resolveEndpoint: () => 'https://test-db.turso.io/v2/pipeline',
+      createSchema: async () => ({ success: true }),
+      sanitizeParseError
     }
+  };
+
+  return { dataModule: require('../src/data'), writes };
+}
+
+describe('データ管理モジュール - Turso永続化', () => {
+  afterEach(() => {
+    clearModuleCache();
   });
 
-  afterEach(async () => {
-    // テスト後にデータファイルを削除
-    try {
-      await fs.unlink(testDataFile);
-    } catch (error) {
-      // ファイルが存在しない場合は無視
-    }
+  it('state=empty なら空配列を返す(初回実行)', async () => {
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'empty', value: null })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.deepStrictEqual(result, { success: true, data: [] });
   });
 
-  describe('loadPreviousData() - 前回データ取得', () => {
-    it('正常系: 有効なJSONファイルからデータを読み込める', async () => {
-      // テストデータを作成
-      const testData = {
-        version: '1.0',
-        timestamp: '2025-12-24T09:00:00.000Z',
-        users: [
-          { userName: '太郎', missionCount: 5, date: '2025-12-24' },
-          { userName: '花子', missionCount: 3, date: '2025-12-24' }
-        ]
-      };
-      await fs.writeFile(testDataFile, JSON.stringify(testData, null, 2));
-
-      const result = await data.loadPreviousData();
-
-      assert.strictEqual(result.success, true, 'データ読み込みが成功すること');
-      assert.strictEqual(Array.isArray(result.data), true, 'dataが配列であること');
-      assert.strictEqual(result.data.length, 2, '2件のデータが取得できること');
-      assert.strictEqual(result.data[0].userName, '太郎', 'ユーザー名が正しいこと');
-      assert.strictEqual(result.data[0].missionCount, 5, 'ミッション数が正しいこと');
+  it('state=uninitialized なら uninitialized フラグ付きで失敗を返す(移行前)', async () => {
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'uninitialized', value: null })
     });
 
-    it('正常系: ファイルが存在しない場合、空配列を返す', async () => {
-      const result = await data.loadPreviousData();
+    const result = await dataModule.loadPreviousData();
 
-      assert.strictEqual(result.success, true, '初回実行時は成功すること');
-      assert.strictEqual(Array.isArray(result.data), true, 'dataが配列であること');
-      assert.strictEqual(result.data.length, 0, '空配列を返すこと');
-    });
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.uninitialized, true);
+    assert.match(result.error, /未初期化/);
+  });
 
-    it('正常系: 空のusers配列の場合、空配列を返す', async () => {
-      const testData = {
-        version: '1.0',
-        timestamp: '2025-12-24T09:00:00.000Z',
-        users: []
-      };
-      await fs.writeFile(testDataFile, JSON.stringify(testData));
-
-      const result = await data.loadPreviousData();
-
-      assert.strictEqual(result.success, true);
-      assert.strictEqual(result.data.length, 0, '空配列を返すこと');
-    });
-
-    it('異常系: 不正なJSON形式の場合、エラーを返す', async () => {
-      // 不正なJSON
-      await fs.writeFile(testDataFile, '{ invalid json }');
-
-      const result = await data.loadPreviousData();
-
-      assert.strictEqual(result.success, false, 'JSONパースエラー時は失敗すること');
-      assert.match(result.error, /JSON|パース|parse/i, 'エラーメッセージにJSONエラーが含まれること');
-    });
-
-    it('異常系: ファイル読み込みエラー時、エラーを返す', async () => {
-      // 実際に不正なファイルを作成してエラーをシミュレート
-      // ディレクトリとして存在するパスを指定することで読み込みエラーを発生させる
-      const invalidPath = path.join(testDataDir, 'mission_data.json', 'invalid');
-      try {
-        await fs.mkdir(path.join(testDataDir, 'mission_data.json'), { recursive: true });
-
-        // テスト対象モジュールを再読み込みして不正なパスを使用
-        // このテストは実装上、実際のファイル読み込みエラーをシミュレートするのが難しいため、
-        // JSONパースエラーのテストで代替可能と判断
-        assert.strictEqual(true, true, 'JSONパースエラーのテストで代替');
-      } finally {
-        // クリーンアップ
-        try {
-          await fs.rmdir(path.join(testDataDir, 'mission_data.json'));
-        } catch (e) {
-          // 無視
-        }
+  it('mission_data キーで読み出す', async () => {
+    const readKeys = [];
+    const { dataModule } = loadDataWithStore({
+      readState: async (key) => {
+        readKeys.push(key);
+        return { success: true, state: 'empty', value: null };
       }
     });
+
+    await dataModule.loadPreviousData();
+
+    assert.deepStrictEqual(readKeys, ['mission_data']);
   });
+
+  it('v2.0のJSONを読み出してusersを返す', async () => {
+    const stored = JSON.stringify({
+      version: '2.0',
+      timestamp: '2026-08-27T00:00:00.000Z',
+      users: [{ userName: 'たろう', missionCount: 4, date: '2026-08-26', studyTime: { hours: 0, minutes: 30 }, totalScore: 300, missions: [] }]
+    });
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data.length, 1);
+    assert.strictEqual(result.data[0].userName, 'たろう');
+  });
+
+  it('users が空配列のJSONも空配列として読み出す', async () => {
+    const stored = JSON.stringify({ version: '2.0', timestamp: '2026-08-27T00:00:00.000Z', users: [] });
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.deepStrictEqual(result, { success: true, data: [] });
+  });
+
+  it('v1.0のJSONは自動マイグレーションしてv2.0形式のusersを返す', async () => {
+    // v1.0形式には studyTime / totalScore / missions が存在しない。
+    // migrateDataV1toV2 (src/data.js) がこれらを補って初期値を埋める経路を検証する。
+    const stored = JSON.stringify({
+      version: '1.0',
+      timestamp: '2025-12-24T09:00:00.000Z',
+      users: [{ userName: 'たろう', missionCount: 5, date: '2025-12-24' }]
+    });
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data.length, 1);
+    assert.strictEqual(result.data[0].userName, 'たろう');
+    assert.strictEqual(result.data[0].missionCount, 5);
+    // migrateDataV1toV2 が補う3フィールド
+    assert.deepStrictEqual(result.data[0].studyTime, { hours: 0, minutes: 0 });
+    assert.strictEqual(result.data[0].totalScore, 0);
+    assert.deepStrictEqual(result.data[0].missions, []);
+  });
+
+  it('v1.0でusersが空配列の場合も空配列を返す', async () => {
+    const stored = JSON.stringify({
+      version: '1.0',
+      timestamp: '2025-12-24T09:00:00.000Z',
+      users: []
+    });
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.deepStrictEqual(result, { success: true, data: [] });
+  });
+
+  it('壊れたJSONはパースエラーとして返す', async () => {
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: '{ broken' })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /JSONパースエラー/);
+  });
+
+  it('読み出しの失敗はそのままエラーとして返す', async () => {
+    const { dataModule } = loadDataWithStore({
+      readState: async () => ({ success: false, error: 'タイムアウト: Turso が10000ms以内に応答しませんでした' })
+    });
+
+    const result = await dataModule.loadPreviousData();
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /タイムアウト/);
+  });
+
+  it('saveDataはmission_dataキーに整形なしJSONを書く', async () => {
+    const { dataModule, writes } = loadDataWithStore();
+
+    const result = await dataModule.saveData([{ userName: 'はなこ', missionCount: 4 }]);
+
+    assert.deepStrictEqual(result, { success: true });
+    assert.strictEqual(writes.length, 1);
+    assert.strictEqual(writes[0].key, 'mission_data');
+    assert.ok(!writes[0].value.includes('\n'), '整形せず1行で保存すること');
+
+    const saved = JSON.parse(writes[0].value);
+    assert.strictEqual(saved.version, '2.0');
+    assert.strictEqual(saved.users[0].userName, 'はなこ');
+    assert.match(saved.timestamp, /^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('saveDataは配列以外を拒否する', async () => {
+    const { dataModule, writes } = loadDataWithStore();
+
+    const result = await dataModule.saveData({ notAnArray: true });
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /配列/);
+    assert.strictEqual(writes.length, 0, '検証に失敗したら書き込まないこと');
+  });
+
+  it('書き込みの失敗はエラーとして返す', async () => {
+    const { dataModule } = loadDataWithStore({
+      writeState: async () => ({ success: false, error: 'SQL エラー: no such table: app_state' })
+    });
+
+    const result = await dataModule.saveData([]);
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /no such table/);
+  });
+
+  it('空配列も保存できる', async () => {
+    const { dataModule, writes } = loadDataWithStore();
+
+    const result = await dataModule.saveData([]);
+
+    assert.deepStrictEqual(result, { success: true });
+    assert.deepStrictEqual(JSON.parse(writes[0].value).users, []);
+  });
+});
+
+describe('データ管理モジュール (src/data.js)', () => {
+  const data = require('../src/data');
 
   describe('compareData() - 新旧データ比較', () => {
     it('正常系: ミッション数が増加したユーザーを検出する', () => {
@@ -266,77 +390,30 @@ describe('データ管理モジュール (src/data.js)', () => {
       assert.strictEqual(result.changes[0].previousCount, 0);
       assert.strictEqual(result.changes[0].diff, 2);
     });
-  });
 
-  describe('saveData() - 新データ保存', () => {
-    it('正常系: 不正なデータ形式の場合、エラーを返す', async () => {
-      // 不正な入力（配列でない）
-      const invalidData = 'invalid data';
+    it('JSONパースエラーのメッセージが実名をマスキングする形式であること', async () => {
+      // sanitizeParseError が呼ばれている（つまり error.message ではなく
+      // sanitizeParseError(error.message) が返されている）ことを確認する。
+      // 実装で error.message に変わると、このテストが落ちるはず。
+      // V8 がエラーメッセージの断片に実名を含める形式の入力を使用
+      const { dataModule } = loadDataWithStore({
+        readState: async () => ({
+          success: true,
+          state: 'ok',
+          // 実名が V8 エラーメッセージに入る形式（カンマなしで断片形式）
+          value: '{"version":"2.0","users":[{"userName":"やまだたろう"},]}'
+        })
+      });
 
-      const result = await data.saveData(invalidData);
+      const result = await dataModule.loadPreviousData();
 
       assert.strictEqual(result.success, false);
-      assert.match(result.error, /不正|無効|配列|invalid|array/i);
-    });
-
-    it('正常系: データをJSON形式でファイルに保存できる', async () => {
-      const testData = [
-        { userName: '太郎', missionCount: 5, date: '2025-12-25' },
-        { userName: '花子', missionCount: 3, date: '2025-12-25' }
-      ];
-
-      const result = await data.saveData(testData);
-
-      assert.strictEqual(result.success, true, 'データ保存が成功すること');
-
-      // ファイルが作成されたことを確認
-      const fileContent = await fs.readFile(testDataFile, 'utf-8');
-      const savedData = JSON.parse(fileContent);
-
-      assert.strictEqual(savedData.version, '2.0', 'バージョン情報が含まれること');
-      assert.strictEqual(typeof savedData.timestamp, 'string', 'タイムスタンプが含まれること');
-      assert.strictEqual(Array.isArray(savedData.users), true, 'users配列が含まれること');
-      assert.strictEqual(savedData.users.length, 2, '2件のデータが保存されること');
-      assert.strictEqual(savedData.users[0].userName, '太郎', 'ユーザー名が保存されること');
-      assert.strictEqual(savedData.users[0].missionCount, 5, 'ミッション数が保存されること');
-    });
-
-    it('正常系: 空配列も保存できる', async () => {
-      const testData = [];
-
-      const result = await data.saveData(testData);
-
-      assert.strictEqual(result.success, true);
-
-      const fileContent = await fs.readFile(testDataFile, 'utf-8');
-      const savedData = JSON.parse(fileContent);
-
-      assert.strictEqual(savedData.users.length, 0, '空配列が保存されること');
-    });
-
-    it('正常系: タイムスタンプがISO 8601形式であること', async () => {
-      const testData = [
-        { userName: '太郎', missionCount: 5, date: '2025-12-25' }
-      ];
-
-      await data.saveData(testData);
-
-      const fileContent = await fs.readFile(testDataFile, 'utf-8');
-      const savedData = JSON.parse(fileContent);
-
-      // ISO 8601形式かチェック（例: 2025-12-25T09:00:00.000Z）
-      assert.match(savedData.timestamp, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-    });
-
-    it('異常系: ファイル書き込みエラー時、エラーを返す', async () => {
-      // 不正なパスを使用してエラーをシミュレート
-      // 存在しないディレクトリ内のファイルに書き込もうとすることでエラーを発生させる
-      const invalidData = { saveData: data.saveData };
-
-      // 代わりにmkdirのエラーをテスト
-      // 実装上、書き込みエラーは主にディレクトリ作成失敗で発生するため、
-      // 不正なデータ形式のテストで代替可能と判断
-      assert.strictEqual(true, true, '不正なデータ形式のテストで代替');
+      // JSONパースエラーとしてのエラー行は出力されること
+      assert.match(result.error, /JSONパースエラー/);
+      // 実装で sanitizeParseError が呼ばれている場合、実名は含まれない
+      // 実装で error.message が直接返されると、この行で落ちる
+      assert.doesNotMatch(result.error, /やまだたろう/, 'JSONパースエラーメッセージに実名が含まれている (sanitizeParseError が呼ばれていない可能性)');
     });
   });
+
 });

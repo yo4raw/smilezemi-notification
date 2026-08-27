@@ -2,10 +2,8 @@
  * ストリーク管理モジュールのテスト
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert');
-const fs = require('fs').promises;
-const path = require('path');
 
 const {
   createInitialState,
@@ -28,9 +26,6 @@ const {
   collapseHistory,
   GRACE_INITIAL
 } = require('../src/streak');
-
-const DATA_DIR = path.join(__dirname, '../data');
-const STREAK_FILE = path.join(DATA_DIR, 'streak_data.json');
 
 describe('STREAK_REQUIREMENTS', () => {
   it('コースごとの必要完了数が正の整数として集約定義されている', () => {
@@ -314,167 +309,6 @@ describe('confirmDay() - 免除日', () => {
     const state = { streak: 5, grace: 0, bonus: 0, lastConfirmedDate: '2026-08-15' };
     const { event } = confirmDay(state, '2026-08-16', false);
     assert.strictEqual(event, 'reset');
-  });
-});
-
-describe('loadStreakData / saveStreakData', () => {
-  beforeEach(async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    try {
-      await fs.unlink(STREAK_FILE);
-    } catch (e) {
-      // ファイルなしは無視
-    }
-  });
-
-  afterEach(async () => {
-    try {
-      await fs.unlink(STREAK_FILE);
-    } catch (e) {
-      // ファイルなしは無視
-    }
-  });
-
-  it('ファイルが存在しない場合は空のマップを返す(初回実行)', async () => {
-    const result = await loadStreakData();
-    assert.strictEqual(result.success, true);
-    assert.deepStrictEqual(result.data, {});
-  });
-
-  it('保存したデータを読み込める(ラウンドトリップ)', async () => {
-    const users = {
-      'たろう (中学生コース)': { streak: 12, grace: 1, lastConfirmedDate: '2026-07-12' }
-    };
-    const saveResult = await saveStreakData(users);
-    assert.strictEqual(saveResult.success, true);
-
-    const loadResult = await loadStreakData();
-    assert.strictEqual(loadResult.success, true);
-    assert.deepStrictEqual(loadResult.data, users);
-  });
-
-  it('保存ファイルに version(1.4) と ISO 8601 timestamp が含まれる', async () => {
-    await saveStreakData({});
-    const content = JSON.parse(await fs.readFile(STREAK_FILE, 'utf-8'));
-    assert.strictEqual(content.version, '1.4');
-    assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(content.timestamp));
-  });
-
-  it('1.0データの読み込み時に全ユーザーのおたすけを3にする(一度きりの満タンチャージ)', async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(STREAK_FILE, JSON.stringify({
-      version: '1.0',
-      users: {
-        'じろう (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-12' },
-        'たろう (中学生コース)': { streak: 15, grace: 2, lastConfirmedDate: '2026-07-12' }
-      }
-    }), 'utf-8');
-
-    const result = await loadStreakData();
-
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, 'おたすけ0は3になること');
-    assert.strictEqual(result.data['じろう (小学生コース)'].streak, 3, 'ストリークは変わらないこと');
-    assert.strictEqual(result.data['たろう (中学生コース)'].grace, 3, 'おたすけ2も3になること');
-  });
-
-  it('1.1データの読み込み時も全ユーザーのおたすけを3にする', async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(STREAK_FILE, JSON.stringify({
-      version: '1.1',
-      users: {
-        'じろう (小学生コース)': { streak: 3, grace: 1, lastConfirmedDate: '2026-07-12' }
-      }
-    }), 'utf-8');
-
-    const result = await loadStreakData();
-
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, '1.1データも満タンチャージ対象なこと');
-  });
-
-  it('1.2データの読み込み時も全ユーザーのおたすけを3にする(v1.3再チャージ)', async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(STREAK_FILE, JSON.stringify({
-      version: '1.2',
-      users: {
-        'じろう (小学生コース)': { streak: 0, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' }
-      }
-    }), 'utf-8');
-
-    const result = await loadStreakData();
-
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, '1.2データも満タンチャージ対象なこと');
-  });
-
-  it('1.3データの読み込みではおたすけ0でも変化しない(消費済みは再付与しない)', async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(STREAK_FILE, JSON.stringify({
-      version: '1.3',
-      users: {
-        'じろう (小学生コース)': { streak: 3, grace: 0, bonus: 0, lastConfirmedDate: '2026-07-12' }
-      }
-    }), 'utf-8');
-
-    const result = await loadStreakData();
-
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 0, '1.3データは移行対象外なこと');
-  });
-
-  it('不正なJSONの場合はエラーを返す', async () => {
-    await fs.writeFile(STREAK_FILE, '{invalid json', 'utf-8');
-    const result = await loadStreakData();
-    assert.strictEqual(result.success, false);
-    assert.ok(result.error.includes('JSONパースエラー'));
-  });
-
-  it('未知のバージョンはエラーを返す', async () => {
-    await fs.writeFile(STREAK_FILE, JSON.stringify({ version: '9.9', users: {} }), 'utf-8');
-    const result = await loadStreakData();
-    assert.strictEqual(result.success, false);
-    assert.ok(result.error.includes('未知のストリークデータバージョン'));
-  });
-
-  it('配列を渡すと保存エラーになる', async () => {
-    const result = await saveStreakData([]);
-    assert.strictEqual(result.success, false);
-  });
-
-  it('v1.3のデータを読むと免除日フィールドが補われる', async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(STREAK_FILE, JSON.stringify({
-      version: '1.3',
-      timestamp: '2026-08-16T00:00:00.000Z',
-      users: { 'たろう': { streak: 7, grace: 2, bonus: 3, lastConfirmedDate: '2026-08-16' } }
-    }), 'utf-8');
-
-    const result = await loadStreakData();
-    assert.strictEqual(result.success, true);
-    const state = result.data['たろう'];
-    assert.deepStrictEqual(state.exemptDates, []);
-    assert.deepStrictEqual(state.history, {});
-    assert.strictEqual(state.replayBase.streak, 7, '現在値がチェックポイントになる');
-    assert.strictEqual(state.replayBase.grace, 2);
-    assert.strictEqual(state.replayBase.date, '2026-08-16');
-  });
-
-  it('v1.4のデータではおたすけを再チャージしない', async () => {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(STREAK_FILE, JSON.stringify({
-      version: '1.4',
-      timestamp: '2026-08-16T00:00:00.000Z',
-      users: {
-        'たろう': {
-          streak: 7, grace: 1, bonus: 0, lastConfirmedDate: '2026-08-16',
-          exemptDates: [], history: {}, replayBase: { streak: 7, grace: 1, date: '2026-08-16' }
-        }
-      }
-    }), 'utf-8');
-
-    const result = await loadStreakData();
-    assert.strictEqual(result.data['たろう'].grace, 1, '既に1.4なら移行は走らない');
   });
 });
 
@@ -1246,5 +1080,322 @@ describe('formatStreakInfo() - 免除日', () => {
       event: 'exempt'
     });
     assert.ok(text.includes('😌 免除日のため記録はそのままです'), text);
+  });
+});
+
+function resolveStreakModule(p) {
+  return require.resolve(p);
+}
+
+const STREAK_MODULE_PATHS = ['../src/streak', '../src/store'];
+
+// sanitizeParseError は実装を差し替える意図がないため、モックにも本物を通す
+// (差し替えるとJSONパースエラーのマスキングを検証できなくなる)
+const { sanitizeParseError } = require('../src/store');
+
+function clearStreakModuleCache() {
+  for (const p of STREAK_MODULE_PATHS) {
+    try { delete require.cache[resolveStreakModule(p)]; } catch {}
+  }
+}
+
+/**
+ * storeをモックしてsrc/streak.jsをロードする
+ *
+ * @param {object} overrides - readState / writeState の差し替え
+ * @returns {{streakModule: object, writes: Array<{key: string, value: string}>}}
+ */
+function loadStreakWithStore(overrides = {}) {
+  clearStreakModuleCache();
+  const writes = [];
+
+  require.cache[resolveStreakModule('../src/store')] = {
+    id: resolveStreakModule('../src/store'),
+    filename: resolveStreakModule('../src/store'),
+    loaded: true,
+    exports: {
+      readState: overrides.readState || (async () => ({ success: true, state: 'empty', value: null })),
+      writeState: overrides.writeState || (async (key, value) => {
+        writes.push({ key, value });
+        return { success: true };
+      }),
+      resolveEndpoint: () => 'https://test-db.turso.io/v2/pipeline',
+      createSchema: async () => ({ success: true }),
+      sanitizeParseError
+    }
+  };
+
+  return { streakModule: require('../src/streak'), writes };
+}
+
+describe('ストリークモジュール - Turso永続化', () => {
+  afterEach(() => {
+    clearStreakModuleCache();
+  });
+
+  it('state=empty なら空マップを返す(初回実行)', async () => {
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'empty', value: null })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.deepStrictEqual(result, { success: true, data: {} });
+  });
+
+  it('state=uninitialized なら uninitialized フラグ付きで失敗を返す(移行前)', async () => {
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'uninitialized', value: null })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.uninitialized, true);
+    assert.match(result.error, /未初期化/);
+  });
+
+  it('readStateの失敗はuninitializedを混入させずそのままエラーとして返す', async () => {
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: false, error: 'タイムアウト: Turso が10000ms以内に応答しませんでした' })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /タイムアウト/);
+    assert.strictEqual(result.uninitialized, undefined, 'state=uninitializedのケースと混同してはならない');
+  });
+
+  it('streak_data キーで読み出す', async () => {
+    const readKeys = [];
+    const { streakModule } = loadStreakWithStore({
+      readState: async (key) => {
+        readKeys.push(key);
+        return { success: true, state: 'empty', value: null };
+      }
+    });
+
+    await streakModule.loadStreakData();
+
+    assert.deepStrictEqual(readKeys, ['streak_data']);
+  });
+
+  it('v1.4のデータをそのまま読み出す(おたすけの再チャージなし)', async () => {
+    const stored = JSON.stringify({
+      version: '1.4',
+      timestamp: '2026-08-27T00:00:00.000Z',
+      users: {
+        'たろう': {
+          streak: 5, grace: 2, bonus: 1, course: 'elementary',
+          lastConfirmedDate: '2026-08-26', exemptDates: [], history: { '2026-08-26': true },
+          replayBase: { streak: 0, grace: 1, date: null }
+        }
+      }
+    });
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data['たろう'].streak, 5);
+    assert.strictEqual(result.data['たろう'].bonus, 1);
+    assert.strictEqual(result.data['たろう'].grace, 2, '1.4は再チャージ対象外なこと');
+    assert.deepStrictEqual(result.data['たろう'].exemptDates, []);
+    assert.deepStrictEqual(result.data['たろう'].history, { '2026-08-26': true });
+    assert.deepStrictEqual(result.data['たろう'].replayBase, { streak: 0, grace: 1, date: null }, '既存のreplayBaseは上書きされないこと');
+  });
+
+  it('v1.0のデータは全ユーザーのおたすけを満タン(3)にし免除日フィールドを補う', async () => {
+    const stored = JSON.stringify({
+      version: '1.0',
+      users: {
+        'じろう (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-12' },
+        'たろう (中学生コース)': { streak: 15, grace: 2, lastConfirmedDate: '2026-07-12' }
+      }
+    });
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, 'おたすけ0は3になること');
+    assert.strictEqual(result.data['じろう (小学生コース)'].streak, 3, 'ストリークは変わらないこと');
+    assert.strictEqual(result.data['たろう (中学生コース)'].grace, 3, 'おたすけ2も3になること');
+    assert.deepStrictEqual(result.data['じろう (小学生コース)'].exemptDates, []);
+    assert.deepStrictEqual(result.data['じろう (小学生コース)'].history, {});
+    assert.strictEqual(result.data['じろう (小学生コース)'].replayBase.streak, 3);
+  });
+
+  it('v1.1のデータも全ユーザーのおたすけを満タン(3)にする', async () => {
+    const stored = JSON.stringify({
+      version: '1.1',
+      users: {
+        'じろう (小学生コース)': { streak: 3, grace: 1, lastConfirmedDate: '2026-07-12' }
+      }
+    });
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, '1.1データも満タンチャージ対象なこと');
+    assert.deepStrictEqual(result.data['じろう (小学生コース)'].exemptDates, []);
+  });
+
+  it('v1.2以前のデータはおたすけ満タンと免除日フィールドを補って読み出す', async () => {
+    const stored = JSON.stringify({
+      version: '1.2',
+      users: { 'はなこ': { streak: 3, grace: 0, bonus: 0, lastConfirmedDate: '2026-08-20' } }
+    });
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.data['はなこ'].grace, 3, '1.3移行でおたすけが満タンになること');
+    assert.deepStrictEqual(result.data['はなこ'].exemptDates, [], '1.4移行でexemptDatesが補われること');
+    assert.deepStrictEqual(result.data['はなこ'].history, {});
+  });
+
+  it('v1.3のデータはおたすけを再チャージせず免除日フィールドのみ補う(消費済みは再付与しない)', async () => {
+    const stored = JSON.stringify({
+      version: '1.3',
+      timestamp: '2026-08-16T00:00:00.000Z',
+      users: { 'たろう': { streak: 7, grace: 0, bonus: 3, lastConfirmedDate: '2026-08-16' } }
+    });
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: stored })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, true);
+    const state = result.data['たろう'];
+    assert.strictEqual(state.grace, 0, '1.3データは満タンチャージ対象外なこと');
+    assert.deepStrictEqual(state.exemptDates, []);
+    assert.deepStrictEqual(state.history, {});
+    assert.strictEqual(state.replayBase.streak, 7, '現在値がチェックポイントになる');
+    assert.strictEqual(state.replayBase.grace, 0);
+    assert.strictEqual(state.replayBase.date, '2026-08-16');
+  });
+
+  it('未知のバージョンは失敗として返す', async () => {
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: JSON.stringify({ version: '9.9', users: {} }) })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /未知のストリークデータバージョン/);
+  });
+
+  it('壊れたJSONはパースエラーとして返す', async () => {
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({ success: true, state: 'ok', value: 'not json' })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /JSONパースエラー/);
+  });
+
+  it('saveStreakDataはstreak_dataキーに整形なしJSONを書く(version 1.4とISO 8601 timestamp)', async () => {
+    const { streakModule, writes } = loadStreakWithStore();
+
+    const result = await streakModule.saveStreakData({ 'じろう': { streak: 1, grace: 1, bonus: 0 } });
+
+    assert.deepStrictEqual(result, { success: true });
+    assert.strictEqual(writes[0].key, 'streak_data');
+    assert.ok(!writes[0].value.includes('\n'), '整形せず1行で保存すること');
+
+    const saved = JSON.parse(writes[0].value);
+    assert.strictEqual(saved.version, '1.4');
+    assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(saved.timestamp), 'ISO 8601形式のtimestampが含まれること');
+    assert.strictEqual(saved.users['じろう'].streak, 1);
+  });
+
+  it('saveStreakDataはオブジェクト以外を拒否する', async () => {
+    const { streakModule, writes } = loadStreakWithStore();
+
+    const result = await streakModule.saveStreakData([]);
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /オブジェクト/);
+    assert.strictEqual(writes.length, 0, '検証に失敗したら書き込まないこと');
+  });
+
+  it('書き込みの失敗はエラーとして返す', async () => {
+    const { streakModule } = loadStreakWithStore({
+      writeState: async () => ({ success: false, error: 'SQL エラー: no such table: app_state' })
+    });
+
+    const result = await streakModule.saveStreakData({});
+
+    assert.strictEqual(result.success, false);
+    assert.match(result.error, /no such table/);
+  });
+
+  it('保存したデータをそのまま読み戻せる(モックストア越しのラウンドトリップ)', async () => {
+    let storedValue = null;
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => storedValue === null
+        ? { success: true, state: 'empty', value: null }
+        : { success: true, state: 'ok', value: storedValue },
+      writeState: async (key, value) => {
+        storedValue = value;
+        return { success: true };
+      }
+    });
+
+    // 本番のユーザーキーは素の名前(コース名は付かない)。コース依存の判定は course フィールドで行う
+    const users = {
+      'たろう': {
+        streak: 12, grace: 1, bonus: 0, course: 'juniorHigh',
+        lastConfirmedDate: '2026-07-12', exemptDates: [], history: {},
+        replayBase: { streak: 12, grace: 1, date: '2026-07-12' }
+      }
+    };
+
+    const saveResult = await streakModule.saveStreakData(users);
+    assert.strictEqual(saveResult.success, true);
+
+    const loadResult = await streakModule.loadStreakData();
+    assert.strictEqual(loadResult.success, true);
+    assert.deepStrictEqual(loadResult.data, users);
+  });
+
+  it('JSONパースエラーのメッセージが実名をマスキングする形式であること', async () => {
+    // sanitizeParseError が呼ばれている（つまり error.message ではなく
+    // sanitizeParseError(error.message) が返されている）ことを確認する。
+    // 実装で error.message に変わると、このテストが落ちるはず。
+    // V8 がエラーメッセージの断片に実名を含める形式の入力を使用
+    const { streakModule } = loadStreakWithStore({
+      readState: async () => ({
+        success: true,
+        state: 'ok',
+        // 実名が V8 エラーメッセージに入る形式
+        value: '{"version":"1.4","users":{"やまだたろう":undefined}}'
+      })
+    });
+
+    const result = await streakModule.loadStreakData();
+
+    assert.strictEqual(result.success, false);
+    // JSONパースエラーとしての エラー行は出力されること
+    assert.match(result.error, /JSONパースエラー/);
+    // 実装で sanitizeParseError が呼ばれている場合、実名は含まれない
+    // 実装で error.message が直接返されると、この行で落ちる
+    assert.doesNotMatch(result.error, /やまだたろう/, 'JSONパースエラーメッセージに実名が含まれている (sanitizeParseError が呼ばれていない可能性)');
   });
 });

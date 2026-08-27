@@ -18,37 +18,11 @@ jobs:
     timeout-minutes: 300
     permissions:
       contents: read
-      actions: read # キャッシュ整合性チェック(gh api)に必要
 
     steps:
       # 1. リポジトリのチェックアウト
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v7
-
-      # 前回データ(ミッション・ストリーク)をキャッシュから復元
-      - name: 前回データを復元
-        id: restore-data
-        uses: actions/cache/restore@v6
-        with:
-          path: data
-          key: smilezemi-data-${{ github.run_id }}
-          restore-keys: |
-            smilezemi-data-
-
-      # キャッシュ整合性チェック: 既存エントリがあるのに復元できなかった場合は
-      # キャッシュサービス異常の可能性が高い。空データのままsaveすると
-      # 「空が最新キャッシュ」になりストリーク履歴が実質消失するため、ここで中断する
-      - name: キャッシュ復元の整合性を検証
-        if: steps.restore-data.outputs.cache-matched-key == ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=smilezemi-data-" --jq '.total_count')
-          if [ "$count" -gt 0 ]; then
-            echo "::error::既存のキャッシュエントリ(${count}件)があるのに復元できませんでした。データ保護のためジョブを中断します。キャッシュサービス回復後に手動で再実行してください。"
-            exit 1
-          fi
-          echo "キャッシュエントリなし(初回実行またはエビクション後)のため、初期状態で続行します"
 
       # 2. .envファイルを作成
       - name: .envファイルを作成
@@ -58,6 +32,8 @@ jobs:
           echo "LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}" >> .env
           echo "LINE_USER_ID=${{ secrets.LINE_USER_ID }}" >> .env
           echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> .env
+          echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}" >> .env
+          echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}" >> .env
 
       # 3. 環境変数の検証
       - name: 環境変数を検証
@@ -77,6 +53,14 @@ jobs:
           fi
           if [ -z "${{ secrets.LINE_USER_ID }}" ]; then
             echo "❌ LINE_USER_ID が設定されていません"
+            exit 1
+          fi
+          if [ -z "${{ secrets.TURSO_DATABASE_URL }}" ]; then
+            echo "❌ TURSO_DATABASE_URL が設定されていません"
+            exit 1
+          fi
+          if [ -z "${{ secrets.TURSO_AUTH_TOKEN }}" ]; then
+            echo "❌ TURSO_AUTH_TOKEN が設定されていません"
             exit 1
           fi
           echo "✅ 全ての環境変数が設定されています"
@@ -105,15 +89,6 @@ jobs:
       - name: 朝通知を実行
         run: docker compose run --rm crawler node src/morning-index.js
 
-      # データをキャッシュに保存(次回実行時に復元される)
-      # 通知失敗などで exit code 1 でも確定済みストリークは保持したいため always()
-      - name: データをキャッシュに保存
-        if: always()
-        uses: actions/cache/save@v6
-        with:
-          path: data
-          key: smilezemi-data-${{ github.run_id }}
-
       # 7. スクリーンショットをアーティファクトとして保存(常に実行)
       - name: スクリーンショットを保存
         if: always()
@@ -121,7 +96,7 @@ jobs:
         with:
           name: morning-screenshots-${{ github.run_number }}
           path: screenshots/
-          retention-days: 90
+          retention-days: 3
           if-no-files-found: ignore
 
       # 8. .envファイルを削除(セキュリティ対策)

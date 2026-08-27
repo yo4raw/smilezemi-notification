@@ -1,0 +1,358 @@
+/**
+ * Turso状態ストアのテスト
+ *
+ * fetchをモックしてHTTPリクエストの内容とレスポンス解釈を検証する。
+ * 実DBには接続しない。
+ */
+
+const { describe, it, beforeEach, afterEach } = require('node:test');
+const assert = require('node:assert');
+
+const store = require('../src/store');
+
+describe('Turso状態ストア (src/store.js)', () => {
+  let originalFetch;
+  let originalUrl;
+  let originalToken;
+  let fetchCalls;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    originalUrl = process.env.TURSO_DATABASE_URL;
+    originalToken = process.env.TURSO_AUTH_TOKEN;
+    process.env.TURSO_DATABASE_URL = 'libsql://test-db.turso.io';
+    process.env.TURSO_AUTH_TOKEN = 'test-token';
+    fetchCalls = [];
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.TURSO_DATABASE_URL;
+    else process.env.TURSO_DATABASE_URL = originalUrl;
+    if (originalToken === undefined) delete process.env.TURSO_AUTH_TOKEN;
+    else process.env.TURSO_AUTH_TOKEN = originalToken;
+  });
+
+  /** pipelineのレスポンスを組み立てる。resultsは各文の結果を順に並べる */
+  function mockFetchOk(results) {
+    global.fetch = async (url, options) => {
+      fetchCalls.push({ url, options, body: JSON.parse(options.body) });
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ baton: null, base_url: null, results })
+      };
+    };
+  }
+
+  /** execute成功の結果。rowsは [[{type,value}]] 形式 */
+  function okExecute(rows = []) {
+    return {
+      type: 'ok',
+      response: { type: 'execute', result: { cols: [], rows, affected_row_count: 0 } }
+    };
+  }
+
+  function errorResult(message) {
+    return { type: 'error', error: { message, code: 'SQLITE_UNKNOWN' } };
+  }
+
+  describe('resolveEndpoint()', () => {
+    it('libsql:// を https:// に変換して /v2/pipeline を付ける', () => {
+      assert.strictEqual(
+        store.resolveEndpoint('libsql://test-db.turso.io'),
+        'https://test-db.turso.io/v2/pipeline'
+      );
+    });
+
+    it('末尾のスラッシュを重複させない', () => {
+      assert.strictEqual(
+        store.resolveEndpoint('libsql://test-db.turso.io/'),
+        'https://test-db.turso.io/v2/pipeline'
+      );
+    });
+
+    it('https:// で渡された場合もそのまま扱う', () => {
+      assert.strictEqual(
+        store.resolveEndpoint('https://test-db.turso.io'),
+        'https://test-db.turso.io/v2/pipeline'
+      );
+    });
+
+    it('空文字列は例外にする', () => {
+      assert.throws(() => store.resolveEndpoint(''), /TURSO_DATABASE_URL/);
+    });
+  });
+
+  describe('readState()', () => {
+    it('行があれば state=ok と値を返す', async () => {
+      mockFetchOk([okExecute([[{ type: 'text', value: '{"version":"2.0"}' }]]), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.readState('mission_data');
+
+      assert.deepStrictEqual(result, { success: true, state: 'ok', value: '{"version":"2.0"}' });
+    });
+
+    it('行がなければ state=empty を返す', async () => {
+      mockFetchOk([okExecute([]), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.readState('mission_data');
+
+      assert.deepStrictEqual(result, { success: true, state: 'empty', value: null });
+    });
+
+    it('no such table は state=uninitialized を返す(移行前)', async () => {
+      mockFetchOk([errorResult('SQLite error: no such table: app_state'), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.readState('streak_data');
+
+      assert.deepStrictEqual(result, { success: true, state: 'uninitialized', value: null });
+    });
+
+    it('no such table 以外のSQLエラーは失敗にする', async () => {
+      mockFetchOk([errorResult('SQLite error: database is locked'), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.readState('streak_data');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /database is locked/);
+    });
+
+    it('keyをバインド引数で渡す(文字列連結しない)', async () => {
+      mockFetchOk([okExecute([]), { type: 'ok', response: { type: 'close' } }]);
+
+      await store.readState('streak_data');
+
+      const { body, url, options } = fetchCalls[0];
+      assert.strictEqual(url, 'https://test-db.turso.io/v2/pipeline');
+      assert.strictEqual(options.headers.Authorization, 'Bearer test-token');
+      assert.deepStrictEqual(body.requests[0].stmt.args, [{ type: 'text', value: 'streak_data' }]);
+      assert.match(body.requests[0].stmt.sql, /where key = \?/);
+      assert.strictEqual(body.requests.at(-1).type, 'close', '最後にcloseを送ること');
+    });
+
+    it('HTTPステータスが200以外なら失敗にする', async () => {
+      global.fetch = async () => ({ ok: false, status: 401, statusText: 'Unauthorized', json: async () => ({}) });
+
+      const result = await store.readState('streak_data');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /401/);
+    });
+
+    it('接続情報が未設定なら失敗にする', async () => {
+      delete process.env.TURSO_AUTH_TOKEN;
+
+      const result = await store.readState('streak_data');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /TURSO_AUTH_TOKEN/);
+    });
+
+    it('タイムアウト(AbortError)は分かりやすいエラーメッセージにする', async () => {
+      global.fetch = async () => {
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        throw error;
+      };
+
+      const result = await store.readState('streak_data');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /タイムアウト/);
+    });
+
+    it('AbortControllerのsignalをfetchに渡す(タイムアウト機構が配線されている)', async () => {
+      let capturedSignal;
+      global.fetch = async (url, options) => {
+        capturedSignal = options.signal;
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        throw error;
+      };
+
+      await store.readState('streak_data');
+
+      assert.ok(capturedSignal instanceof AbortSignal, 'fetchにsignalが渡されていること');
+    });
+  });
+
+  describe('writeState()', () => {
+    it('app_stateのupsertを1文だけ送る(監査行はトリガーが積む)', async () => {
+      mockFetchOk([okExecute(), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.writeState('streak_data', '{"version":"1.4"}');
+
+      assert.deepStrictEqual(result, { success: true });
+
+      const { body } = fetchCalls[0];
+      const executes = body.requests.filter(request => request.type === 'execute');
+      assert.strictEqual(executes.length, 1, 'execute文は1つだけであること');
+      assert.match(executes[0].stmt.sql, /insert into app_state/);
+      assert.match(executes[0].stmt.sql, /on conflict\(key\) do update/);
+      assert.doesNotMatch(executes[0].stmt.sql, /state_audit/, 'アプリからstate_auditへ直接書かないこと');
+      assert.doesNotMatch(executes[0].stmt.sql, /create table/i, 'テーブルを作成しないこと');
+    });
+
+    it('keyとvalueとupdated_atをバインド引数で渡す', async () => {
+      mockFetchOk([okExecute(), { type: 'ok', response: { type: 'close' } }]);
+
+      await store.writeState('mission_data', '{"a":1}');
+
+      const args = fetchCalls[0].body.requests[0].stmt.args;
+      assert.strictEqual(args.length, 3);
+      assert.deepStrictEqual(args[0], { type: 'text', value: 'mission_data' });
+      assert.deepStrictEqual(args[1], { type: 'text', value: '{"a":1}' });
+      assert.strictEqual(args[2].type, 'text');
+      assert.match(args[2].value, /^\d{4}-\d{2}-\d{2}T/, 'updated_atがISO 8601であること');
+    });
+
+    it('失敗したら1度だけ再送し、成功すればsuccessを返す', async () => {
+      let attempts = 0;
+      global.fetch = async (url, options) => {
+        attempts++;
+        fetchCalls.push({ url, options, body: JSON.parse(options.body) });
+        if (attempts === 1) {
+          throw new Error('network down');
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({ results: [okExecute(), { type: 'ok', response: { type: 'close' } }] })
+        };
+      };
+
+      const result = await store.writeState('streak_data', '{}');
+
+      assert.deepStrictEqual(result, { success: true });
+      assert.strictEqual(attempts, 2, '1度だけ再送すること');
+    });
+
+    it('再送しても失敗したら諦めてエラーを返す', async () => {
+      let attempts = 0;
+      global.fetch = async (url, options) => {
+        attempts++;
+        fetchCalls.push({ url, options, body: JSON.parse(options.body) });
+        throw new Error('network down');
+      };
+
+      const result = await store.writeState('streak_data', '{}');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /network down/);
+      assert.strictEqual(attempts, 2, '3回以上は試さないこと');
+    });
+
+    it('テーブルがない状態の書き込みは失敗にする(自動作成しない)', async () => {
+      mockFetchOk([errorResult('SQLite error: no such table: app_state'), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.writeState('streak_data', '{}');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /no such table/);
+    });
+
+    it('タイムアウト(AbortError)しても1度だけ再送し、成功すればsuccessを返す', async () => {
+      let attempts = 0;
+      global.fetch = async (url, options) => {
+        attempts++;
+        if (attempts === 1) {
+          const error = new Error('The operation was aborted');
+          error.name = 'AbortError';
+          throw error;
+        }
+        fetchCalls.push({ url, options, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({ results: [okExecute(), { type: 'ok', response: { type: 'close' } }] })
+        };
+      };
+
+      const result = await store.writeState('streak_data', '{}');
+
+      assert.deepStrictEqual(result, { success: true });
+      assert.strictEqual(attempts, 2, '1度だけ再送すること');
+    });
+  });
+
+  describe('createSchema()', () => {
+    it('テーブル2つとトリガー2つをif not existsで作る', async () => {
+      mockFetchOk([okExecute(), okExecute(), okExecute(), okExecute(), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.createSchema();
+
+      assert.deepStrictEqual(result, { success: true });
+
+      const sqls = fetchCalls[0].body.requests
+        .filter(request => request.type === 'execute')
+        .map(request => request.stmt.sql);
+
+      assert.strictEqual(sqls.length, 4);
+      assert.ok(sqls.some(sql => /create table if not exists app_state/.test(sql)));
+      assert.ok(sqls.some(sql => /create table if not exists state_audit/.test(sql)));
+      assert.ok(sqls.some(sql => /create trigger if not exists app_state_audit_insert/.test(sql)));
+      assert.ok(sqls.some(sql => /create trigger if not exists app_state_audit_update/.test(sql)));
+    });
+
+    it('SQLエラーは失敗として返す', async () => {
+      mockFetchOk([errorResult('SQLite error: syntax error'), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.createSchema();
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /syntax error/);
+    });
+  });
+
+  describe('sanitizeParseError() — JSON.parseエラーの入力断片から実名を除去する', () => {
+    it('前後に...が付く断片(V8が両側を切り詰めた場合)から実名を除去する', () => {
+      const filler = 'x'.repeat(80);
+      const trailing = 'y'.repeat(80);
+      const bad = `{"filler":"${filler}","やまだたろう":undefined,"trailing":"${trailing}"}`;
+      let raw;
+      try {
+        JSON.parse(bad);
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.match(raw, /やまだたろう/, '前提: サニタイズ前は実名が含まれる');
+
+      const sanitized = store.sanitizeParseError(raw);
+      assert.doesNotMatch(sanitized, /やまだたろう/);
+      assert.match(sanitized, /Unexpected token/, '診断情報(トークン種別)は残す');
+    });
+
+    it('...が付かない短い断片(V8が切り詰めない場合)からも実名を除去する', () => {
+      const bad = '{"やまだたろう":undefined}';
+      let raw;
+      try {
+        JSON.parse(bad);
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.match(raw, /やまだたろう/, '前提: サニタイズ前は実名が含まれる');
+
+      const sanitized = store.sanitizeParseError(raw);
+      assert.doesNotMatch(sanitized, /やまだたろう/);
+    });
+
+    it('引用符付き断片を含まないメッセージ(例: 入力終端エラー)はそのまま返す', () => {
+      let raw;
+      try {
+        JSON.parse('');
+      } catch (error) {
+        raw = error.message;
+      }
+      assert.strictEqual(store.sanitizeParseError(raw), raw);
+    });
+
+    it('文字列以外はそのまま返す', () => {
+      assert.strictEqual(store.sanitizeParseError(undefined), undefined);
+      assert.strictEqual(store.sanitizeParseError(null), null);
+    });
+  });
+});
