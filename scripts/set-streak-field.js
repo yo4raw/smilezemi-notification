@@ -111,7 +111,7 @@ async function main() {
       console.error('[set-streak-field] 登録済みユーザー:');
       known.forEach(key => console.error(`  - "${key}"`));
     } else {
-      console.error('[set-streak-field] 登録済みユーザーは0件です(キャッシュ未復元またはデータ未生成の可能性)');
+      console.error('[set-streak-field] 登録済みユーザーは0件です(テーブルはあるがまだデータがありません。初回実行前の可能性があります)');
     }
     process.exitCode = 1;
     return;

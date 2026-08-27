@@ -201,7 +201,7 @@ async function main() {
   const targets = all ? Object.keys(users) : [user];
 
   if (targets.length === 0) {
-    console.error('[set-exempt-dates] 登録済みユーザーは0件です(キャッシュ未復元またはデータ未生成の可能性)');
+    console.error('[set-exempt-dates] 登録済みユーザーは0件です(テーブルはあるがまだデータがありません。初回実行前の可能性があります)');
     process.exitCode = 1;
     return;
   }
