@@ -1379,12 +1379,13 @@ describe('ストリークモジュール - Turso永続化', () => {
     // sanitizeParseError が呼ばれている（つまり error.message ではなく
     // sanitizeParseError(error.message) が返されている）ことを確認する。
     // 実装で error.message に変わると、このテストが落ちるはず。
+    // V8 がエラーメッセージの断片に実名を含める形式の入力を使用
     const { streakModule } = loadStreakWithStore({
       readState: async () => ({
         success: true,
         state: 'ok',
-        // エラーメッセージシミュレーション: 実名を含む壊れたJSON
-        value: '{"version":"1.4","users":{"やまだたろう":{"streak":5'
+        // 実名が V8 エラーメッセージに入る形式
+        value: '{"version":"1.4","users":{"やまだたろう":undefined}}'
       })
     });
 

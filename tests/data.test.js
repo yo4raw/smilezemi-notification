@@ -395,12 +395,13 @@ describe('データ管理モジュール (src/data.js)', () => {
       // sanitizeParseError が呼ばれている（つまり error.message ではなく
       // sanitizeParseError(error.message) が返されている）ことを確認する。
       // 実装で error.message に変わると、このテストが落ちるはず。
+      // V8 がエラーメッセージの断片に実名を含める形式の入力を使用
       const { dataModule } = loadDataWithStore({
         readState: async () => ({
           success: true,
           state: 'ok',
-          // エラーメッセージシミュレーション: 実名を含む壊れたJSON
-          value: '{"version":"1.0","users":[{"userName":"やまだたろう"'
+          // 実名が V8 エラーメッセージに入る形式（カンマなしで断片形式）
+          value: '{"version":"2.0","users":[{"userName":"やまだたろう"},]}'
         })
       });
 
