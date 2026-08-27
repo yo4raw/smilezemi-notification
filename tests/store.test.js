@@ -149,6 +149,33 @@ describe('Turso状態ストア (src/store.js)', () => {
       assert.strictEqual(result.success, false);
       assert.match(result.error, /TURSO_AUTH_TOKEN/);
     });
+
+    it('タイムアウト(AbortError)は分かりやすいエラーメッセージにする', async () => {
+      global.fetch = async () => {
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        throw error;
+      };
+
+      const result = await store.readState('streak_data');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /タイムアウト/);
+    });
+
+    it('AbortControllerのsignalをfetchに渡す(タイムアウト機構が配線されている)', async () => {
+      let capturedSignal;
+      global.fetch = async (url, options) => {
+        capturedSignal = options.signal;
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        throw error;
+      };
+
+      await store.readState('streak_data');
+
+      assert.ok(capturedSignal instanceof AbortSignal, 'fetchにsignalが渡されていること');
+    });
   });
 
   describe('writeState()', () => {
@@ -225,6 +252,30 @@ describe('Turso状態ストア (src/store.js)', () => {
 
       assert.strictEqual(result.success, false);
       assert.match(result.error, /no such table/);
+    });
+
+    it('タイムアウト(AbortError)しても1度だけ再送し、成功すればsuccessを返す', async () => {
+      let attempts = 0;
+      global.fetch = async (url, options) => {
+        attempts++;
+        if (attempts === 1) {
+          const error = new Error('The operation was aborted');
+          error.name = 'AbortError';
+          throw error;
+        }
+        fetchCalls.push({ url, options, body: JSON.parse(options.body) });
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({ results: [okExecute(), { type: 'ok', response: { type: 'close' } }] })
+        };
+      };
+
+      const result = await store.writeState('streak_data', '{}');
+
+      assert.deepStrictEqual(result, { success: true });
+      assert.strictEqual(attempts, 2, '1度だけ再送すること');
     });
   });
 
