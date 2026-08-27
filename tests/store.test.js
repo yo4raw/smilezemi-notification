@@ -150,4 +150,81 @@ describe('Turso状態ストア (src/store.js)', () => {
       assert.match(result.error, /TURSO_AUTH_TOKEN/);
     });
   });
+
+  describe('writeState()', () => {
+    it('app_stateのupsertを1文だけ送る(監査行はトリガーが積む)', async () => {
+      mockFetchOk([okExecute(), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.writeState('streak_data', '{"version":"1.4"}');
+
+      assert.deepStrictEqual(result, { success: true });
+
+      const { body } = fetchCalls[0];
+      const executes = body.requests.filter(request => request.type === 'execute');
+      assert.strictEqual(executes.length, 1, 'execute文は1つだけであること');
+      assert.match(executes[0].stmt.sql, /insert into app_state/);
+      assert.match(executes[0].stmt.sql, /on conflict\(key\) do update/);
+      assert.doesNotMatch(executes[0].stmt.sql, /state_audit/, 'アプリからstate_auditへ直接書かないこと');
+      assert.doesNotMatch(executes[0].stmt.sql, /create table/i, 'テーブルを作成しないこと');
+    });
+
+    it('keyとvalueとupdated_atをバインド引数で渡す', async () => {
+      mockFetchOk([okExecute(), { type: 'ok', response: { type: 'close' } }]);
+
+      await store.writeState('mission_data', '{"a":1}');
+
+      const args = fetchCalls[0].body.requests[0].stmt.args;
+      assert.strictEqual(args.length, 3);
+      assert.deepStrictEqual(args[0], { type: 'text', value: 'mission_data' });
+      assert.deepStrictEqual(args[1], { type: 'text', value: '{"a":1}' });
+      assert.strictEqual(args[2].type, 'text');
+      assert.match(args[2].value, /^\d{4}-\d{2}-\d{2}T/, 'updated_atがISO 8601であること');
+    });
+
+    it('失敗したら1度だけ再送し、成功すればsuccessを返す', async () => {
+      let attempts = 0;
+      global.fetch = async (url, options) => {
+        attempts++;
+        fetchCalls.push({ url, options, body: JSON.parse(options.body) });
+        if (attempts === 1) {
+          throw new Error('network down');
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({ results: [okExecute(), { type: 'ok', response: { type: 'close' } }] })
+        };
+      };
+
+      const result = await store.writeState('streak_data', '{}');
+
+      assert.deepStrictEqual(result, { success: true });
+      assert.strictEqual(attempts, 2, '1度だけ再送すること');
+    });
+
+    it('再送しても失敗したら諦めてエラーを返す', async () => {
+      let attempts = 0;
+      global.fetch = async (url, options) => {
+        attempts++;
+        fetchCalls.push({ url, options, body: JSON.parse(options.body) });
+        throw new Error('network down');
+      };
+
+      const result = await store.writeState('streak_data', '{}');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /network down/);
+      assert.strictEqual(attempts, 2, '3回以上は試さないこと');
+    });
+
+    it('テーブルがない状態の書き込みは失敗にする(自動作成しない)', async () => {
+      mockFetchOk([errorResult('SQLite error: no such table: app_state'), { type: 'ok', response: { type: 'close' } }]);
+
+      const result = await store.writeState('streak_data', '{}');
+
+      assert.strictEqual(result.success, false);
+      assert.match(result.error, /no such table/);
+    });
+  });
 });

@@ -143,7 +143,56 @@ async function readState(key) {
   return { success: true, state: 'ok', value: rows[0][0].value };
 }
 
+// 書き込みの再試行間隔。bonusは実際のお小遣いなので、一瞬のネットワーク断で
+// 1日分を取りこぼさないよう1度だけ待って再送する
+const WRITE_RETRY_DELAY_MS = 1000;
+
+/**
+ * 状態を1件書き込む
+ *
+ * 送るのはapp_stateのupsert 1文だけ。state_auditへの追記はトリガーが行う。
+ * pipelineは文ごとに独立して実行されるため、2文に分けると片方だけ成立する
+ * 状態が起こりうる。トリガーは元の文と同じ暗黙のトランザクションで動くので、
+ * 現在値と監査行が必ず揃う。
+ *
+ * テーブルは作成しない。スキーマ作成は移行スクリプト(createSchema)だけの責務。
+ * ここで自動作成すると、未移行の状態で夜通知がテーブルを作ってしまい、
+ * 翌朝の読み出しが'uninitialized'ではなく'empty'になってストリークが0にリセットされる。
+ *
+ * @param {string} key - 'mission_data' | 'streak_data'
+ * @param {string} value - JSON文字列
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function writeState(key, value) {
+  const statements = [
+    {
+      sql: 'insert into app_state (key, value, updated_at) values (?, ?, ?)'
+        + ' on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at',
+      args: [
+        { type: 'text', value: key },
+        { type: 'text', value },
+        { type: 'text', value: new Date().toISOString() }
+      ]
+    }
+  ];
+
+  const first = await pipeline(statements);
+  if (first.success) {
+    return { success: true };
+  }
+
+  await new Promise(resolve => setTimeout(resolve, WRITE_RETRY_DELAY_MS));
+
+  const second = await pipeline(statements);
+  if (second.success) {
+    return { success: true };
+  }
+
+  return { success: false, error: second.error };
+}
+
 module.exports = {
   resolveEndpoint,
-  readState
+  readState,
+  writeState
 };
