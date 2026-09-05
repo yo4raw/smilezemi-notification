@@ -17,7 +17,7 @@ description: スマイルゼミ通知システムの「学習免除日(おやす
   新しい値が使われる。
 - 通知ワークフローが動いている時間帯（JST 20:00 前後 / 7:00 前後）に実行すると、
   ワークフロー側の保存と後勝ちで競合しうる。時間帯をずらして実行すること。
-- スクリプトは `.env` を自動で読まないため、必ず `-r dotenv/config` を付けて実行する。
+- スクリプトは `.env` を自動で読まないため、必ず `--env-file=.env` を付けて実行する。
 
 ## 免除日の制約
 
@@ -41,7 +41,7 @@ description: スマイルゼミ通知システムの「学習免除日(おやす
 推測せず、必ず読み取り専用スクリプトで実際のキーを確認してコピーする:
 
 ```bash
-node -r dotenv/config scripts/show-streak-data.js
+node --env-file=.env scripts/show-streak-data.js
 ```
 
 出力の `"<キー>"` から正確なキーを、`免除日:` から既存の登録を、`直近の履歴:` から
@@ -56,7 +56,7 @@ node -r dotenv/config scripts/show-streak-data.js
 1人に登録する場合:
 
 ```bash
-node -r dotenv/config scripts/set-exempt-dates.js \
+node --env-file=.env scripts/set-exempt-dates.js \
   --user "<手順2で確認した正確なキー>" \
   --from <YYYY-MM-DD> \
   --to <YYYY-MM-DD> \
@@ -67,7 +67,7 @@ node -r dotenv/config scripts/set-exempt-dates.js \
 全員に登録する場合:
 
 ```bash
-node -r dotenv/config scripts/set-exempt-dates.js \
+node --env-file=.env scripts/set-exempt-dates.js \
   --all \
   --from <YYYY-MM-DD> \
   --to <YYYY-MM-DD> \
@@ -82,7 +82,7 @@ node -r dotenv/config scripts/set-exempt-dates.js \
 dry-run の内容で問題なければ、`--dry-run` を外して実行して保存する:
 
 ```bash
-node -r dotenv/config scripts/set-exempt-dates.js \
+node --env-file=.env scripts/set-exempt-dates.js \
   --user "<手順2で確認した正確なキー>" \
   --from <YYYY-MM-DD> \
   --to <YYYY-MM-DD> \

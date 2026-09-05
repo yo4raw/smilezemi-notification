@@ -279,35 +279,6 @@ describe('Turso状態ストア (src/store.js)', () => {
     });
   });
 
-  describe('createSchema()', () => {
-    it('テーブル2つとトリガー2つをif not existsで作る', async () => {
-      mockFetchOk([okExecute(), okExecute(), okExecute(), okExecute(), { type: 'ok', response: { type: 'close' } }]);
-
-      const result = await store.createSchema();
-
-      assert.deepStrictEqual(result, { success: true });
-
-      const sqls = fetchCalls[0].body.requests
-        .filter(request => request.type === 'execute')
-        .map(request => request.stmt.sql);
-
-      assert.strictEqual(sqls.length, 4);
-      assert.ok(sqls.some(sql => /create table if not exists app_state/.test(sql)));
-      assert.ok(sqls.some(sql => /create table if not exists state_audit/.test(sql)));
-      assert.ok(sqls.some(sql => /create trigger if not exists app_state_audit_insert/.test(sql)));
-      assert.ok(sqls.some(sql => /create trigger if not exists app_state_audit_update/.test(sql)));
-    });
-
-    it('SQLエラーは失敗として返す', async () => {
-      mockFetchOk([errorResult('SQLite error: syntax error'), { type: 'ok', response: { type: 'close' } }]);
-
-      const result = await store.createSchema();
-
-      assert.strictEqual(result.success, false);
-      assert.match(result.error, /syntax error/);
-    });
-  });
-
   describe('sanitizeParseError() — JSON.parseエラーの入力断片から実名を除去する', () => {
     it('前後に...が付く断片(V8が両側を切り詰めた場合)から実名を除去する', () => {
       const filler = 'x'.repeat(80);

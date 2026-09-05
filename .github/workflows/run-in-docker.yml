@@ -1,0 +1,132 @@
+name: Docker実行(共通)
+
+# crawler / morning-crawler / monthly-bonus が共有する手順。
+# .env の作成と検証 → Docker ビルド → 目標時刻(JST)まで待機 → 実行 → 後片付け → 失敗通知。
+# GitHub Actions の schedule は数時間遅延することがあるため(実測 1〜5.5時間)、
+# 呼び出し側は前倒しの cron で起動し、ここで目標時刻まで sleep してから実行する。
+
+on:
+  workflow_call:
+    inputs:
+      command:
+        description: '実行するコマンド'
+        required: true
+        type: string
+      target-time:
+        description: '待機先のJST時刻 (HH:MM)'
+        required: true
+        type: string
+      wait:
+        description: 'target-time まで待機するか(スケジュール実行時のみ true にする)'
+        required: false
+        type: boolean
+        default: false
+      timeout-minutes:
+        description: 'ジョブのタイムアウト(分)。待機時間 + ビルド/実行時間の余裕'
+        required: true
+        type: number
+      screenshot-artifact:
+        description: 'スクリーンショットを保存するアーティファクト名の接頭辞(空なら保存しない)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v7
+
+      # docker build と待機より前に落とすため、必須シークレットが空ならここで失敗させる
+      - name: .envファイルを作成して検証
+        env:
+          SMILEZEMI_USERNAME: ${{ secrets.SMILEZEMI_USERNAME }}
+          SMILEZEMI_PASSWORD: ${{ secrets.SMILEZEMI_PASSWORD }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          for name in SMILEZEMI_USERNAME SMILEZEMI_PASSWORD LINE_CHANNEL_ACCESS_TOKEN LINE_USER_ID TURSO_DATABASE_URL TURSO_AUTH_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "❌ $name が設定されていません"
+              exit 1
+            fi
+          done
+          for name in SMILEZEMI_USERNAME SMILEZEMI_PASSWORD LINE_CHANNEL_ACCESS_TOKEN LINE_USER_ID DISCORD_WEBHOOK_URL TURSO_DATABASE_URL TURSO_AUTH_TOKEN; do
+            echo "$name=${!name}" >> .env
+          done
+          echo "✅ 全ての環境変数が設定されています"
+
+      - name: Dockerイメージをビルド
+        run: docker compose build
+
+      # cron 起動が遅延して既に目標時刻を過ぎている場合は即実行する
+      - name: JST ${{ inputs.target-time }} まで待機
+        if: inputs.wait
+        run: |
+          target=$(TZ=Asia/Tokyo date -d "today ${{ inputs.target-time }}" +%s)
+          now=$(date +%s)
+          wait_sec=$(( target - now ))
+          if [ "$wait_sec" -gt 0 ]; then
+            echo "JST ${{ inputs.target-time }} まで ${wait_sec} 秒待機します"
+            sleep "$wait_sec"
+          else
+            echo "既にJST ${{ inputs.target-time }} を過ぎているため即実行します"
+          fi
+
+      - name: 実行
+        run: ${{ inputs.command }}
+
+      # 中身はみまもるネットの画面そのもの(実名・成績)なので短期保存にする
+      - name: スクリーンショットを保存
+        if: always() && inputs.screenshot-artifact != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.screenshot-artifact }}-${{ github.run_number }}
+          path: screenshots/
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: .envファイルを削除
+        if: always()
+        run: rm -f .env
+
+      # 最後の砦。LINE → 失敗時のみ Discord。この通知自体の失敗はジョブを落とさない
+      - name: 失敗を通知（LINE→失敗時のみDiscord）
+        if: failure()
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER: ${{ secrets.LINE_USER_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          message=$(printf '⚠️ GitHub Actions ワークフローが失敗しました\n\nワークフロー: %s\n実行ログ: %s' "$WORKFLOW_NAME" "$RUN_URL")
+          payload=$(jq -n --arg to "$LINE_USER" --arg text "$message" '{to: $to, messages: [{type: "text", text: $text}]}')
+
+          if curl -sS --fail-with-body -X POST https://api.line.me/v2/bot/message/push \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LINE_TOKEN" \
+            -d "$payload"; then
+            exit 0
+          fi
+
+          echo "::warning::LINEへの失敗通知に失敗しました"
+
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL が未設定のためDiscordへの転送をスキップします"
+            exit 0
+          fi
+
+          discord_message=$(printf '⚠️ LINEへの送信に失敗したためDiscordに転送しました\n\n%s' "$message")
+          discord_payload=$(jq -n --arg content "$discord_message" '{content: $content}')
+          curl -sS --fail-with-body -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$discord_payload" || echo "::warning::Discordへの失敗通知の送信にも失敗しました"

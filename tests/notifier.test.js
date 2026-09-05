@@ -24,120 +24,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     global.fetch = mockFetch;
   });
 
-  describe('sendNotification() - LINE通知送信', () => {
-    it('正常系: 変更があった場合、LINE通知を送信できる', async () => {
-      const changes = [
-        {
-          userName: '太郎',
-          previousCount: 5,
-          currentCount: 8,
-          diff: 3,
-          type: 'increase'
-        }
-      ];
-      const accessToken = 'test_access_token';
-      const userId = 'test_user_id';
-
-      const result = await notifier.sendNotification(changes, accessToken, userId);
-
-      assert.strictEqual(result.success, true, '通知送信が成功すること');
-      assert.strictEqual(mockFetch.mock.calls.length, 1, 'fetchが1回呼ばれること');
-
-      // fetchの引数を確認
-      const [url, options] = mockFetch.mock.calls[0].arguments;
-      assert.strictEqual(url, 'https://api.line.me/v2/bot/message/push', '正しいエンドポイントを使用すること');
-      assert.strictEqual(options.method, 'POST', 'POST メソッドを使用すること');
-      assert.strictEqual(
-        options.headers['Authorization'],
-        'Bearer test_access_token',
-        '正しい認証ヘッダーを含むこと'
-      );
-
-      // リクエストボディを確認
-      const body = JSON.parse(options.body);
-      assert.strictEqual(body.to, 'test_user_id', '正しいユーザーIDを含むこと');
-      assert.strictEqual(Array.isArray(body.messages), true, 'messagesが配列であること');
-      assert.strictEqual(body.messages.length, 1, 'メッセージが1件含まれること');
-      assert.strictEqual(body.messages[0].type, 'text', 'テキストメッセージであること');
-      assert.match(body.messages[0].text, /太郎/, 'ユーザー名が含まれること');
-      assert.match(body.messages[0].text, /3/, '差分が含まれること');
-    });
-
-    it('正常系: 複数の変更を通知できる', async () => {
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' },
-        { userName: '花子', previousCount: 10, currentCount: 7, diff: -3, type: 'decrease' },
-        { userName: '次郎', previousCount: 0, currentCount: 2, diff: 2, type: 'new' }
-      ];
-      const accessToken = 'test_access_token';
-      const userId = 'test_user_id';
-
-      const result = await notifier.sendNotification(changes, accessToken, userId);
-
-      assert.strictEqual(result.success, true);
-
-      const body = JSON.parse(mockFetch.mock.calls[0].arguments[1].body);
-      assert.match(body.messages[0].text, /太郎/, '1人目のユーザー名が含まれること');
-      assert.match(body.messages[0].text, /花子/, '2人目のユーザー名が含まれること');
-      assert.match(body.messages[0].text, /次郎/, '3人目のユーザー名が含まれること');
-    });
-
-    it('正常系: 変更がない場合、「変更なし」メッセージを送信する', async () => {
-      const changes = [];
-      const accessToken = 'test_access_token';
-      const userId = 'test_user_id';
-
-      const result = await notifier.sendNotification(changes, accessToken, userId);
-
-      assert.strictEqual(result.success, true);
-
-      const body = JSON.parse(mockFetch.mock.calls[0].arguments[1].body);
-      assert.match(body.messages[0].text, /変更なし|変更ありませ/, '変更なしのメッセージが含まれること');
-    });
-
-    it('正常系: メッセージが5000文字以内に制限される', async () => {
-      // 大量の変更を作成してメッセージ長をテスト
-      const changes = [];
-      for (let i = 0; i < 100; i++) {
-        changes.push({
-          userName: `ユーザー${i}`,
-          previousCount: 0,
-          currentCount: 5,
-          diff: 5,
-          type: 'new'
-        });
-      }
-
-      const result = await notifier.sendNotification(changes, 'token', 'user');
-
-      assert.strictEqual(result.success, true);
-
-      const body = JSON.parse(mockFetch.mock.calls[0].arguments[1].body);
-      assert.strictEqual(body.messages[0].text.length <= 5000, true, 'メッセージが5000文字以内であること');
-    });
-
-    it('正常系: 増加・減少・新規の変更タイプを区別して表示する', async () => {
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' },
-        { userName: '花子', previousCount: 10, currentCount: 7, diff: -3, type: 'decrease' },
-        { userName: '次郎', previousCount: 0, currentCount: 2, diff: 2, type: 'new' }
-      ];
-
-      const result = await notifier.sendNotification(changes, 'token', 'user');
-
-      assert.strictEqual(result.success, true);
-
-      const body = JSON.parse(mockFetch.mock.calls[0].arguments[1].body);
-      const message = body.messages[0].text;
-
-      // 増加は "+" または "↑" で表示
-      assert.match(message, /\+|↑|増加/, '増加を示す記号が含まれること');
-      // 減少は "-" または "↓" で表示
-      assert.match(message, /-|↓|減少/, '減少を示す記号が含まれること');
-      // 新規は "新規" または "NEW" で表示
-      assert.match(message, /新規|NEW/i, '新規を示す文言が含まれること');
-    });
-
+  describe('sendPushMessage() - リトライ', () => {
     it('異常系: API呼び出し失敗時、リトライして最終的にエラーを返す', async () => {
       // 常にエラーを返すモック
       global.fetch = mock.fn(async () => ({
@@ -146,11 +33,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         statusText: 'Internal Server Error'
       }));
 
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' }
-      ];
-
-      const result = await notifier.sendNotification(changes, 'token', 'user', { maxRetries: 3 });
+      const result = await notifier.sendPushMessage('テストメッセージ', 'token', 'user', { maxRetries: 3 });
 
       assert.strictEqual(result.success, false, '通知送信が失敗すること');
       assert.strictEqual(global.fetch.mock.calls.length, 3, '3回リトライされること');
@@ -162,11 +45,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         throw new Error('Network error');
       });
 
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' }
-      ];
-
-      const result = await notifier.sendNotification(changes, 'token', 'user', { maxRetries: 3 });
+      const result = await notifier.sendPushMessage('テストメッセージ', 'token', 'user', { maxRetries: 3 });
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(global.fetch.mock.calls.length, 3, '3回リトライされること');
@@ -180,27 +59,11 @@ describe('通知モジュール (src/notifier.js)', () => {
         statusText: 'Unauthorized'
       }));
 
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' }
-      ];
-
-      const result = await notifier.sendNotification(changes, 'invalid_token', 'user');
+      const result = await notifier.sendPushMessage('テストメッセージ', 'invalid_token', 'user');
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(global.fetch.mock.calls.length, 1, '認証エラーはリトライしないこと');
       assert.match(result.error, /認証|Unauthorized|401/i);
-    });
-
-    it('異常系: 必須パラメータが欠けている場合、エラーを返す', async () => {
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' }
-      ];
-
-      // accessTokenが欠けている
-      const result = await notifier.sendNotification(changes, null, 'user');
-
-      assert.strictEqual(result.success, false);
-      assert.match(result.error, /必須|パラメータ|token/i);
     });
 
     it('正常系: リトライ間隔が指数バックオフであること', async () => {
@@ -217,11 +80,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         };
       });
 
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' }
-      ];
-
-      await notifier.sendNotification(changes, 'token', 'user', {
+      await notifier.sendPushMessage('テストメッセージ', 'token', 'user', {
         maxRetries: 3,
         retryDelay: 100
       });
@@ -409,79 +268,13 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
-  describe('formatMessage() - メッセージフォーマット', () => {
-    it('正常系: 変更情報を読みやすい形式でフォーマットする', () => {
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' }
-      ];
-
-      const message = notifier.formatMessage(changes);
-
-      assert.strictEqual(typeof message, 'string', 'メッセージが文字列であること');
-      assert.match(message, /太郎/, 'ユーザー名が含まれること');
-      assert.match(message, /5/, '前回値が含まれること');
-      assert.match(message, /8/, '現在値が含まれること');
-      assert.match(message, /3/, '差分が含まれること');
-    });
-
-    it('正常系: 変更がない場合、適切なメッセージを返す', () => {
-      const changes = [];
-
-      const message = notifier.formatMessage(changes);
-
-      assert.strictEqual(typeof message, 'string');
-      assert.match(message, /変更なし|変更ありませ/, '変更なしのメッセージが含まれること');
-    });
-
-    it('正常系: 通常の件数では省略メッセージが付かない', () => {
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' },
-        { userName: '花子', previousCount: 10, currentCount: 7, diff: -3, type: 'decrease' }
-      ];
-
-      const message = notifier.formatMessage(changes);
-
-      assert.doesNotMatch(message, /他\d+件の変更があります/, '省略メッセージが含まれないこと');
-      assert.match(message, /花子/, '全ての変更が含まれること');
-    });
-
-    it('境界値: 5000文字を超える変更一覧は省略メッセージ1回で打ち切られる', () => {
-      // 1件あたり約210文字 × 40件 = 約8400文字分の変更を作る
-      const longName = 'あ'.repeat(200);
-      const changes = Array.from({ length: 40 }, (_, i) => ({
-        userName: `${longName}${i}`,
-        previousCount: 5,
-        currentCount: 8,
-        diff: 3,
-        type: 'increase'
-      }));
-
-      const message = notifier.formatMessage(changes);
-
-      assert.ok(message.length <= 5000, `メッセージが5000文字以内であること (実際: ${message.length})`);
-
-      const omissionMatches = message.match(/他\d+件の変更があります/g) || [];
-      assert.strictEqual(omissionMatches.length, 1, '省略メッセージがちょうど1回含まれること');
-
-      assert.doesNotMatch(
-        message,
-        /メッセージが長すぎたため省略されました/,
-        '最終防衛の切り詰めではなく件数省略で収まること'
-      );
-    });
-  });
-
   describe('センシティブデータのマスキング', () => {
     it('エラーメッセージにアクセストークンが含まれない', async () => {
       global.fetch = mock.fn(async () => {
         throw new Error('Failed with token: secret_token_12345');
       });
 
-      const changes = [
-        { userName: '太郎', previousCount: 5, currentCount: 8, diff: 3, type: 'increase' }
-      ];
-
-      const result = await notifier.sendNotification(changes, 'secret_token_12345', 'user');
+      const result = await notifier.sendPushMessage('テストメッセージ', 'secret_token_12345', 'user');
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(
@@ -514,11 +307,7 @@ describe('通知モジュール (src/notifier.js)', () => {
       const exports = Object.keys(notifier);
 
       // 存在すべき関数
-      assert.strictEqual(exports.includes('sendNotification'), true, 'sendNotificationが含まれること');
-      assert.strictEqual(exports.includes('sendPushMessage'), true, 'sendPushMessageが含まれること');
-      assert.strictEqual(exports.includes('formatMessage'), true, 'formatMessageが含まれること');
-      assert.strictEqual(exports.includes('formatDetailedMessage'), true, 'formatDetailedMessageが含まれること');
-      assert.strictEqual(exports.includes('truncateToLimit'), true, 'truncateToLimitが含まれること');
+      assert.deepStrictEqual(exports.toSorted(), ['formatDetailedMessage', 'sendPushMessage', 'truncateToLimit']);
 
       // 削除されるべき関数
       assert.strictEqual(exports.includes('sendUserListNotification'), false, 'sendUserListNotificationが含まれないこと');
@@ -526,7 +315,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
   });
 
-  describe('formatDetailedMessage - ミッション未達警告 (missionWarningThreshold)', () => {
+  describe('formatDetailedMessage - ミッション未達警告 (missionWarningThresholds)', () => {
     const baseUser = {
       userName: 'じろう (小学生コース)',
       missionCount: 3,
@@ -541,8 +330,8 @@ describe('通知モジュール (src/notifier.js)', () => {
     };
 
     it('完了ミッションが閾値未満なら警告行が表示される(today)', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5,
+      const message = notifier.formatDetailedMessage([baseUser], {
+        missionWarningThresholds: { elementary: 5, juniorHigh: 5 },
         missionWarningStyle: 'today'
       });
 
@@ -550,8 +339,8 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
 
     it('missionWarningStyle: past は過去形の文言になる', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5,
+      const message = notifier.formatDetailedMessage([baseUser], {
+        missionWarningThresholds: { elementary: 5, juniorHigh: 5 },
         missionWarningStyle: 'past'
       });
 
@@ -559,14 +348,14 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
 
     it('missionWarningStyle 省略時は past 扱いになる', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, { missionWarningThreshold: 5 });
+      const message = notifier.formatDetailedMessage([baseUser], { missionWarningThresholds: { elementary: 5, juniorHigh: 5 } });
 
       assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '既定は past であること');
     });
 
     it('missionWarningStyle が未知の値のときは past にフォールバックする', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5,
+      const message = notifier.formatDetailedMessage([baseUser], {
+        missionWarningThresholds: { elementary: 5, juniorHigh: 5 },
         missionWarningStyle: 'unknown'
       });
 
@@ -574,8 +363,8 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
 
     it('missionWarningStyle が "constructor" のような Object.prototype のプロパティ名でも past にフォールバックする', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, {
-        missionWarningThreshold: 5,
+      const message = notifier.formatDetailedMessage([baseUser], {
+        missionWarningThresholds: { elementary: 5, juniorHigh: 5 },
         missionWarningStyle: 'constructor'
       });
 
@@ -584,20 +373,20 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('完了ミッションが閾値以上なら警告行は表示されない', () => {
       const user = { ...baseUser, missionCount: 5 };
-      const message = notifier.formatDetailedMessage([user], null, { missionWarningThreshold: 5 });
+      const message = notifier.formatDetailedMessage([user], { missionWarningThresholds: { elementary: 5, juniorHigh: 5 } });
 
       assert.doesNotMatch(message, /あと\d+件/, '警告行が含まれないこと');
     });
 
     it('閾値未指定なら警告行は表示されない', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, {});
+      const message = notifier.formatDetailedMessage([baseUser], {});
 
       assert.doesNotMatch(message, /あと\d+件/, '警告行が含まれないこと');
     });
 
     it('dataReliable:false のユーザーには警告を出さない(取得失敗の誤警告防止)', () => {
       const user = { ...baseUser, missionCount: 0, dataReliable: false };
-      const message = notifier.formatDetailedMessage([user], null, { missionWarningThreshold: 5 });
+      const message = notifier.formatDetailedMessage([user], { missionWarningThresholds: { elementary: 5, juniorHigh: 5 } });
 
       assert.doesNotMatch(message, /あと\d+件/, '警告行が含まれないこと');
     });
@@ -614,7 +403,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         missions: [],
         dataReliable: false
       };
-      const message = notifier.formatDetailedMessage([user], null, {
+      const message = notifier.formatDetailedMessage([user], {
         showStudyTime: false,
         missionWarningStyle: 'today',
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
@@ -636,7 +425,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         missions: [],
         dataReliable: false
       };
-      const message = notifier.formatDetailedMessage([user], null, {
+      const message = notifier.formatDetailedMessage([user], {
         showNoStudyWarning: true
       });
 
@@ -645,7 +434,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
 
     it('dataReliable 未設定のユーザーにはデータ取得失敗行を出さない', () => {
-      const message = notifier.formatDetailedMessage([baseUser], null, { missionWarningThreshold: 5 });
+      const message = notifier.formatDetailedMessage([baseUser], { missionWarningThresholds: { elementary: 5, juniorHigh: 5 } });
 
       assert.doesNotMatch(message, /データを取得できませんでした/, 'dataReliable未設定なら出ないこと');
     });
@@ -663,8 +452,8 @@ describe('通知モジュール (src/notifier.js)', () => {
           { name: '英語: 不定詞', score: 80, completed: true }
         ]
       };
-      const message = notifier.formatDetailedMessage([juniorUser], null, {
-        missionWarningThreshold: 4,
+      const message = notifier.formatDetailedMessage([juniorUser], {
+        missionWarningThresholds: { elementary: 4, juniorHigh: 4 },
         missionWarningStyle: 'today'
       });
 
@@ -682,9 +471,9 @@ describe('通知モジュール (src/notifier.js)', () => {
         totalScore: 0,
         missions: []
       };
-      const message = notifier.formatDetailedMessage([noStudyUser], null, {
+      const message = notifier.formatDetailedMessage([noStudyUser], {
         showNoStudyWarning: true,
-        missionWarningThreshold: 4
+        missionWarningThresholds: { elementary: 4, juniorHigh: 4 }
       });
 
       assert.match(message, /昨日は学習していません/, '未学習警告が表示されること');
@@ -700,9 +489,9 @@ describe('通知モジュール (src/notifier.js)', () => {
         totalScore: 66,
         missions: [{ name: '数学: いろいろな図形', score: 66, completed: true }]
       };
-      const message = notifier.formatDetailedMessage([partialUser], null, {
+      const message = notifier.formatDetailedMessage([partialUser], {
         showNoStudyWarning: true,
-        missionWarningThreshold: 4
+        missionWarningThresholds: { elementary: 4, juniorHigh: 4 }
       });
 
       assert.match(message, /😢😢 あと3件たりなかった… 😢😢/, '閾値警告が表示されること');
@@ -715,7 +504,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         date: '2026-07-13', studyTime: { hours: 1, minutes: 0 }, totalScore: 240,
         missions: [{ name: '算数', score: 80, completed: true }]
       };
-      const message = notifier.formatDetailedMessage([user], null, {
+      const message = notifier.formatDetailedMessage([user], {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
       assert.match(message, /😢😢 あと1件たりなかった… 😢😢/, '小学生は elementary(4) 閾値が使われること');
@@ -727,7 +516,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };
-      const message = notifier.formatDetailedMessage([user], null, {
+      const message = notifier.formatDetailedMessage([user], {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
       assert.match(message, /😢😢 あと1件たりなかった… 😢😢/, '中学生は juniorHigh(3) 閾値が使われること');
@@ -744,24 +533,13 @@ describe('通知モジュール (src/notifier.js)', () => {
         date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
         missions: [{ name: '数学: 図形', score: 66, completed: true }]
       };
-      const message = notifier.formatDetailedMessage([elem, jh], null, {
+      const message = notifier.formatDetailedMessage([elem, jh], {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
       assert.match(message, /😢😢 あと1件たりなかった… 😢😢/, '小学生の警告(4-3=1件)');
       assert.match(message, /😢😢 あと2件たりなかった… 😢😢/, '中学生の警告(3-1=2件)');
     });
 
-    it('missionWarningThresholds は course 未設定時に名前サフィックスで判定する', () => {
-      const jh = {
-        userName: 'たろう (中学生コース)', missionCount: 2,
-        date: '2026-07-13', studyTime: { hours: 0, minutes: 30 }, totalScore: 150,
-        missions: [{ name: '数学: 図形', score: 66, completed: true }]
-      };
-      const message = notifier.formatDetailedMessage([jh], null, {
-        missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
-      });
-      assert.match(message, /😢😢 あと1件たりなかった… 😢😢/, 'サフィックスで中学生と判定');
-    });
   });
 
   describe('formatDetailedMessage - 朝通知オプション', () => {
@@ -776,7 +554,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         totalScore: 80,
         missions: [{ name: '数学: 一次関数', score: 80, completed: true }]
       }];
-      const message = formatDetailedMessage(userData, null, { dateLabel: '昨日(07/09)' });
+      const message = formatDetailedMessage(userData, { dateLabel: '昨日(07/09)' });
       assert.ok(message.startsWith('📊 スマイルゼミ 昨日(07/09)の学習状況'));
       assert.ok(message.includes('⏱️ 勉強時間: 01:05'));
     });
@@ -790,7 +568,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         totalScore: 0,
         missions: []
       }];
-      const message = formatDetailedMessage(userData, null, {
+      const message = formatDetailedMessage(userData, {
         dateLabel: '昨日(07/09)',
         showNoStudyWarning: true
       });
@@ -807,18 +585,18 @@ describe('通知モジュール (src/notifier.js)', () => {
         totalScore: 90,
         missions: [{ name: '英語: 不定詞', score: 90, completed: true }]
       }];
-      const message = formatDetailedMessage(userData, null, { showNoStudyWarning: true });
+      const message = formatDetailedMessage(userData, { showNoStudyWarning: true });
       assert.ok(!message.includes('⚠️ 昨日は学習していません'));
       assert.ok(message.includes('英語: 不定詞'));
     });
 
     it('データ0件のとき dateLabel 付きの文言を返す', () => {
-      const message = formatDetailedMessage([], null, { dateLabel: '昨日(07/09)' });
+      const message = formatDetailedMessage([], { dateLabel: '昨日(07/09)' });
       assert.ok(message.includes('昨日(07/09)のデータはありません。'));
     });
 
     it('オプション省略時は従来フォーマットのまま', () => {
-      const message = formatDetailedMessage([], null);
+      const message = formatDetailedMessage([]);
       assert.ok(message.startsWith('📊 スマイルゼミ 学習状況'));
       assert.ok(message.includes('本日のデータはありません。'));
     });
@@ -839,13 +617,13 @@ describe('通知モジュール (src/notifier.js)', () => {
     }];
 
     it('showStudyTime: false で勉強時間行を出さない', () => {
-      const message = formatDetailedMessage(userData, null, { showStudyTime: false });
+      const message = formatDetailedMessage(userData, { showStudyTime: false });
       assert.ok(!message.includes('勉強時間'), message);
       assert.ok(message.includes('✅ 学習4件'), '学習件数行は残ること');
     });
 
     it('showStudyTime 省略時は従来どおり勉強時間行を出す', () => {
-      const message = formatDetailedMessage(userData, null, {});
+      const message = formatDetailedMessage(userData, {});
       assert.ok(message.includes('⏱️ 勉強時間: 00:13'), message);
     });
 
@@ -860,7 +638,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         totalScore: 0,
         missions: []
       }];
-      const message = formatDetailedMessage(noStudy, null, {
+      const message = formatDetailedMessage(noStudy, {
         showStudyTime: false,
         showNoStudyWarning: true
       });
@@ -882,7 +660,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('streaks オプションでユーザー名の直後にストリーク行が入る', () => {
       const streaks = { 'たろう (中学生コース)': '🔥 連続学習: 12日目  🛟 おたすけ: 1/3' };
-      const message = formatDetailedMessage(userData, null, { streaks });
+      const message = formatDetailedMessage(userData, { streaks });
       const lines = message.split('\n');
       const nameIndex = lines.findIndex(line => line.startsWith('👤 たろう'));
       assert.strictEqual(lines[nameIndex + 1], '🔥 連続学習: 12日目  🛟 おたすけ: 1/3');
@@ -892,18 +670,18 @@ describe('通知モジュール (src/notifier.js)', () => {
       const streaks = {
         'たろう (中学生コース)': '🔥 連続学習: 10日目  🛟 おたすけ: 1/3\n🎉 10日連続達成!おたすけ+1(残り1)'
       };
-      const message = formatDetailedMessage(userData, null, { streaks });
+      const message = formatDetailedMessage(userData, { streaks });
       assert.ok(message.includes('🎉 10日連続達成!おたすけ+1(残り1)'));
     });
 
     it('streaks に含まれないユーザーにはストリーク行を出さない', () => {
       const streaks = { '別の子 (小学生コース)': '🔥 連続学習: 3日目  🛟 おたすけ: 0/3' };
-      const message = formatDetailedMessage(userData, null, { streaks });
+      const message = formatDetailedMessage(userData, { streaks });
       assert.ok(!message.includes('連続学習'));
     });
 
     it('streaks オプション省略時は従来フォーマットのまま', () => {
-      const message = formatDetailedMessage(userData, null, {});
+      const message = formatDetailedMessage(userData, {});
       assert.ok(!message.includes('連続学習'));
       assert.ok(message.includes('👤 たろう (中学生コース)'));
     });
@@ -1094,7 +872,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         dataReliable: true
       }];
 
-      const message = notifier.formatDetailedMessage(userData, null, {
+      const message = notifier.formatDetailedMessage(userData, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
 
@@ -1113,7 +891,7 @@ describe('通知モジュール (src/notifier.js)', () => {
         dataReliable: true
       }];
 
-      const message = notifier.formatDetailedMessage(userData, null, {
+      const message = notifier.formatDetailedMessage(userData, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 }
       });
 
@@ -1125,7 +903,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     const user = { userName: 'たろう', studyItemCount: 0, missionCount: 0, missions: [], date: '2026-08-17' };
 
     it('免除ユーザーには未達警告を出さない', () => {
-      const message = notifier.formatDetailedMessage([user], null, {
+      const message = notifier.formatDetailedMessage([user], {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
         missionWarningStyle: 'today',
         exemptUserNames: ['たろう']
@@ -1134,7 +912,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
 
     it('showExemptNotice が true ならおやすみ行を出す', () => {
-      const message = notifier.formatDetailedMessage([user], null, {
+      const message = notifier.formatDetailedMessage([user], {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
         missionWarningStyle: 'today',
         exemptUserNames: ['たろう'],
@@ -1144,7 +922,7 @@ describe('通知モジュール (src/notifier.js)', () => {
     });
 
     it('showExemptNotice を省略するとおやすみ行は出ない(朝通知はストリーク行で伝える)', () => {
-      const message = notifier.formatDetailedMessage([user], null, {
+      const message = notifier.formatDetailedMessage([user], {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
         exemptUserNames: ['たろう']
       });
@@ -1153,7 +931,7 @@ describe('通知モジュール (src/notifier.js)', () => {
 
     it('免除ユーザー以外には従来どおり警告を出す', () => {
       const others = [user, { ...user, userName: 'はなこ' }];
-      const message = notifier.formatDetailedMessage(others, null, {
+      const message = notifier.formatDetailedMessage(others, {
         missionWarningThresholds: { elementary: 4, juniorHigh: 3 },
         missionWarningStyle: 'today',
         exemptUserNames: ['たろう']

@@ -6,6 +6,8 @@
  *       docs/superpowers/specs/2026-08-03-discord-message-split-design.md
  */
 
+const { retry } = require('./retry');
+
 // Discordメッセージの最大長（Discord APIの制限。LINEの5000より短い）
 const DISCORD_MAX_MESSAGE_LENGTH = 2000;
 
@@ -45,19 +47,11 @@ function maskWebhookUrl(text, webhookUrl) {
 }
 
 /**
- * UTF-16 の高サロゲート（サロゲートペアの前半）かどうか
- * @private
- */
-function isHighSurrogate(charCode) {
-  return charCode >= 0xD800 && charCode <= 0xDBFF;
-}
-
-/**
  * 1行が上限を超える場合に、その行を文字単位で分割する
  *
  * サロゲートペアの途中で切ると孤立サロゲートが残り、不正なUTF-16を含むJSONは
  * Discordに400で弾かれる（非リトライ判定なのでその通が丸ごと失われる）。
- * 末尾が高サロゲートなら1コードユニット手前で切る。
+ * 切った断片が不正なUTF-16(isWellFormed が false)なら1コードユニット手前で切る。
  *
  * @private
  * @param {string} line - 分割する行
@@ -69,10 +63,7 @@ function splitLongLine(line, maxLength) {
   let rest = line;
 
   while (rest.length > maxLength) {
-    let cut = maxLength;
-    if (isHighSurrogate(rest.charCodeAt(cut - 1))) {
-      cut -= 1;
-    }
+    const cut = rest.slice(0, maxLength).isWellFormed() ? maxLength : maxLength - 1;
     pieces.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
@@ -207,30 +198,21 @@ async function sendDiscordMessage(message, webhookUrl, options = {}) {
 async function sendSingleMessage(message, webhookUrl, options = {}) {
   const { maxRetries = 3, retryDelay = 1000, timeoutMs = 10000 } = options;
 
-  const requestBody = { content: message };
-  let lastError = 'Discord送信に失敗しました';
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const result = await attemptSendDiscord(requestBody, webhookUrl, timeoutMs);
-
-    if (result.success) {
-      return { success: true };
-    }
-
-    lastError = result.error;
-
+  const result = await retry(() => attemptSendDiscord({ content: message }, webhookUrl, timeoutMs), {
+    maxRetries,
+    retryDelay,
     // 429以外の4xxはリトライしても解決しない（404=Webhook削除, 400=ペイロード不正, 401=認証）
-    if (!result.retryable) {
-      return { success: false, error: lastError };
-    }
+    shouldRetry: attempt => attempt.retryable
+  });
 
-    if (attempt < maxRetries) {
-      const delay = retryDelay * Math.pow(2, attempt - 1); // 指数バックオフ
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
+  if (result.success) {
+    return { success: true };
   }
 
-  return { success: false, error: `${lastError}（${maxRetries}回試行）` };
+  return {
+    success: false,
+    error: result.retryable ? `${result.error}（${maxRetries}回試行）` : result.error
+  };
 }
 
 /**
@@ -239,15 +221,12 @@ async function sendSingleMessage(message, webhookUrl, options = {}) {
  * @returns {Promise<{success: boolean, error?: string, retryable?: boolean}>}
  */
 async function attemptSendDiscord(requestBody, webhookUrl, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
     const response = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
-      signal: controller.signal
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     if (!response.ok) {
@@ -282,7 +261,7 @@ async function attemptSendDiscord(requestBody, webhookUrl, timeoutMs) {
   } catch (error) {
     const masked = maskWebhookUrl(error.message, webhookUrl);
 
-    if (error.name === 'AbortError' || masked.includes('abort')) {
+    if (error.name === 'AbortError' || error.name === 'TimeoutError' || masked.includes('abort')) {
       return {
         success: false,
         retryable: true,
@@ -291,9 +270,6 @@ async function attemptSendDiscord(requestBody, webhookUrl, timeoutMs) {
     }
 
     return { success: false, retryable: true, error: `Discord送信エラー: ${masked}` };
-
-  } finally {
-    clearTimeout(timer);
   }
 }
 

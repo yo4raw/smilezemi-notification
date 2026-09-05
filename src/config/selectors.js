@@ -1,60 +1,29 @@
 /**
  * DOMセレクタ定義
- * Requirements: 2.1, 2.2, 3.1, 3.2
  *
  * 調査日: 2025-12-25
- * 調査方法: scripts/investigate-selectors.js による実サイト調査
+ * 調査方法: 実サイトをPlaywrightで調査
  */
 
 module.exports = {
   // ログインページのセレクタ
   login: {
     url: 'https://smile-zemi.jp/mimamoru-net/ui/login',
-
-    // フォーム要素
     usernameField: 'input[name="userId"]',       // type="email"
     passwordField: 'input[name="password"]',     // type="password"
-    submitButton: 'button:has-text("ログイン")', // ログインボタン
-    rememberMeCheckbox: 'input[name="rememberMe"]', // ログイン状態保持
-
-    // 検証用セレクタ
-    loginForm: 'form',
-    errorMessage: '.error-message, [role="alert"]',
-
-    // ページ遷移検証
-    successUrlPattern: /^(?!.*\/login).*$/  // /login を含まないURLへの遷移で成功と判断
-  },
-
-  // ダッシュボードのセレクタ
-  dashboard: {
-    // ユーザー選択UI（調査結果待ち）
-    userSelector: 'select[name="user"]',
-    userSelectorAlternative: '[data-testid*="user"]',
-    userOption: 'option',
-
-    // ミッション数表示要素（調査結果待ち）
-    missionCount: 'text=/\\d+ミッション/',
-    missionCountAlternative: '[data-testid*="mission"]',
-    missionText: 'span:has-text("ミッション")',
-
-    // 日付表示
-    currentDate: '.date, [data-testid="date"]'
+    submitButton: 'button:has-text("ログイン")'
   },
 
   // 待機戦略設定
   waitStrategies: {
-    // ページロード待機
     pageLoad: 'domcontentloaded',
     timeout: 60000,  // 60秒
 
-    // DOM要素の待機
-    elementTimeout: 30000,  // 30秒
-
     // ユーザー切り替え後の待機時間
-    userSwitchDelay: 3000,  // 3秒
+    userSwitchDelay: 3000,
 
     // 追加の安定化待機
-    stabilizationDelay: 1000,  // 1秒
+    stabilizationDelay: 1000,
 
     // タイムライン日付要素の表示待ち上限
     timelineDateTimeout: 3000,
@@ -76,34 +45,14 @@ module.exports = {
     menuItemTimeout: 5000
   },
 
-  // エラー検出用セレクタ
-  errors: {
-    loginError: '.error-message, [role="alert"], .alert-danger',
-    networkError: 'text=/ネットワークエラー|通信エラー/',
-    sessionExpired: 'text=/セッション|タイムアウト/'
-  },
-
   // コース選択のセレクタ
-  // DOM調査日: 2026-01-16 (scripts/investigate-course-selection.js で確認)
+  // DOM調査日: 2026-01-16
   courseSelection: {
     // ユーザー選択後に表示されるコース選択画面
-    juniorHighSchool: 'text="中学生コース"',  // 中学生コース
-    elementarySchool: 'text="小学生コース"',  // 小学生コース
+    juniorHighSchool: 'text="中学生コース"',
+    elementarySchool: 'text="小学生コース"',
     // コース選択確認用の待機時間
-    courseSelectionWaitTime: 2000  // 2秒
-  },
-
-  // ミッション詳細のセレクタ（Requirements: 1.1, 2.2, 3.1）
-  // DOM調査日: 2025-12-30 (scripts/investigate-study-details.js で確認)
-  // 個別のセレクタは elementaryTimeline/juniorHighTimeline に統合済み。
-  // ここには両コース共通で使う defaultName のみ残す。
-  missionDetails: {
-    // ミッション名セレクタ（確定）
-    // 調査結果: .title__C3bzF が実際のミッション名クラス
-    // 親要素: .subIcon__p_BWc
-    missionName: {
-      defaultName: 'ミッション'  // 取得失敗時のデフォルト値
-    }
+    courseSelectionWaitTime: 2000
   },
 
   // 小学生コース タイムラインのセレクタ
@@ -127,24 +76,13 @@ module.exports = {
   // DOM調査日: 2026-04-02 (Playwrightで実サイト調査)
   // 中学生コースのURL: /study/c/timeline（小学生コースの /study/s/timeline とは別UI）
   juniorHighTimeline: {
-    root: '.timeline_root__He2PS',
-    dailyRoot: '.dailyRoot__a754V',
-    studyDate: '.studyDate__GL9tf',
-    studyDateInner: '.studyDateInner__s0Jtj',
-    dateLabel: '.date__FKSSm',
-    subjectsContainer: '.subjects__eHK8S',
-    subjectGroup: '.subject__bWHro',
-    subjectName: '.name__TRpmJ',
-    subjectTime: '.time__Pn3gb',
-    courseName: '.name__nAtRj',
-    courseResult: '.current__PxOK0',
-    // フォールバック（ハッシュ変更対策）
-    alternativeSelectors: {
-      dailyRoot: '[class*="dailyRoot"]',
-      dateLabel: '[class*="date__F"]',
-      subjectGroup: '[class*="subject__b"]',
-      courseName: '[class*="name__"][class*="limit3Line"]',
-      courseResult: '[class*="current__"]'
-    }
+    dailyRoot: '.dailyRoot__a754V',      // 1日分のブロック
+    dateLabel: '.date__FKSSm',           // 日付 "07/30(木)"
+    studyDateInner: '.studyDateInner__s0Jtj', // 日付の下の勉強時間 "6分"
+    subjectGroup: '.subject__bWHro',     // 教科ごとのグループ
+    subjectName: '.name__TRpmJ',         // 教科名 "数学"
+    course: '.course__KrAEA',            // 講座1件
+    courseName: '.name__nAtRj',          // 講座名 "いろいろな図形"
+    courseResult: '.current__PxOK0'      // 結果 "66%"
   }
 };

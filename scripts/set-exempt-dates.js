@@ -19,34 +19,12 @@
  *   node scripts/set-exempt-dates.js --all --from 2026-08-20 --action remove [--dry-run]
  */
 
+const { parseArgs } = require('node:util');
 const { loadStreakData, saveStreakData, replayStreak, shiftDate } = require('../src/streak');
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 31; // 打ち間違いで大量の免除日を作らないための上限
 const ACTIONS = ['add', 'remove'];
-
-/**
- * `--key value` 形式の引数を素朴にパースする(値なしフラグは true)。
- *
- * @param {string[]} argv - process.argv.slice(2)
- * @returns {Record<string, string|boolean>}
- */
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i];
-    if (!token.startsWith('--')) continue;
-    const key = token.slice(2);
-    const next = argv[i + 1];
-    if (next === undefined || next.startsWith('--')) {
-      args[key] = true;
-    } else {
-      args[key] = next;
-      i++;
-    }
-  }
-  return args;
-}
 
 /**
  * カレンダー上存在する日付かを検証する。存在しなければ例外を投げる。
@@ -176,11 +154,19 @@ function findUnrepairableDates(state, dates) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
-
   let input;
   try {
-    input = validateInput(args);
+    const { values } = parseArgs({
+      options: {
+        user: { type: 'string' },
+        all: { type: 'boolean' },
+        from: { type: 'string' },
+        to: { type: 'string' },
+        action: { type: 'string' },
+        'dry-run': { type: 'boolean' }
+      }
+    });
+    input = validateInput(values);
   } catch (error) {
     console.error(`[set-exempt-dates] 入力エラー: ${error.message}`);
     process.exitCode = 1;
@@ -206,7 +192,7 @@ async function main() {
     return;
   }
 
-  if (!all && !Object.prototype.hasOwnProperty.call(users, user)) {
+  if (!all && !Object.hasOwn(users, user)) {
     console.error(`[set-exempt-dates] 対象ユーザーが見つかりません: "${user}"`);
     console.error('[set-exempt-dates] 登録済みユーザー:');
     Object.keys(users).forEach(key => console.error(`  - "${key}"`));
@@ -262,4 +248,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { parseArgs, validateInput, expandDateRange, applyExemptChange, findUnrepairableDates, assertCalendarDate };
+module.exports = { validateInput, expandDateRange, applyExemptChange, findUnrepairableDates, assertCalendarDate };

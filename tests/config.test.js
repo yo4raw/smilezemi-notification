@@ -5,7 +5,7 @@
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert');
-const { loadConfig, validateSecrets, maskSensitiveData } = require('../src/config');
+const { loadConfig, validateSecrets, maskSensitiveData, maskLiterals } = require('../src/config');
 
 describe('環境変数管理', () => {
   let originalEnv;
@@ -150,59 +150,42 @@ describe('環境変数管理', () => {
   });
 
   describe('maskSensitiveData', () => {
-    it('パスワードをマスキングする', () => {
-      const data = { password: 'secretpassword123' };
-      const masked = maskSensitiveData(data);
-
-      assert.strictEqual(masked.password, '***');
-    });
-
-    it('トークンをマスキングする', () => {
-      const data = { token: 'mySecretToken456' };
-      const masked = maskSensitiveData(data);
-
-      assert.strictEqual(masked.token, '***');
-    });
-
-    it('ユーザー名はマスキングしない', () => {
-      const data = { username: 'testuser' };
-      const masked = maskSensitiveData(data);
-
-      assert.strictEqual(masked.username, 'testuser');
-    });
-
-    it('複数のフィールドを適切にマスキングする', () => {
-      const data = {
-        username: 'testuser',
-        password: 'pass123',
-        channelAccessToken: 'token456',
-        userId: 'U123'
-      };
-      const masked = maskSensitiveData(data);
-
-      assert.strictEqual(masked.username, 'testuser');
-      assert.strictEqual(masked.password, '***');
-      assert.strictEqual(masked.channelAccessToken, '***');
-      assert.strictEqual(masked.userId, 'U123');
-    });
-
-    it('ログメッセージ内の認証情報をマスキングする', () => {
-      const message = 'Logging in with password=secretpass123 and token=mytoken456';
-      const masked = maskSensitiveData(message);
+    it('ログメッセージ内の password= / token= の値を伏せる', () => {
+      const masked = maskSensitiveData('Logging in with password=secretpass123 and token=mytoken456');
 
       assert.ok(!masked.includes('secretpass123'));
       assert.ok(!masked.includes('mytoken456'));
-      assert.ok(masked.includes('***'));
+      assert.strictEqual(masked, 'Logging in with password=*** and token=***');
     });
 
-    it('webhookを含むフィールドをマスキングする', () => {
-      const masked = maskSensitiveData({
-        userName: 'たろう',
-        discordWebhookUrl: 'https://discord.com/api/webhooks/123/secret'
-      });
+    it('文字列以外はそのまま返す', () => {
+      assert.strictEqual(maskSensitiveData(undefined), undefined);
+      assert.strictEqual(maskSensitiveData(42), 42);
+    });
+  });
 
-      assert.strictEqual(masked.discordWebhookUrl, '***');
-      assert.strictEqual(masked.userName, 'たろう');
+  describe('maskLiterals', () => {
+    it('渡した秘密値をリテラル一致で全て *** にする', () => {
+      const masked = maskLiterals('token=abc and again abc / user U123', 'abc', 'U123');
+
+      assert.strictEqual(masked, 'token=*** and again *** / user ***');
+    });
+
+    it('正規表現の特殊文字を含む秘密値でも例外にならずマスクする', () => {
+      const secret = 'a+b*c[d](e)?';
+      const masked = maskLiterals(`failed with ${secret}!`, secret);
+
+      assert.strictEqual(masked, 'failed with ***!');
+    });
+
+    it('未設定(undefined/空文字)の秘密値は無視し、パターンマスクは通す', () => {
+      const masked = maskLiterals('password=hunter2 ok', undefined, '');
+
+      assert.strictEqual(masked, 'password=*** ok');
+    });
+
+    it('文字列以外の入力も文字列化して処理する', () => {
+      assert.strictEqual(maskLiterals(new Error('boom secret').message, 'secret'), 'boom ***');
     });
   });
 
@@ -253,14 +236,10 @@ describe('環境変数管理', () => {
       assert.ok(result.missing.includes('TURSO_AUTH_TOKEN'));
     });
 
-    it('maskSensitiveData が TURSO_AUTH_TOKEN の値を伏せる', () => {
-      const masked = maskSensitiveData({
-        TURSO_AUTH_TOKEN: 'eyJhbGciOi',
-        TURSO_DATABASE_URL: 'libsql://x.turso.io'
-      });
+    it('maskLiterals が TURSO_AUTH_TOKEN の値を伏せる', () => {
+      const masked = maskLiterals('auth eyJhbGciOi for libsql://x.turso.io', 'eyJhbGciOi');
 
-      assert.strictEqual(masked.TURSO_AUTH_TOKEN, '***');
-      assert.strictEqual(masked.TURSO_DATABASE_URL, 'libsql://x.turso.io', 'URLは秘密ではないので伏せない');
+      assert.strictEqual(masked, 'auth *** for libsql://x.turso.io', 'URLは秘密ではないので伏せない');
     });
   });
 });

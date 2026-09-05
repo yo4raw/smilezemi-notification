@@ -11,6 +11,7 @@
  *       docs/superpowers/specs/2026-08-03-always-dual-notification-design.md
  */
 
+const { maskLiterals } = require('./config');
 const { sendPushMessage, truncateToLimit } = require('./notifier');
 const { sendDiscordMessage, DISCORD_MAX_MESSAGE_LENGTH } = require('./discord');
 const { fetchQuotaStatus, formatQuotaLine } = require('./line-quota');
@@ -42,11 +43,10 @@ function formatFallbackMessage(message, lineError) {
 }
 
 /**
- * 設定値のシークレット（LINEトークン・ユーザーID）を文字列からマスキングする
+ * 設定値のシークレット（LINEトークン・ユーザーID・Webhook URL）を文字列からマスキングする
  *
  * 例外メッセージはnotifier側のマスキングを経ていない生の文字列なので、
- * Discordへ転送する前にここで落とす。正規表現を組むとシークレットに含まれる
- * 特殊文字で破綻するため split/join でリテラル一致の全置換を行う。
+ * Discordへ転送する前にここで落とす。
  *
  * @private
  * @param {string} text - マスキング対象の文字列
@@ -54,15 +54,7 @@ function formatFallbackMessage(message, lineError) {
  * @returns {string}
  */
 function maskConfigSecrets(text, config) {
-  let masked = String(text);
-
-  for (const secret of [config.LINE_CHANNEL_ACCESS_TOKEN, config.LINE_USER_ID, config.DISCORD_WEBHOOK_URL]) {
-    if (secret && secret.length >= 8 && masked.includes(secret)) {
-      masked = masked.split(secret).join('***');
-    }
-  }
-
-  return masked;
+  return maskLiterals(text, config.LINE_CHANNEL_ACCESS_TOKEN, config.LINE_USER_ID, config.DISCORD_WEBHOOK_URL);
 }
 
 /**

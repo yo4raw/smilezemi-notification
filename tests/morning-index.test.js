@@ -72,15 +72,15 @@ describe('朝通知エントリポイント (src/morning-index.js)', () => {
       id: resolveModule('../src/crawler'), filename: resolveModule('../src/crawler'), loaded: true,
       exports: {
         getAllUsersDetailedData: overrides.getAllUsersDetailedData || (async () => crawlResult),
-        getUserList: async () => ({ success: true, users: [{ name: 'たろう', index: 0 }] }),
-        getTargetDates: () => ({ dateString: '2026-08-26', withPadding: '08/26' })
+        getTargetDates: () => ({ dateString: '2026-08-26', withPadding: '08/26' }),
+        saveErrorScreenshot: async () => {}
       }
     };
 
     require.cache[resolveModule('../src/notifier')] = {
       id: resolveModule('../src/notifier'), filename: resolveModule('../src/notifier'), loaded: true,
       exports: {
-        formatDetailedMessage: overrides.formatDetailedMessage || ((userData, changes, options) => {
+        formatDetailedMessage: overrides.formatDetailedMessage || ((userData, options) => {
           callLog.push({ type: 'formatDetailedMessage', options });
           return 'テスト朝メッセージ';
         }),

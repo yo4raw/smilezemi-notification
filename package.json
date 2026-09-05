@@ -1,11 +1,10 @@
 {
   "name": "smilezemi-notification",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "スマイルゼミ みまもるネット 自動クローリング & LINE通知",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node src/index.js",
     "prepare": "if git rev-parse --git-dir >/dev/null 2>&1; then git config core.hooksPath .githooks; fi",
     "lint": "oxlint --deny-warnings src",
     "lint:fix": "oxlint --fix src",
@@ -14,11 +13,7 @@
     "docker:build": "docker-compose build",
     "docker:run": "docker-compose up",
     "docker:dev": "docker-compose run --rm crawler",
-    "install:browsers": "npx playwright install chromium --with-deps",
-    "validate:env": "node scripts/validate-env.js",
-    "validate:security": "bash scripts/validate-security.sh",
-    "validate:all": "npm run validate:env && npm run validate:security",
-    "test:docker": "bash scripts/test-docker.sh"
+    "install:browsers": "npx playwright install chromium --with-deps"
   },
   "keywords": [
     "smile-zemi",
@@ -30,13 +25,12 @@
   "license": "MIT",
   "packageManager": "npm@10.0.0",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.6.0"
   },
   "dependencies": {
     "playwright": "^1.58.2"
   },
   "devDependencies": {
-    "dotenv": "^17.2.3",
     "oxlint": "1.74.0"
   }
 }

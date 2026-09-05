@@ -22,7 +22,7 @@ description: スマイルゼミ通知システムの「ボーナスポイント(
   このスキルはその通常フロー外での手動訂正・手動リセット用。月次清算そのものを回すものではない。
 - 通知ワークフローが動いている時間帯（JST 20:00 前後 / 7:00 前後）に実行すると、
   ワークフロー側の保存と後勝ちで競合しうる。時間帯をずらして実行すること。
-- スクリプトは `.env` を自動で読まないため、必ず `-r dotenv/config` を付けて実行する。
+- スクリプトは `.env` を自動で読まないため、必ず `--env-file=.env` を付けて実行する。
 
 ## bonus の制約
 
@@ -42,7 +42,7 @@ bonus は 0 以上の絶対値で指定する（「+1」ではなく「5 にす�
 推測せず、必ず読み取り専用スクリプトで実際のキーを確認してコピーする:
 
 ```bash
-node -r dotenv/config scripts/show-streak-data.js
+node --env-file=.env scripts/show-streak-data.js
 ```
 
 出力の `"<キー>": ... bonus=...` から、正確なキーと現在の bonus を読み取る。
@@ -52,7 +52,7 @@ node -r dotenv/config scripts/show-streak-data.js
 いきなり保存せず、`--dry-run` で「変更前→変更後」を確認し、ユーザーに提示して合意を得る:
 
 ```bash
-node -r dotenv/config scripts/set-streak-field.js \
+node --env-file=.env scripts/set-streak-field.js \
   --user "<手順2で確認した正確なキー>" \
   --field bonus \
   --value <目標値> \
@@ -66,7 +66,7 @@ node -r dotenv/config scripts/set-streak-field.js \
 dry-run の内容で問題なければ、`--dry-run` を外して実行して保存する:
 
 ```bash
-node -r dotenv/config scripts/set-streak-field.js \
+node --env-file=.env scripts/set-streak-field.js \
   --user "<手順2で確認した正確なキー>" \
   --field bonus \
   --value <目標値>

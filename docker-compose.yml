@@ -3,25 +3,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # 環境変数は .env からそのまま注入する
     env_file:
       - .env
     volumes:
       # スクリーンショット保存
       - ./screenshots:/app/screenshots
-      # ログ保存（オプション）
-      - ./logs:/app/logs
       # デバッグ用: ソースコードとスクリプト
       - ./src:/app/src
       - ./scripts:/app/scripts
-    environment:
-      # .envから自動読み込み
-      - SMILEZEMI_USERNAME
-      - SMILEZEMI_PASSWORD
-      - LINE_CHANNEL_ACCESS_TOKEN
-      - LINE_USER_ID
-      - DISCORD_WEBHOOK_URL
-      - TURSO_DATABASE_URL
-      - TURSO_AUTH_TOKEN
-      - NODE_ENV=${NODE_ENV:-development}
-    # デバッグ用: コンテナを起動したまま保持
-    # command: tail -f /dev/null
