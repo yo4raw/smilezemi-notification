@@ -1,6 +1,6 @@
 {
   "name": "smilezemi-notification",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "スマイルゼミ みまもるネット 自動クローリング & LINE通知",
   "main": "src/index.js",
   "scripts": {

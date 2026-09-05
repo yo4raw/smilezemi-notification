@@ -217,31 +217,9 @@ Error: browserType.launch: Executable doesn't exist
 2. 下部の **Artifacts** セクションから `screenshots-{run_number}` をクリック
 3. ZIPファイルがダウンロードされる
 
-### 2. ミッションデータ（成功時のみ）
+### 2. 学習データ
 
-**保存先:** `mission-data`
-**保存期間:** 90日間
-**内容:** 取得したミッション数のJSONファイル
-
-**ダウンロード方法:**
-1. Actionsタブ → 該当のワークフロー実行を開く
-2. 下部の **Artifacts** セクションから `mission-data` をクリック
-3. ZIPファイル内に `mission_data.json` が含まれる
-
-**データ形式:**
-```json
-{
-  "version": "1.0",
-  "timestamp": "2025-12-25T08:35:01.283Z",
-  "users": [
-    {
-      "userName": "山田太郎さん",
-      "missionCount": 5,
-      "date": "2025-12-25"
-    }
-  ]
-}
-```
+学習データはアーティファクトに出さない（実名の露出源になるため）。ストリークは Turso に保存され、`node --env-file=.env scripts/show-streak-data.js` で確認できる。
 
 ## セキュリティのベストプラクティス
 
