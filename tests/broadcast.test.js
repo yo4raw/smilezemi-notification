@@ -8,10 +8,16 @@
 const { describe, it, beforeEach, afterEach, after } = require('node:test');
 const assert = require('node:assert');
 
-const MODULE_PATHS = ['../src/notifier', '../src/discord', '../src/broadcast'];
+const MODULE_PATHS = ['../src/notifier', '../src/discord', '../src/line-quota', '../src/broadcast'];
 
 // 切り詰めはモックせず本物を使う（ヘッダ付加後に実際に上限へ収まるかを検証したいため）
 const { truncateToLimit } = require('../src/notifier');
+// 残数行の組み立ても本物を使う（表示文言まで含めて実送信と同じになることを担保する）
+const { formatQuotaLine } = require('../src/line-quota');
+
+// 4人グループで200カウント中61消費した状態。残数行は「📮 LINE残り: 139/200（あと34回）」になる
+const DEFAULT_QUOTA = { limited: true, limit: 200, used: 61, remaining: 139, memberCount: 4 };
+const QUOTA_LINE = '📮 LINE残り: 139/200（あと34回）';
 
 function resolveModule(p) {
   return require.resolve(p);
@@ -60,6 +66,18 @@ describe('送信層 (src/broadcast.js)', () => {
       }
     };
 
+    require.cache[resolveModule('../src/line-quota')] = {
+      id: resolveModule('../src/line-quota'), filename: resolveModule('../src/line-quota'), loaded: true,
+      exports: {
+        fetchQuotaStatus: overrides.fetchQuotaStatus || (async (...args) => {
+          callLog.push({ type: 'quota', args });
+          return { success: true, data: DEFAULT_QUOTA };
+        }),
+        // 文言の組み立ては本物をそのまま使う
+        formatQuotaLine
+      }
+    };
+
     broadcast = require('../src/broadcast');
   }
 
@@ -91,7 +109,7 @@ describe('送信層 (src/broadcast.js)', () => {
       await broadcast.broadcastToAll('清算メッセージ', defaultConfig);
 
       const [sentMessage] = callLog.find(c => c.type === 'discord').args;
-      assert.strictEqual(sentMessage, '清算メッセージ', '転送ヘッダを付けないこと');
+      assert.strictEqual(sentMessage, `清算メッセージ\n\n${QUOTA_LINE}`, '転送ヘッダを付けないこと');
     });
 
     it('正常系: LINE失敗時はDiscordのメッセージに理由行が付く', async () => {
@@ -239,7 +257,7 @@ describe('送信層 (src/broadcast.js)', () => {
       await broadcast.broadcastToAll('あ'.repeat(5000), defaultConfig);
 
       const [sentMessage] = callLog.find(c => c.type === 'discord').args;
-      assert.strictEqual(sentMessage, 'あ'.repeat(5000), '本文が欠けないこと');
+      assert.strictEqual(sentMessage, `${'あ'.repeat(5000)}\n\n${QUOTA_LINE}`, '本文が欠けないこと');
     });
 
     it('正常系: LINEへは5000文字に切り詰めて渡す', async () => {
@@ -247,6 +265,79 @@ describe('送信層 (src/broadcast.js)', () => {
 
       const [sentMessage] = callLog.find(c => c.type === 'line').args;
       assert.strictEqual(sentMessage.length <= 5000, true);
+    });
+  });
+
+  describe('broadcastToAll() - LINE残数行の付加', () => {
+    it('正常系: LINEへ送る本文の末尾に残数行を付ける', async () => {
+      await broadcast.broadcastToAll('本文', defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'line').args;
+      assert.strictEqual(sentMessage, `本文\n\n${QUOTA_LINE}`);
+    });
+
+    it('正常系: Discordへ送る本文の末尾にも同じ残数行を付ける', async () => {
+      await broadcast.broadcastToAll('本文', defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.ok(sentMessage.endsWith(`\n\n${QUOTA_LINE}`), `末尾に残数行がない: ${sentMessage}`);
+    });
+
+    it('正常系: 残数の取得に失敗したら残数行を付けずに送る', async () => {
+      setupMocks({
+        fetchQuotaStatus: async () => ({ success: false, error: 'LINE API エラー: 401 Unauthorized' })
+      });
+
+      await broadcast.broadcastToAll('本文', defaultConfig);
+
+      const [lineMessage] = callLog.find(c => c.type === 'line').args;
+      const [discordMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.strictEqual(lineMessage, '本文', '残数行を付けないこと');
+      assert.strictEqual(discordMessage, '本文', '残数行を付けないこと');
+    });
+
+    it('正常系: 残数の取得が例外を投げても通知は送る', async () => {
+      setupMocks({
+        fetchQuotaStatus: async () => {
+          throw new Error('想定外の例外');
+        }
+      });
+
+      const result = await broadcast.broadcastToAll('本文', defaultConfig);
+
+      assert.strictEqual(result.success, true, '残数の取得失敗で通知を止めないこと');
+      const [lineMessage] = callLog.find(c => c.type === 'line').args;
+      assert.strictEqual(lineMessage, '本文');
+    });
+
+    it('正常系: 本文が長くても、切り詰め後の末尾に残数行が残る', async () => {
+      await broadcast.broadcastToAll('あ'.repeat(9000), defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'line').args;
+      assert.ok(sentMessage.length <= 5000, `5000文字を超えている: ${sentMessage.length}`);
+      assert.ok(sentMessage.endsWith(`\n\n${QUOTA_LINE}`), '切り詰めで残数行が落ちないこと');
+    });
+
+    it('正常系: LINE失敗時、Discordの本文は先頭が理由行・末尾が残数行になる', async () => {
+      setupMocks({
+        sendPushMessage: async (...args) => {
+          callLog.push({ type: 'line', args });
+          return { success: false, error: 'LINE API エラー: 429 Too Many Requests' };
+        }
+      });
+
+      await broadcast.broadcastToAll('本文', defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.match(sentMessage, /^⚠️ LINEへの送信に失敗しました/);
+      assert.ok(sentMessage.endsWith(`\n\n${QUOTA_LINE}`), '末尾に残数行がない');
+    });
+
+    it('正常系: 送信オプションのタイムアウトを残数の取得にも渡す', async () => {
+      await broadcast.broadcastToAll('本文', defaultConfig, { timeoutMs: 3000 });
+
+      const quotaCall = callLog.find(c => c.type === 'quota');
+      assert.deepStrictEqual(quotaCall.args[1], { timeoutMs: 3000 });
     });
   });
 
@@ -268,6 +359,14 @@ describe('送信層 (src/broadcast.js)', () => {
       const [sentMessage, webhookUrl] = callLog.find(c => c.type === 'discord').args;
       assert.strictEqual(sentMessage, '記録メッセージ', '転送ヘッダを付けないこと');
       assert.strictEqual(webhookUrl, 'https://discord.com/api/webhooks/123/abc');
+    });
+
+    it('正常系: LINEを使わないので残数行を付けず、送信枠も問い合わせない', async () => {
+      await broadcast.broadcastToDiscordOnly('記録メッセージ', defaultConfig);
+
+      const [sentMessage] = callLog.find(c => c.type === 'discord').args;
+      assert.strictEqual(sentMessage.includes('LINE残り'), false, '残数行を付けないこと');
+      assert.strictEqual(callLog.some(c => c.type === 'quota'), false, '送信枠APIを叩かないこと');
     });
 
     it('正常系: Discordへは切り詰めず全文を渡す（分割はdiscord.jsが行う）', async () => {
