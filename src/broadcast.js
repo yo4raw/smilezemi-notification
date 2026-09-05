@@ -13,9 +13,13 @@
 
 const { sendPushMessage, truncateToLimit } = require('./notifier');
 const { sendDiscordMessage, DISCORD_MAX_MESSAGE_LENGTH } = require('./discord');
+const { fetchQuotaStatus, formatQuotaLine } = require('./line-quota');
 
 // LINEメッセージの最大長（LINE APIの制限）
 const LINE_MAX_MESSAGE_LENGTH = 5000;
+
+// 残数行と本文の間に入れる空行
+const QUOTA_LINE_SEPARATOR = '\n\n';
 
 /**
  * Discordへ送る本文の先頭にLINE失敗の理由行を付ける
@@ -117,6 +121,65 @@ async function postToDiscord(body, config, options) {
 }
 
 /**
+ * 通知末尾に付けるLINE残数行を組み立てる
+ *
+ * 月間の送信枠(無料プランは200カウント)がどれだけ残っているかを毎回の通知に載せる。
+ * これは付帯情報にすぎないため、取得に失敗しても通知は止めない。null を返して
+ * 呼び出し側が残数行なしで送れるようにする。
+ *
+ * LINEを使う通知だけが対象なので、broadcastToAll() からのみ呼ぶ。
+ * broadcastToDiscordOnly() はLINEを消費しないため呼ばない（APIも叩かない）。
+ *
+ * @private
+ * @param {object} config - 設定オブジェクト
+ * @param {object} options - 送信オプション（timeoutMs を送信枠の取得にも使う）
+ * @returns {Promise<string|null>} 残数行。取得できなければ null
+ */
+async function buildQuotaLine(config, options) {
+  try {
+    const status = await fetchQuotaStatus(config, options);
+
+    if (!status.success) {
+      console.warn('⚠️ LINEの送信枠を取得できませんでした:', status.error);
+      return null;
+    }
+
+    return formatQuotaLine(status.data);
+  } catch (error) {
+    // 例外がここを抜けると通知そのものが送られなくなるため、必ず畳み込む
+    console.warn(
+      '⚠️ LINEの送信枠の取得で予期しない例外が発生しました:',
+      maskConfigSecrets(error && error.message ? error.message : error, config)
+    );
+    return null;
+  }
+}
+
+/**
+ * 本文の末尾に残数行を付ける
+ *
+ * 上限が指定された場合は、残数行が切り詰めで落ちないよう本文を先に縮めてから足す。
+ * LINEは5000文字で切り詰めるため、末尾に置いた残数行は本文が長い日に消えてしまう。
+ *
+ * @private
+ * @param {string} message - 本文
+ * @param {string|null} quotaLine - 残数行。null なら本文をそのまま返す
+ * @param {number} [maxLength] - 全体の上限文字数。省略時は切り詰めない（Discord向け）
+ * @returns {string}
+ */
+function appendQuotaLine(message, quotaLine, maxLength = null) {
+  if (!quotaLine) {
+    return message;
+  }
+
+  const body = maxLength === null
+    ? message
+    : truncateToLimit(message, maxLength - quotaLine.length - QUOTA_LINE_SEPARATOR.length);
+
+  return `${body}${QUOTA_LINE_SEPARATOR}${quotaLine}`;
+}
+
+/**
  * メッセージをLINEとDiscordの両方へ送る
  *
  * LINEの成否にかかわらずDiscordへも送る。LINEを使う通知はすべてこれを使う。
@@ -136,7 +199,13 @@ async function postToDiscord(body, config, options) {
 async function broadcastToAll(message, config, options = {}) {
   const results = [];
 
-  const lineResult = await sendToLine(message, config, options);
+  // 残り送信可能数を本文の末尾に載せる。LINEは切り詰めで落ちないよう先に本文を縮め、
+  // Discordは分割で全文が届くため縮めない
+  const quotaLine = await buildQuotaLine(config, options);
+  const lineMessage = appendQuotaLine(message, quotaLine, LINE_MAX_MESSAGE_LENGTH);
+  const discordMessage = appendQuotaLine(message, quotaLine);
+
+  const lineResult = await sendToLine(lineMessage, config, options);
   results.push({ channel: 'line', success: lineResult.success, error: lineResult.error });
 
   if (!lineResult.success) {
@@ -151,7 +220,7 @@ async function broadcastToAll(message, config, options = {}) {
   console.log('📤 Discordへ送信しています...');
   // LINEが失敗している場合だけ理由行を付ける（成功時は本文をそのまま送る）
   const discordResult = await postToDiscord(
-    lineResult.success ? message : formatFallbackMessage(message, lineResult.error || '不明なエラー'),
+    lineResult.success ? discordMessage : formatFallbackMessage(discordMessage, lineResult.error || '不明なエラー'),
     config,
     options
   );
