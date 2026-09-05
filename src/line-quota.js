@@ -10,7 +10,7 @@
  * 呼び出し側(src/broadcast.js)は失敗時に残数行を落として送信を続ける。
  */
 
-const { maskSensitiveData } = require('./config');
+const { maskLiterals } = require('./config');
 
 const LINE_API_BASE = 'https://api.line.me/v2/bot';
 
@@ -50,14 +50,11 @@ function resolveMemberCountPath(targetId) {
  * @returns {Promise<{success: boolean, data?: object, error?: string}>}
  */
 async function getJson(url, accessToken, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
     const response = await fetch(url, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${accessToken}` },
-      signal: controller.signal
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     if (!response.ok) {
@@ -70,9 +67,10 @@ async function getJson(url, accessToken, timeoutMs) {
     return { success: true, data: await response.json() };
 
   } catch (error) {
-    const message = maskToken(error && error.message ? error.message : String(error), accessToken);
+    // このエラー文字列はログに出るため、GitHub Actionsの自動マスクが効かない経路でも漏れないよう伏せる
+    const message = maskLiterals(error?.message ?? error, accessToken);
 
-    if (error && (error.name === 'AbortError' || message.includes('abort'))) {
+    if (error?.name === 'AbortError' || error?.name === 'TimeoutError' || message.includes('abort')) {
       return {
         success: false,
         error: `タイムアウト: LINE APIが${timeoutMs}ms以内に応答しませんでした`
@@ -80,27 +78,7 @@ async function getJson(url, accessToken, timeoutMs) {
     }
 
     return { success: false, error: `送信枠の取得に失敗しました: ${message}` };
-  } finally {
-    clearTimeout(timer);
   }
-}
-
-/**
- * エラーメッセージから実際のトークンを除去する
- *
- * このエラー文字列はログに出るため、GitHub Actionsの自動マスクが効かない経路でも
- * 漏れないようリテラル一致で落としておく。正規表現を組むとトークン中の特殊文字で破綻する。
- *
- * @private
- */
-function maskToken(text, accessToken) {
-  let masked = String(text);
-
-  if (accessToken && masked.includes(accessToken)) {
-    masked = masked.split(accessToken).join('***');
-  }
-
-  return maskSensitiveData(masked);
 }
 
 /**

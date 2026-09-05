@@ -16,7 +16,7 @@ function resolveModule(p) {
 
 const MODULE_PATHS = [
   '../src/index', '../src/config', '../src/auth',
-  '../src/crawler', '../src/data', '../src/notifier', '../src/broadcast', '../src/streak', '../src/store', 'playwright'
+  '../src/crawler', '../src/notifier', '../src/broadcast', '../src/streak', '../src/store', 'playwright'
 ];
 
 function clearModuleCache() {
@@ -65,17 +65,6 @@ describe('オーケストレーション (src/index.js)', () => {
       detailsAvailable: true,
       partialFailure: false
     };
-    const crawlBasicResult = overrides.crawlBasicResult || {
-      success: true,
-      data: [{ userName: '太郎', studyItemCount: 5, missionCount: 5, date: '2025-12-25' }]
-    };
-    const previousDataResult = overrides.previousDataResult || { success: true, data: [] };
-    const compareResult = overrides.compareResult || {
-      success: true,
-      changes: [{ userName: '太郎', previousCount: 0, currentCount: 5, diff: 5, type: 'new' }]
-    };
-    const saveResult = overrides.saveResult || { success: true };
-
     mockFetch = overrides.fetch || (async () => ({ ok: true, status: 200, text: async () => '' }));
     global.fetch = async (...args) => {
       callLog.push({ type: 'fetch', args });
@@ -116,29 +105,14 @@ describe('オーケストレーション (src/index.js)', () => {
       id: resolveModule('../src/crawler'), filename: resolveModule('../src/crawler'), loaded: true,
       exports: {
         getAllUsersDetailedData: overrides.getAllUsersDetailedData || (async () => crawlDetailedResult),
-        getAllUsersMissionCounts: overrides.getAllUsersMissionCounts || (async () => crawlBasicResult),
-        getUserList: overrides.getUserList || (async () => ({ success: true, users: [{ name: '太郎', index: 0 }] })),
-        getTargetDates: overrides.getTargetDates || (() => ({ dateString: '2025-12-24', withPadding: '2025-12-24' }))
-      }
-    };
-
-    require.cache[resolveModule('../src/data')] = {
-      id: resolveModule('../src/data'), filename: resolveModule('../src/data'), loaded: true,
-      exports: {
-        loadPreviousData: overrides.loadPreviousData || (async () => previousDataResult),
-        compareData: overrides.compareData || (() => compareResult),
-        compareMissionDetails: overrides.compareMissionDetails || (() => ({ success: true, changes: [] })),
-        saveData: overrides.saveData || (async () => {
-          callLog.push({ type: 'saveData' });
-          return saveResult;
-        })
+        getTargetDates: overrides.getTargetDates || (() => ({ dateString: '2025-12-24', withPadding: '2025-12-24' })),
+        saveErrorScreenshot: async () => {}
       }
     };
 
     require.cache[resolveModule('../src/notifier')] = {
       id: resolveModule('../src/notifier'), filename: resolveModule('../src/notifier'), loaded: true,
       exports: {
-        formatMessage: overrides.formatMessage || ((changes) => `テスト基本メッセージ(${changes.length}件)`),
         formatDetailedMessage: overrides.formatDetailedMessage || (() => 'テスト詳細メッセージ'),
         // 切り詰めはDRY_RUNプレビューで使うので本物を使う
         truncateToLimit: realTruncateToLimit
@@ -223,13 +197,6 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(fetchCalls.length, 0, '素のfetch直書きが使われないこと');
     });
 
-    it('正常系: データ保存が実行される', async () => {
-      await mainModule.main();
-
-      const saveCalls = callLog.filter(c => c.type === 'saveData');
-      assert.strictEqual(saveCalls.length, 1, 'saveDataが呼ばれること');
-    });
-
     it('異常系: 環境変数が欠けている場合、終了コード1で終了する', async () => {
       setupMocks({
         loadConfig: () => { throw new Error('必須環境変数が設定されていません'); }
@@ -265,38 +232,14 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(result.error, '認証失敗');
     });
 
-    it('正常系: 基本モードにフォールバックした場合も通知はbroadcast経由で送られる', async () => {
+    it('異常系: クロールに失敗したら「変更なし」ではなく障害通知を送って終了コード1にする', async () => {
       setupMocks({
         crawlDetailedResult: { success: false, error: '詳細取得エラー' }
-      });
-
-      await mainModule.main();
-
-      const calls = callLog.filter(c => c.type === 'broadcastToAll');
-      assert.strictEqual(calls.length, 1, '基本モードでも1回だけ通知すること');
-      assert.match(calls[0].args[0], /テスト基本メッセージ/, 'formatMessageの結果が送られること');
-    });
-
-    it('異常系: 詳細・基本の両方が失敗した場合、終了コード1', async () => {
-      setupMocks({
-        getAllUsersDetailedData: async () => ({ success: false, error: '詳細失敗' }),
-        getAllUsersMissionCounts: async () => ({ success: false, error: '基本も失敗' })
       });
 
       const result = await mainModule.main();
 
       assert.strictEqual(result.success, false);
-      assert.strictEqual(result.exitCode, 1);
-    });
-
-    it('異常系: 詳細も基本も失敗したら「変更なし」ではなく障害通知を送る', async () => {
-      setupMocks({
-        crawlDetailedResult: { success: false, error: '詳細取得エラー' },
-        crawlBasicResult: { success: false, error: '基本取得エラー' }
-      });
-
-      const result = await mainModule.main();
-
       assert.strictEqual(result.exitCode, 1);
       const calls = callLog.filter(c => c.type === 'broadcastToAll');
       assert.strictEqual(calls.length, 1, '障害通知が送られること');
@@ -391,7 +334,7 @@ describe('オーケストレーション (src/index.js)', () => {
         // 未達(false)にして送信経路を通す(全員達成だと送信スキップされ警告閾値を検証できない)
         isStudied: (user, options) => { capturedIsStudiedOptions = options; return false; },
         getRequirementForCourse: (course) => course === 'juniorHigh' ? 3 : 4,
-        formatDetailedMessage: (currentData, changes, options) => {
+        formatDetailedMessage: (currentData, options) => {
           capturedFormatOptions = options;
           return 'テスト詳細メッセージ';
         }
@@ -428,9 +371,6 @@ describe('オーケストレーション (src/index.js)', () => {
         callLog.filter(c => c.type === 'broadcastToDiscordOnly').length, 1,
         '全員達成の日はDiscordのみに1回送ること'
       );
-
-      const saveCalls = callLog.filter(c => c.type === 'saveData');
-      assert.strictEqual(saveCalls.length, 1, 'データは保存されること');
     });
 
     it('正常系: 全員達成の日のDiscord本文には断り行が先頭に付く', async () => {
@@ -500,7 +440,6 @@ describe('オーケストレーション (src/index.js)', () => {
 
       assert.strictEqual(result.success, true, '宛先がないだけなので赤くしないこと');
       assert.strictEqual(result.exitCode, 0);
-      assert.strictEqual(callLog.filter(c => c.type === 'saveData').length, 1, 'データは保存されること');
     });
 
     it('正常系: 未達ユーザーが1人でもいる日は夜通知を送信する', async () => {
@@ -598,7 +537,6 @@ describe('オーケストレーション (src/index.js)', () => {
         assert.strictEqual(result.success, true);
         assert.strictEqual(callLog.filter(c => c.type === 'broadcastToAll').length, 0);
         assert.strictEqual(callLog.filter(c => c.type === 'broadcastToDiscordOnly').length, 0, 'ドライランではDiscordにも送らないこと');
-        assert.strictEqual(callLog.filter(c => c.type === 'saveData').length, 0, 'ドライランではデータ保存しないこと');
       } finally {
         if (originalDryRun === undefined) {
           delete process.env.DRY_RUN;
@@ -707,9 +645,6 @@ describe('オーケストレーション (src/index.js)', () => {
         const pushCalls = callLog.filter(c => c.type === 'broadcastToAll');
         assert.strictEqual(pushCalls.length, 0, 'broadcastToAllが呼ばれないこと');
 
-        const saveCalls = callLog.filter(c => c.type === 'saveData');
-        assert.strictEqual(saveCalls.length, 0, 'saveDataが呼ばれないこと');
-
         assert.strictEqual(saveStreakCalls, 0, 'saveStreakDataが呼ばれないこと');
       } finally {
         if (originalDryRun === undefined) {
@@ -739,19 +674,10 @@ describe('オーケストレーション (src/index.js)', () => {
       assert.strictEqual(browserCloseCount, 1, 'エラー時もbrowser.close()が呼ばれること');
     });
 
-    it('正常系: 前回データが取得できなくても処理を続行する', async () => {
-      setupMocks({
-        loadPreviousData: async () => ({ success: false, error: 'ファイルなし' })
-      });
-
-      const result = await mainModule.main();
-
-      assert.strictEqual(result.success, true, '前回データなしでも処理が続行されること');
-    });
   });
 
   describe('ストリーク統合', () => {
-    it('正常系: 当日クロールが courseFilter:null で1回だけ呼ばれる(前日クロールしない)', async () => {
+    it('正常系: 当日クロールが1回だけ呼ばれる(前日クロールしない)', async () => {
       const detailedCalls = [];
       setupMocks({
         getAllUsersDetailedData: async (page, options) => {
@@ -768,7 +694,7 @@ describe('オーケストレーション (src/index.js)', () => {
       await mainModule.main();
 
       assert.strictEqual(detailedCalls.length, 1, 'getAllUsersDetailedData は当日分の1回だけ');
-      assert.deepStrictEqual(detailedCalls[0], { courseFilter: null }, '両コース(null)で当日分を取得すること');
+      assert.strictEqual(detailedCalls[0], undefined, 'dateOffset を指定せず当日分を取得すること');
     });
 
     it('夜通知はストリーク確定処理を行わない(loadStreakDataは免除日判定のためだけに読み、失敗しても続行する)', async () => {
@@ -796,7 +722,7 @@ describe('オーケストレーション (src/index.js)', () => {
     it('formatDetailedMessageにstreaksを渡さない(ストリーク行を出さない)', async () => {
       let capturedOptions;
       setupMocks({
-        formatDetailedMessage: (currentData, missionChangesResult, options) => {
+        formatDetailedMessage: (currentData, options) => {
           capturedOptions = options;
           return 'テスト詳細メッセージ';
         }
@@ -811,7 +737,7 @@ describe('オーケストレーション (src/index.js)', () => {
     it('formatDetailedMessageに夜通知用の表示オプションを渡す', async () => {
       let capturedOptions;
       setupMocks({
-        formatDetailedMessage: (currentData, missionChangesResult, options) => {
+        formatDetailedMessage: (currentData, options) => {
           capturedOptions = options;
           return 'テスト詳細メッセージ';
         }

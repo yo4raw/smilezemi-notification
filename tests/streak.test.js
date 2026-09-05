@@ -8,7 +8,6 @@ const assert = require('node:assert');
 const {
   createInitialState,
   isStudied,
-  countCompletedMissions,
   countStudyItems,
   confirmDay,
   confirmDayWithHistory,
@@ -53,10 +52,6 @@ describe('isStudied', () => {
     assert.strictEqual(isStudied({ studyTime: { hours: 0, minutes: 0 }, missions: [] }), false);
   });
 
-  it('勉強時間があれば学習済み', () => {
-    assert.strictEqual(isStudied({ studyTime: { hours: 0, minutes: 5 }, missions: [] }), true);
-  });
-
   it('ミッションがあれば学習済み', () => {
     assert.strictEqual(
       isStudied({ studyTime: { hours: 0, minutes: 0 }, missions: [{ name: '算数', score: 80, completed: true }] }),
@@ -84,10 +79,9 @@ describe('isStudied', () => {
       assert.strictEqual(isStudied(user, { minCompletedMissions: 5 }), false);
     });
 
-    it('オプション未指定(または0)は現行判定のまま', () => {
-      const user = { studyTime: { hours: 0, minutes: 5 }, missionCount: 0, missions: [] };
-      assert.strictEqual(isStudied(user), true);
-      assert.strictEqual(isStudied(user, { minCompletedMissions: 0 }), true);
+    it('オプション未指定(または0)は学習件数1件以上で学習済みとする', () => {
+      assert.strictEqual(isStudied({ missionCount: 1, missions: [] }), true);
+      assert.strictEqual(isStudied({ missionCount: 0, missions: [] }, { minCompletedMissions: 0 }), false);
     });
 
     it('missionCountがない場合はmissionsのcompleted件数で判定する', () => {
@@ -106,28 +100,9 @@ describe('isStudied', () => {
   });
 });
 
-describe('countCompletedMissions', () => {
-  it('missionCount(数値)を優先して返す', () => {
-    assert.strictEqual(countCompletedMissions({ missionCount: 3, missions: [] }), 3);
-  });
-
-  it('missionCountがない場合はmissionsのcompleted件数を返す', () => {
-    const missions = [
-      { name: 'a', completed: true },
-      { name: 'b', completed: false },
-      { name: 'c', completed: true }
-    ];
-    assert.strictEqual(countCompletedMissions({ missions }), 2);
-  });
-
-  it('どちらもない場合は0を返す', () => {
-    assert.strictEqual(countCompletedMissions({}), 0);
-  });
-});
-
 describe('confirmDay', () => {
   it('学習した日はストリークが+1される(初期おたすけ1は維持)', () => {
-    const { state, event } = confirmDay(createInitialState(), '2026-07-12', true);
+    const { state, event } = confirmDay({ streak: 0, grace: 1, bonus: 0, lastConfirmedDate: null }, '2026-07-12', true);
     assert.deepStrictEqual(state, { streak: 1, grace: 1, bonus: 0, lastConfirmedDate: '2026-07-12' });
     assert.strictEqual(event, 'none');
   });
@@ -1120,7 +1095,6 @@ function loadStreakWithStore(overrides = {}) {
         return { success: true };
       }),
       resolveEndpoint: () => 'https://test-db.turso.io/v2/pipeline',
-      createSchema: async () => ({ success: true }),
       sanitizeParseError
     }
   };
@@ -1181,7 +1155,7 @@ describe('ストリークモジュール - Turso永続化', () => {
     assert.deepStrictEqual(readKeys, ['streak_data']);
   });
 
-  it('v1.4のデータをそのまま読み出す(おたすけの再チャージなし)', async () => {
+  it('v1.4のデータをそのまま読み出す', async () => {
     const stored = JSON.stringify({
       version: '1.4',
       timestamp: '2026-08-27T00:00:00.000Z',
@@ -1208,95 +1182,17 @@ describe('ストリークモジュール - Turso永続化', () => {
     assert.deepStrictEqual(result.data['たろう'].replayBase, { streak: 0, grace: 1, date: null }, '既存のreplayBaseは上書きされないこと');
   });
 
-  it('v1.0のデータは全ユーザーのおたすけを満タン(3)にし免除日フィールドを補う', async () => {
-    const stored = JSON.stringify({
-      version: '1.0',
-      users: {
-        'じろう (小学生コース)': { streak: 3, grace: 0, lastConfirmedDate: '2026-07-12' },
-        'たろう (中学生コース)': { streak: 15, grace: 2, lastConfirmedDate: '2026-07-12' }
-      }
-    });
-    const { streakModule } = loadStreakWithStore({
-      readState: async () => ({ success: true, state: 'ok', value: stored })
-    });
+  it('1.4以外のバージョンは失敗として返す(旧バージョンの移行コードは削除済み)', async () => {
+    for (const version of ['1.3', '9.9', undefined]) {
+      const { streakModule } = loadStreakWithStore({
+        readState: async () => ({ success: true, state: 'ok', value: JSON.stringify({ version, users: {} }) })
+      });
 
-    const result = await streakModule.loadStreakData();
+      const result = await streakModule.loadStreakData();
 
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, 'おたすけ0は3になること');
-    assert.strictEqual(result.data['じろう (小学生コース)'].streak, 3, 'ストリークは変わらないこと');
-    assert.strictEqual(result.data['たろう (中学生コース)'].grace, 3, 'おたすけ2も3になること');
-    assert.deepStrictEqual(result.data['じろう (小学生コース)'].exemptDates, []);
-    assert.deepStrictEqual(result.data['じろう (小学生コース)'].history, {});
-    assert.strictEqual(result.data['じろう (小学生コース)'].replayBase.streak, 3);
-  });
-
-  it('v1.1のデータも全ユーザーのおたすけを満タン(3)にする', async () => {
-    const stored = JSON.stringify({
-      version: '1.1',
-      users: {
-        'じろう (小学生コース)': { streak: 3, grace: 1, lastConfirmedDate: '2026-07-12' }
-      }
-    });
-    const { streakModule } = loadStreakWithStore({
-      readState: async () => ({ success: true, state: 'ok', value: stored })
-    });
-
-    const result = await streakModule.loadStreakData();
-
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['じろう (小学生コース)'].grace, 3, '1.1データも満タンチャージ対象なこと');
-    assert.deepStrictEqual(result.data['じろう (小学生コース)'].exemptDates, []);
-  });
-
-  it('v1.2以前のデータはおたすけ満タンと免除日フィールドを補って読み出す', async () => {
-    const stored = JSON.stringify({
-      version: '1.2',
-      users: { 'はなこ': { streak: 3, grace: 0, bonus: 0, lastConfirmedDate: '2026-08-20' } }
-    });
-    const { streakModule } = loadStreakWithStore({
-      readState: async () => ({ success: true, state: 'ok', value: stored })
-    });
-
-    const result = await streakModule.loadStreakData();
-
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.data['はなこ'].grace, 3, '1.3移行でおたすけが満タンになること');
-    assert.deepStrictEqual(result.data['はなこ'].exemptDates, [], '1.4移行でexemptDatesが補われること');
-    assert.deepStrictEqual(result.data['はなこ'].history, {});
-  });
-
-  it('v1.3のデータはおたすけを再チャージせず免除日フィールドのみ補う(消費済みは再付与しない)', async () => {
-    const stored = JSON.stringify({
-      version: '1.3',
-      timestamp: '2026-08-16T00:00:00.000Z',
-      users: { 'たろう': { streak: 7, grace: 0, bonus: 3, lastConfirmedDate: '2026-08-16' } }
-    });
-    const { streakModule } = loadStreakWithStore({
-      readState: async () => ({ success: true, state: 'ok', value: stored })
-    });
-
-    const result = await streakModule.loadStreakData();
-
-    assert.strictEqual(result.success, true);
-    const state = result.data['たろう'];
-    assert.strictEqual(state.grace, 0, '1.3データは満タンチャージ対象外なこと');
-    assert.deepStrictEqual(state.exemptDates, []);
-    assert.deepStrictEqual(state.history, {});
-    assert.strictEqual(state.replayBase.streak, 7, '現在値がチェックポイントになる');
-    assert.strictEqual(state.replayBase.grace, 0);
-    assert.strictEqual(state.replayBase.date, '2026-08-16');
-  });
-
-  it('未知のバージョンは失敗として返す', async () => {
-    const { streakModule } = loadStreakWithStore({
-      readState: async () => ({ success: true, state: 'ok', value: JSON.stringify({ version: '9.9', users: {} }) })
-    });
-
-    const result = await streakModule.loadStreakData();
-
-    assert.strictEqual(result.success, false);
-    assert.match(result.error, /未知のストリークデータバージョン/);
+      assert.strictEqual(result.success, false, `version=${version}`);
+      assert.match(result.error, /未知のストリークデータバージョン/);
+    }
   });
 
   it('壊れたJSONはパースエラーとして返す', async () => {

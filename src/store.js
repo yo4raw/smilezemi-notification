@@ -5,8 +5,10 @@
  * (本番依存をplaywrightのみに保ち、Dockerイメージを重くしないため)。
  * 用途は「1行読んで1行書く」だけなのでSDKの機能は不要。
  *
- * データモデルと未初期化の扱いは
- * docs/superpowers/specs/2026-08-27-turso-migration-design.md を参照。
+ * スキーマ(app_state / state_audit とトリガー)は移行時(2026-08-27)に作成済みで、
+ * ランタイムは作成しない。テーブルの存在自体が移行完了の印で、未移行を
+ * 「初回実行」と誤認させないため。
+ * データモデルは docs/superpowers/specs/2026-08-27-turso-migration-design.md を参照。
  */
 
 /**
@@ -53,9 +55,6 @@ async function pipeline(statements, options = {}) {
     return { success: false, error: 'TURSO_AUTH_TOKEN が設定されていません' };
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
     const response = await fetch(resolveEndpoint(databaseUrl), {
       method: 'POST',
@@ -69,7 +68,7 @@ async function pipeline(statements, options = {}) {
           { type: 'close' }
         ]
       }),
-      signal: controller.signal
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     if (!response.ok) {
@@ -89,24 +88,14 @@ async function pipeline(statements, options = {}) {
 
     return { success: true, results };
   } catch (error) {
-    if (error.name === 'AbortError') {
+    if (error.name === 'AbortError' || error.name === 'TimeoutError') {
       return {
         success: false,
         error: `タイムアウト: Turso が${timeoutMs}ms以内に応答しませんでした`
       };
     }
     return { success: false, error: `Turso 接続エラー: ${error.message}` };
-  } finally {
-    clearTimeout(timer);
   }
-}
-
-/**
- * app_stateテーブルが存在しないことを示すエラーか
- * @private
- */
-function isMissingTableError(message) {
-  return typeof message === 'string' && message.includes('no such table');
 }
 
 /**
@@ -116,7 +105,7 @@ function isMissingTableError(message) {
  * これを「初回実行(empty)」と区別し、ストリークの確定処理をスキップしなければならない。
  * 同一視すると移行前に連続日数が0にリセットされる。
  *
- * @param {string} key - 'mission_data' | 'streak_data'
+ * @param {string} key - 'streak_data'
  * @returns {Promise<{success: boolean, state?: 'ok'|'empty'|'uninitialized', value?: string|null, error?: string}>}
  */
 async function readState(key) {
@@ -128,7 +117,7 @@ async function readState(key) {
   ]);
 
   if (!result.success) {
-    if (isMissingTableError(result.error)) {
+    if (typeof result.error === 'string' && result.error.includes('no such table')) {
       return { success: true, state: 'uninitialized', value: null };
     }
     return { success: false, error: result.error };
@@ -155,11 +144,10 @@ const WRITE_RETRY_DELAY_MS = 1000;
  * 状態が起こりうる。トリガーは元の文と同じ暗黙のトランザクションで動くので、
  * 現在値と監査行が必ず揃う。
  *
- * テーブルは作成しない。スキーマ作成は移行スクリプト(createSchema)だけの責務。
- * ここで自動作成すると、未移行の状態で夜通知がテーブルを作ってしまい、
+ * テーブルは作成しない。ここで自動作成すると、未移行の状態でテーブルができてしまい、
  * 翌朝の読み出しが'uninitialized'ではなく'empty'になってストリークが0にリセットされる。
  *
- * @param {string} key - 'mission_data' | 'streak_data'
+ * @param {string} key - 'streak_data'
  * @param {string} value - JSON文字列
  * @returns {Promise<{success: boolean, error?: string}>}
  */
@@ -192,65 +180,15 @@ async function writeState(key, value) {
 }
 
 /**
- * スキーマを作成する(移行スクリプト専用)
- *
- * ランタイム(readState/writeState)からは絶対に呼ばない。未移行の状態を
- * 「初回実行」と誤認させないため、テーブルの存在自体が移行完了の印になっている。
- *
- * @returns {Promise<{success: boolean, error?: string}>}
- */
-async function createSchema() {
-  const result = await pipeline([
-    {
-      sql: 'create table if not exists app_state ('
-        + ' key text primary key,'
-        + ' value text not null,'
-        + ' updated_at text not null'
-        + ')'
-    },
-    {
-      sql: 'create table if not exists state_audit ('
-        + ' id integer primary key autoincrement,'
-        + ' key text not null,'
-        + ' value text not null,'
-        + ' written_at text not null'
-        + ')'
-    },
-    {
-      sql: 'create trigger if not exists app_state_audit_insert'
-        + ' after insert on app_state'
-        + ' begin'
-        + ' insert into state_audit (key, value, written_at) values (new.key, new.value, new.updated_at);'
-        + ' end'
-    },
-    {
-      sql: 'create trigger if not exists app_state_audit_update'
-        + ' after update on app_state'
-        + ' begin'
-        + ' insert into state_audit (key, value, written_at) values (new.key, new.value, new.updated_at);'
-        + ' end'
-    }
-  ]);
-
-  if (!result.success) {
-    return { success: false, error: result.error };
-  }
-  return { success: true };
-}
-
-/**
  * JSON.parseの失敗メッセージから入力断片を取り除く。
  *
  * V8はJSON.parseに失敗すると `Unexpected token 'u', ..."<入力の断片>"... is not
  * valid JSON` のように、前後の生テキストをメッセージにそのまま埋め込む
  * (断片の長さや"..."の有無は入力の長さ・エラー位置によって変わる)。
- * streak_data/mission_dataのトップレベルキーやuserNameはユーザーの実名なので、
- * Turso側の値やローカルファイルが壊れているとこの断片に実名がそのまま乗り、
- * 公開リポジトリのワークフローログに漏れる。"Unexpected token 'u'," のような
- * 診断情報は残しつつ、二重引用符で囲まれた断片(先頭〜末尾の"の間)だけを除去する。
- *
- * ランタイム(src/streak.js / src/data.js)と移行スクリプトの両方が使うため、
- * 両者が既に依存しているこのモジュールに置いて実装を1つに保つ。
+ * streak_dataのトップレベルキーはユーザーの実名なので、Turso側の値が壊れていると
+ * この断片に実名がそのまま乗り、公開リポジトリのワークフローログに漏れる。
+ * "Unexpected token 'u'," のような診断情報は残しつつ、
+ * 二重引用符で囲まれた断片(先頭〜末尾の"の間)だけを除去する。
  *
  * @param {string} message - error.message などの生メッセージ
  * @returns {string}
@@ -266,6 +204,5 @@ module.exports = {
   resolveEndpoint,
   readState,
   writeState,
-  createSchema,
   sanitizeParseError
 };

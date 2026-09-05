@@ -1,6 +1,5 @@
 /**
  * 環境変数管理とシークレット処理モジュール
- * Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 9.1, 9.2, 9.3, 9.4
  */
 
 const REQUIRED_SECRETS = [
@@ -12,128 +11,69 @@ const REQUIRED_SECRETS = [
   'TURSO_AUTH_TOKEN'
 ];
 
-const SENSITIVE_FIELDS = [
-  'password',
-  'token',
-  'channelAccessToken',
-  'accessToken',
-  'secret',
-  'key',
-  'webhook'
-];
-
 /**
  * 環境変数から設定をロードする
  * @returns {object} 設定オブジェクト
  * @throws {Error} 必須環境変数が欠落している場合
  */
 function loadConfig() {
-  // デバッグ: 環境変数の存在確認
-  if (process.env.NODE_ENV !== 'test') {
-    console.log('🔍 [config.js] 環境変数の読み込み状態:');
-    console.log(`  SMILEZEMI_USERNAME: ${process.env.SMILEZEMI_USERNAME ? `存在 (長さ: ${process.env.SMILEZEMI_USERNAME.length})` : '未設定'}`);
-    console.log(`  SMILEZEMI_PASSWORD: ${process.env.SMILEZEMI_PASSWORD ? `存在 (長さ: ${process.env.SMILEZEMI_PASSWORD.length})` : '未設定'}`);
-    console.log(`  LINE_CHANNEL_ACCESS_TOKEN: ${process.env.LINE_CHANNEL_ACCESS_TOKEN ? `存在 (長さ: ${process.env.LINE_CHANNEL_ACCESS_TOKEN.length})` : '未設定'}`);
-    console.log(`  LINE_USER_ID: ${process.env.LINE_USER_ID ? `存在 (長さ: ${process.env.LINE_USER_ID.length})` : '未設定'}`);
-    console.log(`  TURSO_DATABASE_URL: ${process.env.TURSO_DATABASE_URL ? '存在' : '未設定'}`);
-    console.log(`  TURSO_AUTH_TOKEN: ${process.env.TURSO_AUTH_TOKEN ? `存在 (長さ: ${process.env.TURSO_AUTH_TOKEN.length})` : '未設定'}`);
-    console.log(`  DISCORD_WEBHOOK_URL: ${process.env.DISCORD_WEBHOOK_URL ? '存在 (任意)' : '未設定 (任意: LINE失敗時のフォールバックが無効)'}`);
+  const secrets = Object.fromEntries(REQUIRED_SECRETS.map(key => [key, process.env[key]?.trim()]));
+
+  const { valid, missing } = validateSecrets(secrets);
+  if (!valid) {
+    throw new Error(`必須環境変数が設定されていません: ${missing.join(', ')}`);
   }
 
-  const secrets = {
-    SMILEZEMI_USERNAME: process.env.SMILEZEMI_USERNAME?.trim(),
-    SMILEZEMI_PASSWORD: process.env.SMILEZEMI_PASSWORD?.trim(),
-    LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim(),
-    LINE_USER_ID: process.env.LINE_USER_ID?.trim(),
-    TURSO_DATABASE_URL: process.env.TURSO_DATABASE_URL?.trim(),
-    TURSO_AUTH_TOKEN: process.env.TURSO_AUTH_TOKEN?.trim()
-  };
-
-  const validation = validateSecrets(secrets);
-
-  if (!validation.valid) {
-    throw new Error(
-      `必須環境変数が設定されていません: ${validation.missing.join(', ')}`
-    );
-  }
-
-  // 任意設定: 未設定ならLINE失敗時のDiscordフォールバックが無効になるだけで、
-  // 通知そのものは従来どおり動く。そのためREQUIRED_SECRETSには含めない
-  const discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL?.trim();
-
-  return {
-    SMILEZEMI_USERNAME: secrets.SMILEZEMI_USERNAME,
-    SMILEZEMI_PASSWORD: secrets.SMILEZEMI_PASSWORD,
-    LINE_CHANNEL_ACCESS_TOKEN: secrets.LINE_CHANNEL_ACCESS_TOKEN,
-    LINE_USER_ID: secrets.LINE_USER_ID,
-    TURSO_DATABASE_URL: secrets.TURSO_DATABASE_URL,
-    TURSO_AUTH_TOKEN: secrets.TURSO_AUTH_TOKEN,
-    DISCORD_WEBHOOK_URL: discordWebhookUrl || undefined
-  };
+  // 任意: 未設定ならDiscordへ送らないだけで通知そのものは動くため必須にしない
+  return { ...secrets, DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL?.trim() || undefined };
 }
 
 /**
  * シークレットの存在を検証する
  * @param {object} secrets - 検証するシークレットオブジェクト
- * @returns {object} { valid: boolean, missing: string[] }
+ * @returns {{valid: boolean, missing: string[]}}
  */
 function validateSecrets(secrets) {
-  const missing = [];
-
-  for (const key of REQUIRED_SECRETS) {
-    if (!secrets[key] || secrets[key].trim() === '') {
-      missing.push(key);
-    }
-  }
-
-  return {
-    valid: missing.length === 0,
-    missing
-  };
+  const missing = REQUIRED_SECRETS.filter(key => !secrets[key] || secrets[key].trim() === '');
+  return { valid: missing.length === 0, missing };
 }
 
 /**
- * センシティブデータをマスキングする
- * @param {string|object} data - マスキングするデータ
- * @returns {string|object} マスキングされたデータ
+ * 文字列中の `password=...` / `token=...` パターンを伏せる
+ * @param {string} text
+ * @returns {string}
  */
-function maskSensitiveData(data) {
-  // 文字列の場合
-  if (typeof data === 'string') {
-    let masked = data;
-
-    // パスワード、トークンのパターンをマスキング
-    masked = masked.replace(/password=[\w]+/gi, 'password=***');
-    masked = masked.replace(/token=[\w]+/gi, 'token=***');
-
-    return masked;
+function maskSensitiveData(text) {
+  if (typeof text !== 'string') {
+    return text;
   }
+  return text.replace(/(password|token)=\w+/gi, '$1=***');
+}
 
-  // オブジェクトの場合
-  if (typeof data === 'object' && data !== null) {
-    const masked = { ...data };
-
-    for (const key in masked) {
-      const lowerKey = key.toLowerCase();
-
-      // センシティブフィールドをマスキング
-      const isSensitive = SENSITIVE_FIELDS.some(field =>
-        lowerKey.includes(field.toLowerCase())
-      );
-
-      if (isSensitive) {
-        masked[key] = '***';
-      }
+/**
+ * 既知の秘密値をリテラル一致で全置換し、パターンマスクも通す
+ *
+ * 正規表現を組み立てると秘密値に含まれる特殊文字(+ * [ ( 等)がメタ文字として
+ * 解釈されてマスクが空振りしたり SyntaxError を投げたりするため、split/join で置換する。
+ * このエラー文字列はDiscordへの転送でGitHub Actionsの自動マスクが効かない場所へ出る。
+ *
+ * @param {string} text - マスキング対象
+ * @param {...(string|undefined)} secrets - 伏せる値。空・未設定は無視する
+ * @returns {string}
+ */
+function maskLiterals(text, ...secrets) {
+  let masked = String(text);
+  for (const secret of secrets) {
+    if (secret && masked.includes(secret)) {
+      masked = masked.split(secret).join('***');
     }
-
-    return masked;
   }
-
-  return data;
+  return maskSensitiveData(masked);
 }
 
 module.exports = {
   loadConfig,
   validateSecrets,
-  maskSensitiveData
+  maskSensitiveData,
+  maskLiterals
 };

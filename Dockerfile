@@ -1,20 +1,15 @@
 # Playwright公式イメージを使用（Node.js + ブラウザ環境）
 FROM mcr.microsoft.com/playwright:v1.58.2-noble
 
-# 作業ディレクトリ設定
 WORKDIR /app
 
-# package.jsonとpackage-lock.jsonをコピー
+# 依存関係インストール（npm ciで決定論的インストール。本番依存のみ）
 COPY package*.json ./
+RUN npm ci --omit=dev
 
-# 依存関係インストール（npm ciで決定論的インストール）
-RUN npm ci --only=production
-
-# アプリケーションコードをコピー
 COPY . .
 
-# スクリーンショット、ログ用ディレクトリ作成
-RUN mkdir -p screenshots logs
+# スクリーンショット用ディレクトリ
+RUN mkdir -p screenshots
 
-# 実行コマンド
 CMD ["node", "src/index.js"]

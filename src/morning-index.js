@@ -1,13 +1,13 @@
 /**
  * 朝通知 - メイン実行フロー
  * 毎朝 JST 7:00 に両コース(小学生・中学生)の前日学習実績を通知する。
- * 前日は確定データのため差分比較・mission_data.json への保存は行わない。
+ * 前日は確定データのためストリークを確定する(唯一の確定点)。
  */
 
 const { chromium } = require('playwright');
 const { loadConfig } = require('./config');
 const { login } = require('./auth');
-const { getAllUsersDetailedData, getTargetDates } = require('./crawler');
+const { getAllUsersDetailedData, getTargetDates, saveErrorScreenshot } = require('./crawler');
 const { formatDetailedMessage, truncateToLimit } = require('./notifier');
 const { broadcastToAll, getDiscordFailure, LINE_MAX_MESSAGE_LENGTH, DISCORD_MAX_MESSAGE_LENGTH } = require('./broadcast');
 const {
@@ -17,8 +17,6 @@ const {
   formatStreakInfo,
   STREAK_REQUIREMENTS
 } = require('./streak');
-const fs = require('fs').promises;
-const path = require('path');
 
 /**
  * メイン実行関数
@@ -82,10 +80,7 @@ async function main() {
     // 4. 両コースの前日分データを取得
     const targetDates = getTargetDates(-1);
     console.log(`🔍 前日(${targetDates.withPadding})の両コースデータを取得しています...`);
-    const crawlResult = await getAllUsersDetailedData(page, {
-      courseFilter: null,
-      dateOffset: -1
-    });
+    const crawlResult = await getAllUsersDetailedData(page, { dateOffset: -1 });
 
     if (!crawlResult.success) {
       console.error('❌ クローリングに失敗しました:', crawlResult.error);
@@ -122,7 +117,7 @@ async function main() {
 
     console.log(`✅ データの取得が完了しました（${crawlResult.data.length}件）`);
 
-    // 4.5 ストリーク(連続学習日数)の確定判定
+    // 5. ストリーク(連続学習日数)の確定判定
     // 前日分は確定データのため、そのままストリークを確定する
     let streaks = null;
     let exemptUserNames = [];
@@ -142,11 +137,9 @@ async function main() {
       console.error('❌ ストリークデータを読み込めなかったため、確定処理をスキップします:', streakLoadResult.error);
       errors.push(streakLoadResult.error);
     } else {
-      const previousStreakUsers = streakLoadResult.data;
-
       // 前日は確定データ。コース別しきい値で確定する(小学生4 / 中学生3)
       const { streakUsers, results } = updateStreaksByCourse(
-        previousStreakUsers,
+        streakLoadResult.data,
         crawlResult.data,
         targetDates.dateString
       );
@@ -175,8 +168,8 @@ async function main() {
       }
     }
 
-    // 5. メッセージフォーマット（前日は確定データのため差分比較なし。未学習でも必ず通知）
-    const message = formatDetailedMessage(crawlResult.data, null, {
+    // 6. メッセージフォーマット（前日は確定データ。未学習でも必ず通知）
+    const message = formatDetailedMessage(crawlResult.data, {
       dateLabel: `昨日(${targetDates.withPadding})`,
       showNoStudyWarning: true,
       streaks,
@@ -191,7 +184,6 @@ async function main() {
     // ドライラン: DRY_RUN=true の場合はメッセージを表示して送信しない
     if (process.env.DRY_RUN === 'true') {
       // 実送信ではbroadcastが宛先ごとに切り詰めるため、プレビューもLINEの上限で切って表示する
-      // （送信経路には手を入れず、表示だけを実際の文面に合わせる）
       console.log('\n📋 === 通知メッセージプレビュー ===');
       console.log(truncateToLimit(message, LINE_MAX_MESSAGE_LENGTH));
       console.log('=== プレビュー終了 ===\n');
@@ -202,7 +194,7 @@ async function main() {
       return { success: true, exitCode: 0 };
     }
 
-    // 6. 通知送信（リトライ・タイムアウト・切り詰め・マスキングはbroadcastToAllに委譲）
+    // 7. 通知送信（リトライ・タイムアウト・切り詰め・マスキングはbroadcastToAllに委譲）
     console.log('📤 通知を送信しています...');
     const notifyResult = await broadcastToAll(message, config);
 
@@ -223,7 +215,6 @@ async function main() {
       }
     }
 
-    // 7. 完了
     console.log('🎉 処理が正常に完了しました');
 
     return {
@@ -255,26 +246,6 @@ async function main() {
     } catch (error) {
       console.error('⚠️ ブラウザの終了に失敗しました:', error.message);
     }
-  }
-}
-
-/**
- * エラー時のスクリーンショット保存
- * @private
- */
-async function saveErrorScreenshot(page, errorType) {
-  try {
-    const screenshotsDir = path.join(__dirname, '../screenshots');
-    await fs.mkdir(screenshotsDir, { recursive: true });
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `${errorType}-${timestamp}.png`;
-    const filepath = path.join(screenshotsDir, filename);
-
-    await page.screenshot({ path: filepath, fullPage: true });
-    console.log(`📸 スクリーンショットを保存しました: ${filename}`);
-  } catch (error) {
-    console.error('⚠️ スクリーンショットの保存に失敗しました:', error.message);
   }
 }
 

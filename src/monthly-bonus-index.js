@@ -23,17 +23,14 @@ const BONUS_POINT_YEN = {
  * @returns {string} 例: "7月"
  */
 function getPreviousMonthLabel(now = new Date()) {
-  // UTC+9時間ずらしてUTCゲッターで読むことでJSTの年月を得る
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const month = jst.getUTCMonth() + 1;
-  const prevMonth = month === 1 ? 12 : month - 1;
-  return `${prevMonth}月`;
+  const month = Number(now.toLocaleDateString('en-US', { timeZone: 'Asia/Tokyo', month: 'numeric' }));
+  return `${month === 1 ? 12 : month - 1}月`;
 }
 
 /**
  * コースに対応するボーナスポイント単価(円/ポイント)を返す
  *
- * 未設定・未知の値は小学生コース扱いにする。streak_data.json の course は
+ * 未設定・未知の値は小学生コース扱いにする。streak_data の course は
  * 任意フィールドで、朝通知が初めて書き込むまでは欠落し得るため、
  * 支給が止まらない側に倒している。
  *
@@ -47,26 +44,12 @@ function toBonusRate(course) {
 }
 
 /**
- * ボーナスポイントを金額(円)に換算する
- *
- * コース種別は streak_data.json に保存された course を使う。以前は表示名に
- * 「中学生コース」が含まれるかで判定していたが、コース選択画面を経由しない
- * ユーザーの表示名にはコース名が付かず、全員が小学生単価になっていた。
- * 設計: docs/superpowers/specs/2026-08-03-monthly-bonus-course-rate-design.md
- *
- * @param {'elementary'|'juniorHigh'|undefined} course - ストリーク状態のコース種別
- * @param {number} bonus - ボーナスポイント数
- * @returns {number} 金額(円)
- */
-function toBonusYen(course, bonus) {
-  return bonus * toBonusRate(course);
-}
-
-/**
  * 清算リストを通知メッセージに整形する
  *
  * ポイント数に加えて、コース別単価で換算した金額と全員分の合計を載せる。
  * 受け取る側がそのまま現金を渡せる状態にするため。
+ * コース種別は streak_data に保存された course を使う(表示名にコース名は付かないため)。
+ * 設計: docs/superpowers/specs/2026-08-03-monthly-bonus-course-rate-design.md
  *
  * @param {Array<{userName: string, bonus: number, course?: string}>} settlements
  * @param {string} monthLabel - 例: "7月"
@@ -84,7 +67,7 @@ function formatMonthlyBonusMessage(settlements, monthLabel) {
 
   settlements.forEach(settlement => {
     const rate = toBonusRate(settlement.course);
-    const yen = toBonusYen(settlement.course, settlement.bonus);
+    const yen = settlement.bonus * rate;
     totalYen += yen;
     lines.push(`👤 ${settlement.userName}: ${settlement.bonus}ポイント × ¥${rate} → ¥${yen.toLocaleString('ja-JP')}`);
   });

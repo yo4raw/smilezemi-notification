@@ -9,7 +9,7 @@
  *   - 範囲検証: grace は 0〜3、streak / bonus は 0 以上の整数
  *   - 変更前→後を必ず表示し、--dry-run では保存しない
  *
- * 形式・バージョン(1.3)の整合は src/streak.js の load/save を再利用して担保する。
+ * 形式・バージョン(1.4)の整合は src/streak.js の load/save を再利用して担保する。
  *
  * --user に渡すユーザーキーはクローラーの表示名で、コース選択画面を経由しないユーザーは
  * コース名が付かない素の名前になる(本番は全員この形式)。
@@ -18,6 +18,7 @@
  *   node scripts/set-streak-field.js --user "たろう" --field grace --value 3 [--dry-run]
  */
 
+const { parseArgs } = require('node:util');
 const { loadStreakData, saveStreakData, collapseHistory } = require('../src/streak');
 
 // フィールドごとの制約。変更時はここだけ書き換える
@@ -26,29 +27,6 @@ const FIELD_CONSTRAINTS = {
   streak: { min: 0, max: null, label: '連続学習日数' },
   bonus: { min: 0, max: null, label: 'ボーナスポイント' }
 };
-
-/**
- * `--key value` 形式の引数を素朴にパースする(値なしフラグは true)。
- *
- * @param {string[]} argv - process.argv.slice(2)
- * @returns {Record<string, string|boolean>}
- */
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i++) {
-    const token = argv[i];
-    if (!token.startsWith('--')) continue;
-    const key = token.slice(2);
-    const next = argv[i + 1];
-    if (next === undefined || next.startsWith('--')) {
-      args[key] = true;
-    } else {
-      args[key] = next;
-      i++;
-    }
-  }
-  return args;
-}
 
 /**
  * 入力を検証し、正常なら {user, field, value, dryRun} を返す。
@@ -62,7 +40,7 @@ function validateInput(args) {
     throw new Error('--user は必須です(例: --user "たろう")');
   }
 
-  if (!Object.prototype.hasOwnProperty.call(FIELD_CONSTRAINTS, field)) {
+  if (!Object.hasOwn(FIELD_CONSTRAINTS, field)) {
     throw new Error(
       `--field は ${Object.keys(FIELD_CONSTRAINTS).join(' / ')} のいずれかを指定してください(指定値: ${field})`
     );
@@ -82,11 +60,17 @@ function validateInput(args) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
-
   let input;
   try {
-    input = validateInput(args);
+    const { values } = parseArgs({
+      options: {
+        user: { type: 'string' },
+        field: { type: 'string' },
+        value: { type: 'string' },
+        'dry-run': { type: 'boolean' }
+      }
+    });
+    input = validateInput(values);
   } catch (error) {
     console.error(`[set-streak-field] 入力エラー: ${error.message}`);
     process.exitCode = 1;
@@ -104,7 +88,7 @@ async function main() {
   const users = loadResult.data;
 
   // 既存ユーザーのみ変更可。未知キーは候補を提示して中断する
-  if (!Object.prototype.hasOwnProperty.call(users, user)) {
+  if (!Object.hasOwn(users, user)) {
     const known = Object.keys(users);
     console.error(`[set-streak-field] 対象ユーザーが見つかりません: "${user}"`);
     if (known.length > 0) {
