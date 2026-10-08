@@ -1,0 +1,105 @@
+name: Keepalive
+
+# 公開リポジトリでは60日間リポジトリに活動がないと GitHub が schedule ワークフローを
+# 自動無効化する。このリポジトリの通知はすべて schedule 駆動なので、無効化されると
+# 通知システム全体が止まる。月2回の起動で「活動」を作り、無効化を未然に防ぐ。
+#
+# 2つの手段:
+# 1. 最終 push から45日以上経っていたら空コミットを push する(60日の猶予のうち
+#    2回チャンスがあり、cron が1回落ちても耐える)。GITHUB_TOKEN の push は新規の
+#    workflow 実行を起こさないが「リポジトリの活動」としてはカウントされる。
+# 2. 万が一無効化された場合に備え、disabled_inactivity 状態のワークフローを
+#    API で再有効化する(手動無効化 disabled_manually は意図を尊重して触らない)。
+#    このワークフロー自身が無効化された場合は手動で一度だけ再有効化すれば、
+#    以降の起動で他のワークフローも復旧する。
+
+on:
+  # 毎月1日と15日の UTC 03:35 (JST 12:35)。毎時0分は混雑し遅延が最大化しやすいため避ける。
+  schedule:
+    - cron: '35 3 1,15 * *'
+
+  # 手動実行で即座に活動を作りたい場合・復旧確認用
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # 空コミットの push に必要
+      actions: write    # 無効化されたワークフローの再有効化に必要
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v7
+
+      - name: 45日以上無活動なら空コミットをpush
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pushed_at=$(gh api "repos/${{ github.repository }}" --jq '.pushed_at')
+          pushed_epoch=$(date -d "$pushed_at" +%s)
+          now_epoch=$(date +%s)
+          days=$(( (now_epoch - pushed_epoch) / 86400 ))
+          echo "最終push: ${pushed_at} (${days}日前)"
+
+          if [ "$days" -lt 45 ]; then
+            echo "45日未満のため空コミットはスキップします"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keepalive (最終pushから${days}日経過) [skip ci]"
+          git push origin HEAD:main
+
+      - name: 無活動で無効化されたワークフローを再有効化
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          disabled=$(gh api "repos/${{ github.repository }}/actions/workflows" \
+            --jq '.workflows[] | select(.state == "disabled_inactivity") | .id')
+
+          if [ -z "$disabled" ]; then
+            echo "無効化されているワークフローはありません"
+            exit 0
+          fi
+
+          for id in $disabled; do
+            echo "ワークフロー ${id} を再有効化します"
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/${id}/enable"
+          done
+
+      # run-in-docker.yml と同じ最後の砦。keepalive が壊れたまま60日を越えると
+      # 全通知が止まるため、失敗は必ず通知する。この通知自体の失敗はジョブを落とさない
+      - name: 失敗を通知（LINE→失敗時のみDiscord）
+        if: failure()
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER: ${{ secrets.LINE_USER_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          message=$(printf '⚠️ GitHub Actions ワークフローが失敗しました\n\nワークフロー: %s\n実行ログ: %s' "$WORKFLOW_NAME" "$RUN_URL")
+          payload=$(jq -n --arg to "$LINE_USER" --arg text "$message" '{to: $to, messages: [{type: "text", text: $text}]}')
+
+          if curl -sS --fail-with-body -X POST https://api.line.me/v2/bot/message/push \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LINE_TOKEN" \
+            -d "$payload"; then
+            exit 0
+          fi
+
+          echo "::warning::LINEへの失敗通知に失敗しました"
+
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL が未設定のためDiscordへの転送をスキップします"
+            exit 0
+          fi
+
+          discord_message=$(printf '⚠️ LINEへの送信に失敗したためDiscordに転送しました\n\n%s' "$message")
+          discord_payload=$(jq -n --arg content "$discord_message" '{content: $content}')
+          curl -sS --fail-with-body -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$discord_payload" || echo "::warning::Discordへの失敗通知の送信にも失敗しました"
