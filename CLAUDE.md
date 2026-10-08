@@ -33,6 +33,8 @@ GitHub Actions (cron) → Docker → Playwright (headless Chromium)
 - `.github/workflows/morning-crawler.yml` → `docker compose run --rm crawler node src/morning-index.js`
 - `.github/workflows/monthly-bonus.yml` → `docker compose run --rm crawler node src/monthly-bonus-index.js`（月末候補日28-31のUTC 22:47起動 + `date-guard` ジョブのJST日付ガードで「1日」のみ実行）
 
+`.github/workflows/keepalive.yml` は `run-in-docker.yml` を通らない単独ワークフロー（Docker不要・毎月1日と15日のUTC 03:35）。公開リポジトリでは60日間リポジトリに活動がないと GitHub が schedule ワークフローを自動無効化し、通知が全停止するのを防ぐ。最終 push から45日超なら空コミットを push し、さらに `disabled_inactivity` のワークフローを API で再有効化する（手動無効化は触らない）。keepalive 自身が無効化された場合は手動で1度だけ再有効化すれば以降は自律復旧する。
+
 ### データ永続化 (Turso)
 
 ストリークデータは Turso（libSQL）の `app_state` テーブルに1キー1JSONドキュメントで保存する。`data/` ディレクトリは使わない。
