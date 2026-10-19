@@ -1,5 +1,5 @@
 # Playwright公式イメージを使用（Node.js + ブラウザ環境）
-FROM mcr.microsoft.com/playwright:v1.58.2-noble
+FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 WORKDIR /app
 
